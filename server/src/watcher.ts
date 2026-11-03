@@ -21,6 +21,10 @@ export type WatcherOptions = {
   maxLineBytes?: number;
   /** How much of the end of a big file is read when a session is first seen. */
   tailBytes?: number;
+  /** True for ids of workers this app started; their logs are skipped (the app already reports them). */
+  isManaged?: (id: string) => boolean;
+  /** True while a worker is starting. A new log file may be its own, so new files wait until it has an id. */
+  startPending?: () => boolean;
   log?: (line: Record<string, unknown>) => void;
 };
 
@@ -123,6 +127,7 @@ export async function startWatcher(opts: WatcherOptions): Promise<Watcher> {
   });
 
   async function syncFile(c: Candidate, nowMs: number) {
+    if (opts.isManaged?.(c.id)) return;
     const st = await lstatSafe(c.path);
     const state = files.get(c.path);
     if (!st?.isFile() || nowMs - st.mtimeMs > staleMs) {
@@ -134,6 +139,7 @@ export async function startWatcher(opts: WatcherOptions): Promise<Watcher> {
       await syncMeta(state);
       return;
     }
+    if (opts.startPending?.()) return; // retried on the next event or sweep
     if (registry.size() >= maxAgents) return warnOnce("cap", { max: maxAgents });
     await adopt(c, st);
   }

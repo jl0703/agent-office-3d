@@ -1,0 +1,284 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import http from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, describe, it } from "node:test";
+import { startServer, type RunningServer } from "../src/app.ts";
+import { createRegistry } from "../src/registry.ts";
+import { createSupervisor, type SupervisorOptions } from "../src/supervisor.ts";
+import { createFake, type FakeOptions } from "./fakeQuery.ts";
+import { loginTo, openStream, parse, send, type Stream } from "./helpers.ts";
+
+const dirs: string[] = [];
+const servers: RunningServer[] = [];
+const closers: (() => Promise<void>)[] = [];
+const streams: Stream[] = [];
+after(async () => {
+  for (const s of streams) s.close();
+  await Promise.all(closers.map((close) => close()));
+  await Promise.all(servers.map((s) => s.close()));
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
+async function rig(fake: FakeOptions = {}, extra: Partial<SupervisorOptions> = {}) {
+  const root = mkdtempSync(join(tmpdir(), "managed-http-"));
+  dirs.push(root);
+  const work = join(root, "demo");
+  mkdirSync(work);
+  const staticDir = join(root, "dist");
+  mkdirSync(staticDir);
+  writeFileSync(join(staticDir, "index.html"), "<p>x</p>");
+
+  const registry = createRegistry();
+  const f = createFake(fake);
+  const supervisor = createSupervisor({
+    registry,
+    query: f.query,
+    roots: [root],
+    env: { PATH: "p" },
+    stopGraceMs: 150,
+    startTimeoutMs: 1000,
+    log: () => {},
+    ...extra,
+  });
+  closers.push(() => supervisor.close());
+  const srv = await startServer({ port: 0, staticDir, registry, supervisor, log: () => {} });
+  servers.push(srv);
+  const auth = await loginTo(srv);
+
+  const headers = (more: Record<string, string> = {}) => ({
+    host: auth.host,
+    cookie: auth.cookie,
+    origin: `http://${auth.host}`,
+    "content-type": "application/json",
+    ...more,
+  });
+  const post = (path: string, body: unknown = {}, more: Record<string, string> = {}) =>
+    send(srv.port, path, { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body), headers: headers(more) });
+  const start = (body: object = {}) => post("/api/agents", { role: "worker", cwd: work, prompt: "do it", ...body });
+  const stream = async () => {
+    const s = await openStream(srv.port, { host: auth.host, cookie: auth.cookie });
+    streams.push(s);
+    return s;
+  };
+  return { root, work, registry, supervisor, srv, auth, post, start, stream, headers, ...f };
+}
+
+describe("starting a worker over HTTP", () => {
+  it("starts a worker and tells the browser about it", async () => {
+    const r = await rig();
+    const stream = await r.stream();
+    const res = await r.start({ name: "Fixer" });
+    assert.equal(res.status, 201);
+    const { id } = JSON.parse(res.body) as { id: string };
+    const spawned = parse(await stream.next((e) => e.name === "agent.spawned")) as { agent: { id: string; origin: string; name: string } };
+    assert.equal(spawned.agent.id, id);
+    assert.equal(spawned.agent.origin, "managed");
+    assert.equal(spawned.agent.name, "Fixer");
+  });
+
+  it("refuses bad requests with a short code and never starts anything", async () => {
+    const r = await rig();
+    const cases: [string, unknown, number, string][] = [
+      ["not json", "{nope", 400, "invalid_json"],
+      ["empty body", "", 400, "invalid_json"],
+      ["missing prompt", { role: "worker", cwd: r.work }, 400, "invalid_request"],
+      ["empty prompt", { role: "worker", cwd: r.work, prompt: "" }, 400, "invalid_request"],
+      ["prompt too long", { role: "worker", cwd: r.work, prompt: "x".repeat(10_001) }, 400, "invalid_request"],
+      ["cwd not text", { role: "worker", cwd: 5, prompt: "x" }, 400, "invalid_request"],
+      ["unknown field", { role: "worker", cwd: r.work, prompt: "x", extra: 1 }, 400, "invalid_request"],
+      ["unknown role", { role: "admin", cwd: r.work, prompt: "x" }, 400, "invalid_request"],
+      ["master not available yet", { role: "master", cwd: r.work, prompt: "x" }, 400, "unsupported_role"],
+      ["array", [1, 2], 400, "invalid_request"],
+      ["null", "null", 400, "invalid_request"],
+    ];
+    for (const [name, body, status, code] of cases) {
+      const res = await r.post("/api/agents", body);
+      assert.equal(res.status, status, name);
+      assert.deepEqual(JSON.parse(res.body), { error: code }, name);
+    }
+    assert.equal(r.calls.length, 0);
+    assert.equal(r.registry.size(), 0);
+  });
+
+  it("requires a JSON content type", async () => {
+    const r = await rig();
+    for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
+      const res = await r.post("/api/agents", JSON.stringify({ role: "worker", cwd: r.work, prompt: "x" }), { "content-type": type });
+      assert.equal(res.status, 415, type);
+    }
+    const noType = await send(r.srv.port, "/api/agents", {
+      method: "POST",
+      body: "{}",
+      headers: { host: r.auth.host, cookie: r.auth.cookie, origin: `http://${r.auth.host}` },
+    });
+    assert.equal(noType.status, 415);
+    const withCharset = await r.post("/api/agents", { role: "worker", cwd: r.work, prompt: "x" }, { "content-type": "application/json; charset=utf-8" });
+    assert.equal(withCharset.status, 201);
+    assert.equal(r.calls.length, 1);
+  });
+
+  it("stops reading a body that is too large and keeps serving", async () => {
+    const r = await rig();
+    const big = JSON.stringify({ role: "worker", cwd: r.work, prompt: "x".repeat(70_000) });
+    const res = await r.post("/api/agents", big);
+    assert.equal(res.status, 413);
+    assert.deepEqual(JSON.parse(res.body), { error: "too_large" });
+    assert.equal(res.headers["connection"], "close");
+    assert.equal(r.calls.length, 0);
+    assert.equal((await r.start()).status, 201, "the server still works");
+  });
+
+  it("limits a body sent in pieces with no declared length", async () => {
+    const r = await rig();
+    const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port: r.srv.port, path: "/api/agents", method: "POST", headers: { ...r.headers(), "transfer-encoding": "chunked" } },
+        (response) => {
+          let body = "";
+          response.on("data", (c: Buffer) => (body += c));
+          response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      const piece = "x".repeat(8 * 1024);
+      req.write('{"role":"worker","cwd":"x","prompt":"');
+      for (let i = 0; i < 12; i++) req.write(piece); // 96 KB, over the 64 KB limit
+      req.end('"}');
+    });
+    assert.equal(res.status, 413);
+    assert.equal(r.calls.length, 0);
+  });
+
+  it("refuses a folder outside the allowed roots (403) and one that does not exist (400)", async () => {
+    const r = await rig();
+    const outside = mkdtempSync(join(tmpdir(), "outside-"));
+    dirs.push(outside);
+    const denied = await r.start({ cwd: outside });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(JSON.parse(denied.body), { error: "folder_not_allowed" });
+    const missing = await r.start({ cwd: join(r.root, "nope") });
+    assert.equal(missing.status, 400);
+    assert.deepEqual(JSON.parse(missing.body), { error: "invalid_folder" });
+    assert.equal(r.calls.length, 0);
+  });
+
+  it("answers 429 once the limit is reached", async () => {
+    const r = await rig({}, { maxManaged: 2 });
+    assert.equal((await r.start()).status, 201);
+    assert.equal((await r.start()).status, 201);
+    const third = await r.start();
+    assert.equal(third.status, 429);
+    assert.deepEqual(JSON.parse(third.body), { error: "too_many" });
+    assert.equal(r.calls.length, 2);
+  });
+
+  it("answers 502 when the session cannot be started on the subscription login", async () => {
+    const r = await rig({ apiKeySource: "ANTHROPIC_API_KEY" });
+    const res = await r.start();
+    assert.equal(res.status, 502);
+    assert.deepEqual(JSON.parse(res.body), { error: "start_failed" });
+  });
+
+  it("does not echo the request back in any answer", async () => {
+    const r = await rig();
+    const secret = "TOP-SECRET-PROMPT";
+    const bodies = [
+      (await r.post("/api/agents", { role: "worker", cwd: r.work, prompt: secret, extra: 1 })).body,
+      (await r.post("/api/agents", { role: "worker", cwd: join(r.root, secret), prompt: secret })).body,
+    ];
+    for (const body of bodies) assert.ok(!body.includes(secret));
+  });
+});
+
+describe("stopping workers over HTTP", () => {
+  it("stops a worker, tells the browser, and accepts a repeat", async () => {
+    const r = await rig();
+    const stream = await r.stream();
+    const { id } = JSON.parse((await r.start()).body) as { id: string };
+    const first = await r.post(`/api/agents/${id}/stop`);
+    assert.equal(first.status, 202);
+    const status = parse(await stream.next((e) => e.name === "agent.status" && e.data.includes('"stopped"'))) as { id: string };
+    assert.equal(status.id, id);
+    assert.equal(r.registry.get(id)?.status, "stopped");
+    assert.equal((await r.post(`/api/agents/${id}/stop`)).status, 202);
+  });
+
+  it("stops a worker that ignores the polite stop", async () => {
+    const r = await rig({ stubborn: true, spawnChild: true });
+    const { id } = JSON.parse((await r.start()).body) as { id: string };
+    const res = await r.post(`/api/agents/${id}/stop`);
+    assert.equal(res.status, 202);
+    assert.equal(r.registry.get(id)?.status, "stopped");
+    assert.equal(r.sessions[0]?.aborted, true);
+  });
+
+  it("stops everything with stop-all", async () => {
+    const r = await rig();
+    const ids = [];
+    for (let i = 0; i < 3; i++) ids.push((JSON.parse((await r.start()).body) as { id: string }).id);
+    assert.equal((await r.post("/api/agents/stop-all")).status, 202);
+    for (const id of ids) assert.equal(r.registry.get(id)?.status, "stopped");
+    assert.equal(r.supervisor.liveCount(), 0);
+  });
+
+  it("answers 404 for an unknown id and 409 for a session that is only watched", async () => {
+    const r = await rig();
+    assert.equal((await r.post("/api/agents/nope/stop")).status, 404);
+    r.registry.upsert("observed-1", { kind: "session", parentId: null, project: "p", name: "p", currentTask: null });
+    const res = await r.post("/api/agents/observed-1/stop");
+    assert.equal(res.status, 409);
+    assert.deepEqual(JSON.parse(res.body), { reason: "observed" });
+    assert.equal(r.registry.get("observed-1")?.status, "idle", "a watched session is untouched");
+  });
+
+  it("does not support follow-up tasks or resume yet (501)", async () => {
+    const r = await rig();
+    const { id } = JSON.parse((await r.start()).body) as { id: string };
+    assert.equal((await r.post(`/api/agents/${id}/tasks`, { prompt: "more" })).status, 501);
+    assert.equal((await r.post(`/api/agents/${id}/resume`)).status, 501);
+  });
+});
+
+describe("the guard in front of the new routes", () => {
+  it("refuses requests without the session cookie, from a foreign Origin, or for a foreign Host", async () => {
+    const r = await rig();
+    const body = JSON.stringify({ role: "worker", cwd: r.work, prompt: "x" });
+    const noCookie = await send(r.srv.port, "/api/agents", { method: "POST", body, headers: { host: r.auth.host, origin: `http://${r.auth.host}`, "content-type": "application/json" } });
+    assert.equal(noCookie.status, 403);
+    const badOrigin = await r.post("/api/agents", body, { origin: "http://evil.example" });
+    assert.equal(badOrigin.status, 403);
+    const noOrigin = await send(r.srv.port, "/api/agents", { method: "POST", body, headers: { host: r.auth.host, cookie: r.auth.cookie, "content-type": "application/json" } });
+    assert.equal(noOrigin.status, 403);
+    const badHost = await r.post("/api/agents", body, { host: `evil.example:${r.srv.port}` });
+    assert.equal(badHost.status, 403);
+    for (const path of ["/api/agents/stop-all", "/api/agents/x/stop"]) {
+      const res = await send(r.srv.port, path, { method: "POST", body: "{}", headers: { host: r.auth.host, origin: "http://evil.example", cookie: r.auth.cookie, "content-type": "application/json" } });
+      assert.equal(res.status, 403, path);
+    }
+    assert.equal(r.calls.length, 0);
+  });
+
+  it("does not answer GET on the control routes", async () => {
+    const r = await rig();
+    for (const path of ["/api/agents", "/api/agents/stop-all", "/api/agents/x/stop"]) {
+      const res = await send(r.srv.port, path, { headers: { host: r.auth.host, cookie: r.auth.cookie } });
+      assert.equal(res.status, 404, path);
+    }
+  });
+
+  it("has no start route when the server runs without a supervisor", async () => {
+    const root = mkdtempSync(join(tmpdir(), "no-sup-"));
+    dirs.push(root);
+    const srv = await startServer({ port: 0, staticDir: root, registry: createRegistry(), log: () => {} });
+    servers.push(srv);
+    const auth = await loginTo(srv);
+    const res = await send(srv.port, "/api/agents", {
+      method: "POST",
+      body: "{}",
+      headers: { host: auth.host, cookie: auth.cookie, origin: `http://${auth.host}`, "content-type": "application/json" },
+    });
+    assert.equal(res.status, 404);
+  });
+});

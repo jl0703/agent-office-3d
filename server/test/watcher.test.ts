@@ -312,6 +312,41 @@ describe("watcher", () => {
     assert.equal(r.logs.filter((l) => l["key"] === "cap").length, 1);
   });
 
+  it("skips the log of a worker the app started", async () => {
+    const r = rig();
+    writeFileSync(r.file(), userLine() + toolLine("t1"));
+    writeFileSync(r.file("other-session"), userLine());
+    await r.start({ isManaged: (id) => id === SESSION });
+    assert.equal(r.registry.has(SESSION), false);
+    assert.equal(r.registry.has("other-session"), true, "other sessions are still watched");
+  });
+
+  it("holds back new logs while a worker is starting, then lists only the ones that are not its own", async () => {
+    const r = rig();
+    let starting = true;
+    let owned = false;
+    writeFileSync(r.file(), userLine());
+    writeFileSync(r.file("mine"), userLine());
+    const w = await r.start({ startPending: () => starting, isManaged: (id) => owned && id === "mine" });
+    assert.equal(r.registry.size(), 0, "nothing is adopted during the start");
+    starting = false;
+    owned = true;
+    await w.scan();
+    assert.equal(r.registry.has(SESSION), true);
+    assert.equal(r.registry.has("mine"), false);
+  });
+
+  it("does not hold back sessions it already follows while a worker is starting", async () => {
+    const r = rig();
+    writeFileSync(r.file(), userLine());
+    let starting = false;
+    const w = await r.start({ startPending: () => starting });
+    starting = true;
+    appendFileSync(r.file(), toolLine("t1", "Read", { file_path: "z.ts" }));
+    await w.scan();
+    assert.equal(r.registry.get(SESSION)?.activity, "Read z.ts");
+  });
+
   it("finds new files with the backup sweep alone when file watching is off", async () => {
     const r = rig();
     await r.start({ watch: false, sweepMs: 40 });

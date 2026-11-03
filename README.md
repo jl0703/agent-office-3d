@@ -17,7 +17,16 @@ The terminal prints a **one-time URL**. Open it: the server swaps the token for 
 
 For a production-style run: `npm run build`, then `npm start` (page and server both on 4777).
 
+## Starting workers from the page
+
+Needs Claude Code installed and logged in with your Claude subscription. Workers never use an API key: key and cloud-provider variables are removed from their environment, and a session that reports an API key source is ended.
+
+A worker can read, search, edit and write files in its folder and search the web. It cannot run commands or fetch pages. By default it may only use the folder the server was started in; to allow others set `OFFICE_ALLOWED_ROOTS` (several folders separated by `;` on Windows, `:` elsewhere). `MAX_MANAGED` (default 6) limits how many run at once.
+
+Search results are untrusted text. A worker that can edit files could be steered by instructions hidden in them, so keep its folder to something you can restore.
+
 ## Checks
+
 
 ```sh
 npm run typecheck
@@ -30,4 +39,8 @@ npm run build
 
 The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`.
 
-Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one).
+Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
+
+## Live check
+
+`OFFICE_LIVE_TESTS=1 node --test server/test/live.test.ts` starts a real worker in a temporary folder, to confirm the lockdown against the real Claude Agent SDK. It uses a little of your subscription, and each run leaves a small log folder under your Claude `projects` folder. Normal test runs and CI skip it.
