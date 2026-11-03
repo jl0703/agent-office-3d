@@ -4,6 +4,8 @@ import { stat } from "node:fs/promises";
 import http from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { pipeline } from "node:stream";
+import type { ServerEvent } from "../../shared/events.ts";
+import type { Registry } from "./registry.ts";
 
 export type RunningServer = {
   server: http.Server;
@@ -19,10 +21,13 @@ type Options = {
   publicPort?: number;
   staticDir: string;
   heartbeatMs?: number;
+  /** When given, /events starts with a snapshot of its agents and then streams changes. */
+  registry?: Registry;
   log?: (line: Record<string, unknown>) => void;
 };
 
 const SESSION_COOKIE = "office_session";
+const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(?:tasks|stop|resume)$/;
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -101,6 +106,12 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         return deny(res, 403, "no-session", req);
       }
       if (url.pathname === "/events" && method === "GET") return openStream(res);
+      const command = AGENT_COMMAND.exec(url.pathname);
+      if (command?.[1] && method === "POST") {
+        // Agents seen through their logs are view-only; nothing is controllable yet.
+        const known = opts.registry?.get(command[1]) !== undefined;
+        return known ? json(res, 409, { reason: "observed" }) : json(res, 404, { error: "not_found" });
+      }
       return deny(res, 404, "not-found", req);
     }
 
@@ -118,12 +129,17 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       "Cache-Control": "no-store",
       Connection: "keep-alive",
     });
+    const registry = opts.registry;
+    // The snapshot goes first and the subscription follows in the same tick, so no change is missed.
+    if (registry) writeEvent(res, { type: "snapshot", agents: registry.snapshot() });
+    const unsubscribe = registry?.subscribe((event) => writeEvent(res, event));
     const beat = () => res.write(`event: heartbeat\ndata: ${JSON.stringify({ ts: new Date().toISOString() })}\n\n`);
     beat();
     const timer = setInterval(beat, heartbeatMs);
     streams.add(res);
     res.on("close", () => {
       clearInterval(timer);
+      unsubscribe?.();
       streams.delete(res);
     });
   }
@@ -178,6 +194,15 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         server.closeAllConnections();
       }),
   };
+}
+
+function writeEvent(res: http.ServerResponse, event: ServerEvent) {
+  if (!res.writableEnded) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function json(res: http.ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body));
 }
 
 function pathOf(req: http.IncomingMessage): string {

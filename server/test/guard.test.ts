@@ -6,28 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { startServer, type RunningServer } from "../src/app.ts";
-
-type Reply = { status: number; headers: http.IncomingHttpHeaders; body: string };
-
-function send(
-  port: number,
-  path: string,
-  opts: { method?: string; headers?: Record<string, string> } = {},
-): Promise<Reply> {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path, method: opts.method ?? "GET", headers: opts.headers },
-      (res) => {
-        let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (c: string) => (body += c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body }));
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
+import { loginTo, send } from "./helpers.ts";
 
 /** Opens an SSE stream and resolves with the head and the first chunk, then hangs up. */
 function firstChunk(port: number, headers: Record<string, string>) {
@@ -76,12 +55,6 @@ describe("request guard", () => {
     extra.push(s);
     return s;
   }
-  async function loginTo(s: RunningServer): Promise<{ host: string; cookie: string }> {
-    const host = `127.0.0.1:${s.port}`;
-    const r = await send(s.port, `/api/session?t=${s.token}`, { headers: { host } });
-    return { host, cookie: String(r.headers["set-cookie"]?.[0]).split(";")[0] ?? "" };
-  }
-
   it("listens on 127.0.0.1 only", () => {
     const addr = srv.server.address();
     assert.ok(addr && typeof addr === "object");
