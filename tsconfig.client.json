@@ -9,8 +9,10 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["client"]
+  "include": ["client", "shared"],
+  "exclude": ["client/test"]
 }

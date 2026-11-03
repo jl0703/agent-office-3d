@@ -1,0 +1,80 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.connection {
+  display: inline-block;
+  margin: 0;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+}
+
+.note,
+.activity,
+.project {
+  opacity: 0.8;
+}
+
+.agents,
+.agents ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.agents ul {
+  margin-left: 1.25rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid currentColor;
+}
+
+.agent {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0.375rem;
+}
+
+.agent p {
+  margin: 0.125rem 0;
+}
+
+.agent-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+/* The word is always shown; the border style adds a second cue besides color. */
+.status {
+  padding: 0 0.5rem;
+  border: 2px solid currentColor;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.status-working {
+  border-style: solid;
+  font-weight: 700;
+}
+
+.status-idle {
+  border-style: dashed;
+}
+
+.status-done {
+  border-style: dotted;
+}

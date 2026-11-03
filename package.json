@@ -12,7 +12,7 @@
     "start": "node server/src/main.ts",
     "typecheck": "tsc -p tsconfig.server.json && tsc -p tsconfig.client.json",
     "lint": "eslint .",
-    "test": "node --test \"server/test/*.test.ts\""
+    "test": "node --test \"server/test/*.test.ts\" \"client/test/*.test.ts\""
   },
   "dependencies": {
     "react": "^19.3.1",
