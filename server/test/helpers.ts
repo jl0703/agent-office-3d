@@ -7,7 +7,7 @@ export type Reply = { status: number; headers: http.IncomingHttpHeaders; body: s
 export function send(
   port: number,
   path: string,
-  opts: { method?: string; headers?: Record<string, string> } = {},
+  opts: { method?: string; headers?: Record<string, string>; body?: string } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const req = http.request(
@@ -20,7 +20,7 @@ export function send(
       },
     );
     req.on("error", reject);
-    req.end();
+    req.end(opts.body);
   });
 }
 

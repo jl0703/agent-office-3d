@@ -42,6 +42,11 @@ export function parseLine(raw: string): ParsedLine {
   } catch {
     return { ok: false };
   }
+  return parseValue(value);
+}
+
+/** Same as parseLine for a message that is already an object, such as one from the SDK stream. */
+export function parseValue(value: unknown): ParsedLine {
   if (!isRecord(value) || typeof value["type"] !== "string") return { ok: false };
 
   const type = value["type"];

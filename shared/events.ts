@@ -1,11 +1,12 @@
 // Types shared by the server and the browser. Type-only: nothing here runs.
 
-export type AgentStatus = "working" | "idle" | "done";
+export type AgentStatus = "working" | "idle" | "done" | "stopped" | "error";
 
 export type Agent = {
   id: string;
   kind: "session" | "subagent";
-  origin: "observed";
+  /** Seen through its log file (view-only), or started by this app (controllable). */
+  origin: "observed" | "managed";
   role: "solo" | "worker";
   parentId: string | null;
   name: string;

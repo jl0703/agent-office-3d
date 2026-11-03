@@ -4,8 +4,11 @@ import { stat } from "node:fs/promises";
 import http from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { pipeline } from "node:stream";
+import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
+import { HttpError, readJson } from "./body.ts";
 import type { Registry } from "./registry.ts";
+import type { Supervisor } from "./supervisor.ts";
 
 export type RunningServer = {
   server: http.Server;
@@ -23,11 +26,22 @@ type Options = {
   heartbeatMs?: number;
   /** When given, /events starts with a snapshot of its agents and then streams changes. */
   registry?: Registry;
+  /** When given, the browser can start and stop workers. */
+  supervisor?: Supervisor;
   log?: (line: Record<string, unknown>) => void;
 };
 
 const SESSION_COOKIE = "office_session";
-const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(?:tasks|stop|resume)$/;
+const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume)$/;
+
+const StartBody = z
+  .object({
+    role: z.enum(["worker", "master"]),
+    cwd: z.string().min(1).max(1000),
+    prompt: z.string().min(1).max(10_000),
+    name: z.string().min(1).max(100).optional(),
+  })
+  .strict();
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -106,11 +120,28 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         return deny(res, 403, "no-session", req);
       }
       if (url.pathname === "/events" && method === "GET") return openStream(res);
+      if (method === "POST" && opts.supervisor) {
+        if (url.pathname === "/api/agents") return run(req, res, () => startWorker(req, res));
+        if (url.pathname === "/api/agents/stop-all") {
+          return run(req, res, async () => {
+            await opts.supervisor?.stopAll();
+            json(res, 202, {});
+          });
+        }
+      }
       const command = AGENT_COMMAND.exec(url.pathname);
       if (command?.[1] && method === "POST") {
-        // Agents seen through their logs are view-only; nothing is controllable yet.
-        const known = opts.registry?.get(command[1]) !== undefined;
-        return known ? json(res, 409, { reason: "observed" }) : json(res, 404, { error: "not_found" });
+        const agent = opts.registry?.get(command[1]);
+        if (!agent) return json(res, 404, { error: "not_found" });
+        // Agents seen only through their logs are view-only.
+        if (agent.origin === "observed") return json(res, 409, { reason: "observed" });
+        const supervisor = opts.supervisor;
+        if (!supervisor) return json(res, 404, { error: "not_found" });
+        if (command[2] !== "stop") return json(res, 501, { error: "not_implemented" });
+        return run(req, res, async () => {
+          await supervisor.stop(agent.id);
+          json(res, 202, {});
+        });
       }
       return deny(res, 404, "not-found", req);
     }
@@ -122,6 +153,31 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       else deny(res, 500, "internal", req);
     });
   });
+
+  /** Runs an async route and turns any failure into a response, so nothing can crash the server. */
+  function run(req: http.IncomingMessage, res: http.ServerResponse, task: () => Promise<void>) {
+    task().catch((error: unknown) => {
+      if (error instanceof HttpError) {
+        log({ event: "route-refused", status: error.status, code: error.code, path: pathOf(req) });
+        // After a too-large body the rest of the request is not read, so close the connection.
+        return json(res, error.status, { error: error.code }, error.status === 413 ? { Connection: "close" } : {});
+      }
+      log({ event: "route-error", path: pathOf(req) });
+      if (res.headersSent) res.destroy();
+      else json(res, 500, { error: "internal" });
+    });
+  }
+
+  async function startWorker(req: http.IncomingMessage, res: http.ServerResponse) {
+    const parsed = StartBody.safeParse(await readJson(req));
+    if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+    if (parsed.data.role !== "worker") return json(res, 400, { error: "unsupported_role" });
+    const { cwd, prompt, name } = parsed.data;
+    const result = await opts.supervisor?.start(name === undefined ? { cwd, prompt } : { cwd, prompt, name });
+    if (!result) return json(res, 404, { error: "not_found" });
+    if (!result.ok) return json(res, result.status, { error: result.code });
+    json(res, 201, { id: result.id });
+  }
 
   function openStream(res: http.ServerResponse) {
     res.writeHead(200, {
@@ -200,8 +256,8 @@ function writeEvent(res: http.ServerResponse, event: ServerEvent) {
   if (!res.writableEnded) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
 }
 
-function json(res: http.ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+function json(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers });
   res.end(JSON.stringify(body));
 }
 

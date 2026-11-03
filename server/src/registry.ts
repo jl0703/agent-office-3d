@@ -1,8 +1,15 @@
 import type { Agent, AgentStatus, ServerEvent } from "../../shared/events.ts";
 import type { Fact } from "./transcript.ts";
 
-type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask">;
-type Entry = { agent: Agent; pending: Set<string>; lastEventAt: number; finished: boolean };
+type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role">>;
+type Entry = {
+  agent: Agent;
+  pending: Set<string>;
+  lastEventAt: number;
+  finished: boolean;
+  /** Set when an agent we started has ended; it overrides everything else. */
+  terminal: "stopped" | "error" | null;
+};
 
 const MAX_PENDING = 200;
 
@@ -23,6 +30,7 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
   };
 
   const derive = (e: Entry): AgentStatus => {
+    if (e.terminal) return e.terminal;
     if (e.finished) return "done";
     if (e.pending.size > 0) return "working";
     return now() - e.lastEventAt < idleMs ? "working" : "idle";
@@ -40,15 +48,19 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
       if (entries.has(id)) return;
       const agent: Agent = {
         id,
-        origin: "observed",
-        role: init.kind === "session" ? "solo" : "worker",
+        kind: init.kind,
+        origin: init.origin ?? "observed",
+        role: init.role ?? (init.kind === "session" ? "solo" : "worker"),
+        parentId: init.parentId,
+        name: init.name,
+        project: init.project,
         status: "idle",
+        currentTask: init.currentTask,
         tool: null,
         activity: null,
         updatedAt: new Date(now()).toISOString(),
-        ...init,
       };
-      entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false });
+      entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null });
       emit({ type: "agent.spawned", agent: { ...agent } });
     },
 
@@ -86,6 +98,15 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
     clearPending(id: string) {
       const e = entries.get(id);
       if (!e) return;
+      e.pending.clear();
+      refresh(id, e);
+    },
+
+    /** Marks an agent we started as ended. Later facts no longer change its status. */
+    setTerminal(id: string, status: "stopped" | "error") {
+      const e = entries.get(id);
+      if (!e || e.terminal) return;
+      e.terminal = status;
       e.pending.clear();
       refresh(id, e);
     },
