@@ -11,7 +11,8 @@ after(() => {
 });
 
 function layout() {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "guard-")));
+  // The same function the server uses. The plain one keeps Windows short names such as RUNNER~1.
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "guard-")));
   made.push(base);
   const root = join(base, "work");
   const outside = join(base, "elsewhere");
@@ -67,9 +68,11 @@ describe("folder guard: file tools", () => {
     }
   });
 
-  it("refuses Windows device and network paths", async () => {
+  it("refuses network and device paths, home-folder shortcuts, and system folders", async () => {
     const { root } = layout();
-    for (const p of ["\\\\server\\share\\x.txt", "\\\\.\\pipe\\x", "\\\\?\\C:\\Windows\\win.ini", "C:\\Windows\\win.ini", "/etc/passwd", "~/.ssh/id_rsa", "~"]) {
+    // A drive letter only means something on Windows; elsewhere "C:\Windows\win.ini" is an ordinary relative name.
+    const driveLetter = process.platform === "win32" ? ["C:\\Windows\\win.ini"] : [];
+    for (const p of ["\\\\server\\share\\x.txt", "\\\\.\\pipe\\x", "\\\\?\\C:\\Windows\\win.ini", ...driveLetter, "/etc/passwd", "~/.ssh/id_rsa", "~"]) {
       assert.equal(await ok(root, "Read", { file_path: p }), false, p);
     }
   });
@@ -93,7 +96,9 @@ describe("folder guard: search tools", () => {
 
   it("refuses a file pattern that points outside the folder", async () => {
     const { root, outside } = layout();
-    for (const pattern of [join(outside, "*"), "../**", "..\\*", "sub/../../*", "C:/Users/**", "\\\\host\\share\\*", "~/*", "/etc/*"]) {
+    // A drive letter only means something on Windows; elsewhere "C:/Users/**" is an ordinary relative name.
+    const driveLetter = process.platform === "win32" ? ["C:/Users/**"] : [];
+    for (const pattern of [join(outside, "*"), "../**", "..\\*", "sub/../../*", ...driveLetter, "\\\\host\\share\\*", "~/*", "/etc/*"]) {
       assert.equal(await ok(root, "Glob", { pattern }), false, `Glob ${pattern}`);
       assert.equal(await ok(root, "Grep", { pattern: "x", glob: pattern }), false, `Grep glob ${pattern}`);
     }
@@ -165,8 +170,11 @@ describe("folder guard: the hook", () => {
   });
 
   it("denies, rather than throws, when the check itself breaks", async () => {
-    const hooks = folderGuardHooks("Z:\\root\\that\\does\\not\\exist");
-    const out = (await call(hooks, "Read", { file_path: "a.txt" })) as { hookSpecificOutput: { permissionDecision: string } };
+    const { root } = layout();
+    const hooks = folderGuardHooks(root);
+    // An input whose fields throw when read: the check cannot finish, so the call must be denied.
+    const hostile = new Proxy({}, { get: () => { throw new Error("boom"); } });
+    const out = (await call(hooks, "Read", hostile)) as { hookSpecificOutput: { permissionDecision: string } };
     assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
   });
 });
