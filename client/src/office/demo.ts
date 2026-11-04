@@ -22,6 +22,7 @@ const TOOLS: [string, string][] = [
   ["Glob", "Glob **/*.test.ts"],
   ["WebSearch", "WebSearch vite proxy headers"],
 ];
+const DELEGATED = ["Fix the flaky checkout tests", "Review the billing refactor", "Profile the search index", "Update the API docs", "Check <b>markup</b> stays text", "Migrate the old config format"];
 const MAX_LOG = 50;
 
 export type DemoWorld = {
@@ -102,6 +103,11 @@ export function stepDemo(world: DemoWorld, nowMs: number): ServerEvent[] {
     agent.status = status;
     agent.updatedAt = new Date(nowMs).toISOString();
     events.push({ type: "agent.status", id, status });
+    if (status === "working" && agent.parentId !== null) {
+      // A fresh job from its master, so the demo shows the hand-over.
+      agent.currentTask = DELEGATED[Math.floor(world.rng() * DELEGATED.length)] as string;
+      events.push({ type: "agent.updated", agent: { ...agent } });
+    }
     if (status === "working") {
       const [tool, summary] = TOOLS[Math.floor(world.rng() * TOOLS.length)] as [string, string];
       agent.tool = tool;

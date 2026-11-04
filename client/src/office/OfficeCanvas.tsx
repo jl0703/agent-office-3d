@@ -6,6 +6,7 @@ import type { Agent } from "../../../shared/events.ts";
 import { Office } from "./Office.tsx";
 import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, fitCamera, truncateTag } from "./layout.ts";
 import type { Vault } from "../vault.ts";
+import { MAX_BUBBLES } from "./story.ts";
 import { overviewBounds, roomBounds, roomName, type Assignment, type Bounds } from "./rooms.ts";
 import { FAMILY_LETTERS } from "./palette.ts";
 import { familyIndexes } from "./families.ts";
@@ -204,6 +205,7 @@ export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubO
   const tagRefs = useRef(new Map<string, HTMLElement>());
   const roomRefs = useRef(new Map<string, HTMLElement>());
   const hubRef = useRef<HTMLElement | null>(null);
+  const bubbleRefs = useRef<(HTMLElement | null)[]>([]);
   const { room } = useSelection(selection);
   const stats = useRef<HTMLPreElement | null>(null);
 
@@ -259,7 +261,7 @@ export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubO
               });
             }}
           >
-            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} assignment={assignment} roomRefs={roomRefs} vault={vault} hubRef={hubRef} />
+            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} assignment={assignment} roomRefs={roomRefs} vault={vault} hubRef={hubRef} bubbleRefs={bubbleRefs} />
             <CameraRig view={view} limit={limit} focusKey={room ?? ""} reduced={reduced} api={rig} />
             {demo && <Stats out={stats} />}
           </Canvas>
@@ -321,6 +323,19 @@ export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubO
             <span className="room-name">Knowledge hub</span>
             <span className="room-meta">{vault ? `${vault.noteCount} notes` : "no vault connected"}</span>
           </button>
+        </div>
+
+        <div className="office-bubbles" aria-hidden="true">
+          {Array.from({ length: MAX_BUBBLES }, (_, i) => (
+            <div
+              key={i}
+              className="office-bubble"
+              style={{ display: "none" }}
+              ref={(el) => {
+                bubbleRefs.current[i] = el;
+              }}
+            />
+          ))}
         </div>
 
         <div className="office-tags" aria-hidden="true">

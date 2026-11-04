@@ -211,6 +211,9 @@ export function lampGeometry(): BufferGeometry {
   ]);
 }
 
+/** One leg of a standing figure, hanging from the hip (the pivot is at the top). */
+export const walkLegGeometry = () => merge([{ geometry: place(new CapsuleGeometry(0.08, 0.55, 2, 6), 0, -0.36, 0), color: "#4A5568" }]);
+
 /** The hub: a low round dais. */
 export const daisGeometry = () => place(new CylinderGeometry(1, 1.06, 1, 48), 0, 0.5, 0);
 export const coreGeometry = () => new SphereGeometry(1, 16, 12);
