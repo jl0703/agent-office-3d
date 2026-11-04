@@ -33,6 +33,14 @@ Each session is a low-poly character at its own desk; the desk stays the same wh
 
 `node tools/browser/check-office.ts <output folder> shots narrow click reduced perf` starts the server and a headless Edge or Chrome (set `BROWSER_PATH` if it is elsewhere), then writes screenshots and prints frame rate, draw calls and console problems.
 
+## Giving workers more work, limits, and restarts
+
+A running worker takes one task at a time: use "Give a task" in its details panel (a second task while it is busy is refused). Workers that ended, errored or were left behind by a restart stay in the list; "Resume" continues the same conversation after you press it (nothing restarts by itself), "Dismiss" forgets the worker.
+
+Usage limits (estimates reported by the SDK, they protect your plan's usage): about 2 per run, `OFFICE_SESSION_BUDGET_USD` (default 5) per session across resumes, `OFFICE_TOTAL_BUDGET_USD` (default 20) for all workers since the server started. A worker that reaches a limit is stopped and the page says why. When Claude reports a subscription rate limit the worker shows "Waiting" and is not retried.
+
+The server keeps a small file `data/managed.json` (git-ignored; folder set with `OFFICE_DATA_DIR`) with each worker's name, folder, process id and cost. At startup it stops a leftover worker process only if its name and start time still match, then lists all stored workers as detached. Delete the file at any time to forget them.
+
 ## Checks
 
 
@@ -47,7 +55,7 @@ npm run build
 
 The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`.
 
-Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
+Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED`, `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
 
 ## Live check
 

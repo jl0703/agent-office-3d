@@ -4,6 +4,7 @@ import type { ActivityEntry, Agent } from "../../shared/events.ts";
 import { getAgentEvents } from "./api.ts";
 import { canStop } from "./AgentList.tsx";
 import { StatusChip } from "./StatusChip.tsx";
+import { WorkerControls } from "./WorkerControls.tsx";
 
 const LOG_REFRESH_MS = 1000;
 const TASK_PREVIEW = 120;
@@ -87,6 +88,7 @@ export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOf
         <StatusChip status={agent.status} />
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </div>
+      {agent.note && <p className="panel-note">{agent.note}</p>}
       {notShown && <p className="panel-note">Not shown in the office view: all desks are taken.</p>}
       <dl className="panel-facts">
         <dt>Project</dt>
@@ -119,6 +121,7 @@ export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOf
           {stopping ? "Stopping…" : "Stop"}
         </button>
       )}
+      <WorkerControls key={`${agent.id}-${canStop(agent)}`} agent={agent} off={stopOff} />
       {canStop(agent) && stopOff && <p className="panel-note">{stopOff}</p>}
       <h3>Activity</h3>
       {log === "loading" && <p className="panel-note">Loading…</p>}

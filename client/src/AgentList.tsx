@@ -19,7 +19,7 @@ type Controls = {
 };
 
 /** A worker started here that has not ended yet. */
-export const canStop = (agent: Agent) => agent.origin === "managed" && (agent.status === "working" || agent.status === "idle");
+export const canStop = (agent: Agent) => agent.origin === "managed" && (agent.status === "working" || agent.status === "idle" || agent.status === "waiting");
 
 function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
   const { agent, children } = node;
@@ -51,6 +51,7 @@ function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
         <span className="project">{agent.project}</span>
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </p>
+      {agent.note && <p className="note">{agent.note}</p>}
       <p className="activity">{agent.activity ?? "No tool used yet"}</p>
       {canStop(agent) && (
         <button

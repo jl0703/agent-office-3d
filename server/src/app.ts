@@ -43,6 +43,8 @@ const StartBody = z
     name: z.string().min(1).max(100).optional(),
   })
   .strict();
+const TaskBody = z.object({ prompt: z.string().min(1).max(10_000) }).strict();
+const ResumeBody = z.object({ prompt: z.string().min(1).max(10_000).optional() }).strict();
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -143,10 +145,19 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         if (agent.origin === "observed") return json(res, 409, { reason: "observed" });
         const supervisor = opts.supervisor;
         if (!supervisor) return json(res, 404, { error: "not_found" });
-        if (command[2] !== "stop") return json(res, 501, { error: "not_implemented" });
+        if (command[2] === "stop") {
+          return run(req, res, async () => {
+            await supervisor.stop(agent.id);
+            json(res, 202, {});
+          });
+        }
         return run(req, res, async () => {
-          await supervisor.stop(agent.id);
-          json(res, 202, {});
+          const parsed = (command[2] === "tasks" ? TaskBody : ResumeBody).safeParse(await readJson(req));
+          if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+          const result = command[2] === "tasks" ? supervisor.assign(agent.id, parsed.data.prompt as string) : await supervisor.resume(agent.id, parsed.data.prompt);
+          if (result.ok) return json(res, 202, {});
+          // A conflict says why in `reason`; every other refusal is an `error` code.
+          json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
         });
       }
       return deny(res, 404, "not-found", req);

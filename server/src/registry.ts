@@ -8,7 +8,9 @@ type Entry = {
   lastEventAt: number;
   finished: boolean;
   /** Set when an agent we started has ended; it overrides everything else. */
-  terminal: "stopped" | "error" | null;
+  terminal: "stopped" | "error" | "detached" | null;
+  /** The subscription's usage limit was reached; the session is paused, not ended. */
+  waiting: boolean;
   /** The last MAX_LOG tool calls, oldest first. */
   log: ActivityEntry[];
 };
@@ -41,6 +43,7 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
 
   const derive = (e: Entry): AgentStatus => {
     if (e.terminal) return e.terminal;
+    if (e.waiting) return "waiting";
     if (e.finished) return "done";
     if (e.pending.size > 0) return "working";
     return now() - e.lastEventAt < idleMs ? "working" : "idle";
@@ -72,8 +75,9 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
         activity: null,
         desk,
         updatedAt: new Date(now()).toISOString(),
+        note: null,
       };
-      entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null, log: [] });
+      entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null, waiting: false, log: [] });
       emit({ type: "agent.spawned", agent: { ...agent } });
     },
 
@@ -119,12 +123,38 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
     },
 
     /** Marks an agent we started as ended. Later facts no longer change its status. */
-    setTerminal(id: string, status: "stopped" | "error") {
+    setTerminal(id: string, status: "stopped" | "error" | "detached") {
       const e = entries.get(id);
       if (!e || e.terminal) return;
       e.terminal = status;
       e.pending.clear();
       refresh(id, e);
+    },
+
+    /** Brings an ended agent back to life, for example when it is resumed. */
+    reopen(id: string) {
+      const e = entries.get(id);
+      if (!e) return;
+      e.terminal = null;
+      e.waiting = false;
+      e.finished = false;
+      e.lastEventAt = now();
+      refresh(id, e);
+    },
+
+    setWaiting(id: string, waiting: boolean) {
+      const e = entries.get(id);
+      if (!e || e.waiting === waiting) return;
+      e.waiting = waiting;
+      refresh(id, e);
+    },
+
+    setNote(id: string, note: string | null) {
+      const e = entries.get(id);
+      const text = note === null ? null : note.slice(0, 200);
+      if (!e || e.agent.note === text) return;
+      e.agent.note = text;
+      emit({ type: "agent.updated", agent: { ...e.agent } });
     },
 
     setFinished(id: string, finished: boolean) {

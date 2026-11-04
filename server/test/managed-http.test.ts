@@ -7,7 +7,8 @@ import { after, describe, it } from "node:test";
 import { startServer, type RunningServer } from "../src/app.ts";
 import { createRegistry } from "../src/registry.ts";
 import { createSupervisor, type SupervisorOptions } from "../src/supervisor.ts";
-import { createFake, type FakeOptions } from "./fakeQuery.ts";
+import { saveStore } from "../src/managedStore.ts";
+import { createFake, rateLimitMessage, resultMessage, storedWorker, type FakeOptions } from "./fakeQuery.ts";
 import { loginTo, openStream, parse, send, type Stream } from "./helpers.ts";
 
 const dirs: string[] = [];
@@ -31,6 +32,7 @@ async function rig(fake: FakeOptions = {}, extra: Partial<SupervisorOptions> = {
   writeFileSync(join(staticDir, "index.html"), "<p>x</p>");
 
   const registry = createRegistry();
+  const logs: Record<string, unknown>[] = [];
   const f = createFake(fake);
   const supervisor = createSupervisor({
     registry,
@@ -39,7 +41,8 @@ async function rig(fake: FakeOptions = {}, extra: Partial<SupervisorOptions> = {
     env: { PATH: "p" },
     stopGraceMs: 150,
     startTimeoutMs: 1000,
-    log: () => {},
+    dataDir: join(root, "data"),
+    log: (line) => logs.push(line),
     ...extra,
   });
   closers.push(() => supervisor.close());
@@ -62,7 +65,20 @@ async function rig(fake: FakeOptions = {}, extra: Partial<SupervisorOptions> = {
     streams.push(s);
     return s;
   };
-  return { root, work, registry, supervisor, srv, auth, post, start, stream, headers, ...f };
+  /** Puts workers in the file and runs the startup recovery, like a restart. */
+  const restartWith = async (...ids: string[]) => {
+    await supervisor.settled(); // writes still queued would collide with this one
+    await saveStore(join(root, "data"), ids.map((id) => storedWorker(id, { cwd: work })));
+    await supervisor.recover();
+  };
+  /** Ends the turn of one session and waits until the server has seen it. */
+  const endTurn = async (session: number, cost = 0.1) => {
+    const before = logs.filter((l) => l["event"] === "managed-turn-end").length;
+    f.sessions[session]?.out.push(resultMessage(cost));
+    const end = Date.now() + 3000;
+    while (logs.filter((l) => l["event"] === "managed-turn-end").length === before && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+  };
+  return { root, work, registry, supervisor, srv, auth, post, start, stream, headers, restartWith, endTurn, ...f };
 }
 
 describe("starting a worker over HTTP", () => {
@@ -202,7 +218,10 @@ describe("stopping workers over HTTP", () => {
     const status = parse(await stream.next((e) => e.name === "agent.status" && e.data.includes('"stopped"'))) as { id: string };
     assert.equal(status.id, id);
     assert.equal(r.registry.get(id)?.status, "stopped");
+    // Stopping a worker that has already ended dismisses it.
     assert.equal((await r.post(`/api/agents/${id}/stop`)).status, 202);
+    assert.equal(r.registry.has(id), false);
+    assert.equal((await r.post(`/api/agents/${id}/stop`)).status, 404);
   });
 
   it("stops a worker that ignores the polite stop", async () => {
@@ -233,11 +252,120 @@ describe("stopping workers over HTTP", () => {
     assert.equal(r.registry.get("observed-1")?.status, "idle", "a watched session is untouched");
   });
 
-  it("does not support follow-up tasks or resume yet (501)", async () => {
+  it("dismisses a detached worker with stop (202)", async () => {
+    const r = await rig();
+    await r.restartWith("old-one");
+    assert.equal((await r.post("/api/agents/old-one/stop")).status, 202);
+    assert.equal(r.registry.has("old-one"), false);
+    assert.equal((await r.post("/api/agents/old-one/stop")).status, 404);
+  });
+});
+
+describe("tasks and resume over HTTP", () => {
+  const reason = async (r: Awaited<ReturnType<typeof rig>>, path: string, body: object = { prompt: "x" }) => {
+    const res = await r.post(path, body);
+    return [res.status, JSON.parse(res.body) as unknown];
+  };
+
+  it("accepts a task for an idle worker (202) and answers busy (409) while it works", async () => {
     const r = await rig();
     const { id } = JSON.parse((await r.start()).body) as { id: string };
-    assert.equal((await r.post(`/api/agents/${id}/tasks`, { prompt: "more" })).status, 501);
-    assert.equal((await r.post(`/api/agents/${id}/resume`)).status, 501);
+    assert.deepEqual(await reason(r, `/api/agents/${id}/tasks`), [409, { reason: "busy" }]);
+    await r.endTurn(0);
+    assert.deepEqual(await reason(r, `/api/agents/${id}/tasks`, { prompt: "second" }), [202, {}]);
+    assert.deepEqual(await reason(r, `/api/agents/${id}/tasks`), [409, { reason: "busy" }]);
+    assert.equal(r.sessions[0]?.prompts.length, 2);
+  });
+
+  it("answers 409 with a reason for stopped, detached and watched sessions, and 404 for an unknown one", async () => {
+    const r = await rig();
+    const { id } = JSON.parse((await r.start()).body) as { id: string };
+    await r.post(`/api/agents/${id}/stop`);
+    await r.restartWith("old-one");
+    r.registry.upsert("seen", { kind: "session", parentId: null, project: "p", name: "p", currentTask: null });
+    assert.deepEqual(await reason(r, `/api/agents/${id}/tasks`), [409, { reason: "stopped" }]);
+    assert.deepEqual(await reason(r, "/api/agents/old-one/tasks"), [409, { reason: "detached" }]);
+    assert.deepEqual(await reason(r, "/api/agents/seen/tasks"), [409, { reason: "observed" }]);
+    assert.deepEqual(await reason(r, "/api/agents/seen/resume", {}), [409, { reason: "observed" }]);
+    assert.deepEqual(await reason(r, "/api/agents/nope/tasks"), [404, { error: "not_found" }]);
+    assert.deepEqual(await reason(r, "/api/agents/nope/resume", {}), [404, { error: "not_found" }]);
+    assert.equal(r.calls.length, 1);
+  });
+
+  it("refuses bad task and resume bodies with a short code and starts nothing", async () => {
+    const r = await rig({ sessionId: () => "old-one" });
+    await r.restartWith("old-one");
+    const cases: [string, string, unknown, number, string][] = [
+      ["tasks", "not json", "{nope", 400, "invalid_json"],
+      ["tasks", "missing prompt", {}, 400, "invalid_request"],
+      ["tasks", "empty prompt", { prompt: "" }, 400, "invalid_request"],
+      ["tasks", "long prompt", { prompt: "x".repeat(10_001) }, 400, "invalid_request"],
+      ["tasks", "unknown field", { prompt: "x", extra: 1 }, 400, "invalid_request"],
+      ["resume", "empty prompt", { prompt: "" }, 400, "invalid_request"],
+      ["resume", "unknown field", { cwd: "C:\\" }, 400, "invalid_request"],
+      ["resume", "null", "null", 400, "invalid_request"],
+    ];
+    for (const [route, name, body, status, code] of cases) {
+      const res = await r.post(`/api/agents/old-one/${route}`, body);
+      assert.equal(res.status, status, `${route} ${name}`);
+      assert.deepEqual(JSON.parse(res.body), { error: code }, `${route} ${name}`);
+    }
+    assert.equal((await r.post("/api/agents/old-one/tasks", JSON.stringify({ prompt: "x".repeat(70_000) }))).status, 413);
+    assert.equal((await r.post("/api/agents/old-one/resume", "{}", { "content-type": "text/plain" })).status, 415);
+    assert.equal(r.calls.length, 0);
+  });
+
+  it("resumes a detached worker (202) with the default message or a given one, and tells the browser", async () => {
+    const r = await rig({ sessionId: () => "old-one" });
+    await r.restartWith("old-one");
+    const stream = await r.stream();
+    assert.deepEqual(await reason(r, "/api/agents/old-one/resume", {}), [202, {}]);
+    await stream.next((e) => e.name === "agent.status" && e.data.includes('"working"'));
+    assert.equal(r.calls[0]?.resume, "old-one");
+    assert.equal(r.sessions[0]?.prompts[0]?.message.content, "Continue where you left off.");
+    assert.deepEqual(await reason(r, "/api/agents/old-one/resume", {}), [409, { reason: "not_resumable" }], "it is running now");
+    await r.post("/api/agents/old-one/stop");
+    assert.deepEqual(await reason(r, "/api/agents/old-one/resume", { prompt: "Do part two" }), [202, {}]);
+    assert.equal(r.sessions[1]?.prompts[0]?.message.content, "Do part two");
+  });
+
+  it("answers the resume refusals: 429 budget, 403 folder, 502 wrong id", async () => {
+    const used = await rig({}, { sessionBudgetUsd: 1 });
+    await saveStore(join(used.root, "data"), [storedWorker("spent", { cwd: used.work, costUsdTotal: 1 })]);
+    await used.supervisor.recover();
+    assert.deepEqual(await reason(used, "/api/agents/spent/resume", {}), [429, { error: "budget" }]);
+
+    const away = await rig();
+    await saveStore(join(away.root, "data"), [storedWorker("away", { cwd: tmpdir() })]);
+    await away.supervisor.recover();
+    assert.deepEqual(await reason(away, "/api/agents/away/resume", {}), [403, { error: "folder_not_allowed" }]);
+
+    const wrong = await rig(); // reports another id than the one stored
+    await wrong.restartWith("mine");
+    assert.deepEqual(await reason(wrong, "/api/agents/mine/resume", {}), [502, { error: "start_failed" }]);
+    assert.equal(used.calls.length + away.calls.length, 0);
+  });
+
+  it("answers 429 for a new task and a new start when the app budget is used up", async () => {
+    const r = await rig({}, { totalBudgetUsd: 1 });
+    const a = JSON.parse((await r.start()).body) as { id: string };
+    const b = JSON.parse((await r.start()).body) as { id: string };
+    await r.endTurn(0, 0.6);
+    await r.endTurn(1, 0.6);
+    assert.equal(r.registry.get(b.id)?.status === "stopped" || r.registry.get(a.id)?.status === "stopped", true);
+    const alive = r.registry.get(a.id)?.status === "stopped" ? b.id : a.id;
+    assert.deepEqual(await reason(r, `/api/agents/${alive}/tasks`), [429, { error: "budget" }]);
+    assert.equal((await r.start()).status, 429);
+  });
+
+  it("shows the waiting state and its note to the browser", async () => {
+    const r = await rig();
+    const stream = await r.stream();
+    const { id } = JSON.parse((await r.start()).body) as { id: string };
+    r.sessions[0]?.out.push(rateLimitMessage("rejected"));
+    const updated = await stream.next((e) => e.name === "agent.updated" && e.data.includes("Usage limit"));
+    assert.equal((parse(updated) as { agent: { id: string } }).agent.id, id);
+    assert.equal(r.registry.get(id)?.status, "waiting");
   });
 });
 
@@ -253,7 +381,7 @@ describe("the guard in front of the new routes", () => {
     assert.equal(noOrigin.status, 403);
     const badHost = await r.post("/api/agents", body, { host: `evil.example:${r.srv.port}` });
     assert.equal(badHost.status, 403);
-    for (const path of ["/api/agents/stop-all", "/api/agents/x/stop"]) {
+    for (const path of ["/api/agents/stop-all", "/api/agents/x/stop", "/api/agents/x/tasks", "/api/agents/x/resume"]) {
       const res = await send(r.srv.port, path, { method: "POST", body: "{}", headers: { host: r.auth.host, origin: "http://evil.example", cookie: r.auth.cookie, "content-type": "application/json" } });
       assert.equal(res.status, 403, path);
     }
@@ -262,7 +390,7 @@ describe("the guard in front of the new routes", () => {
 
   it("does not answer GET on the control routes", async () => {
     const r = await rig();
-    for (const path of ["/api/agents", "/api/agents/stop-all", "/api/agents/x/stop"]) {
+    for (const path of ["/api/agents", "/api/agents/stop-all", "/api/agents/x/stop", "/api/agents/x/tasks", "/api/agents/x/resume"]) {
       const res = await send(r.srv.port, path, { headers: { host: r.auth.host, cookie: r.auth.cookie } });
       assert.equal(res.status, 404, path);
     }
