@@ -177,11 +177,13 @@ export type OfficeCanvasProps = {
   connection: "connecting" | "connected" | "disconnected";
   demo: boolean;
   selection: Selection;
+  /** Raised by one each time the header's Reset view is pressed. */
+  resetSignal: number;
   onTryDemo: () => void;
-  onExitDemo: () => void;
+  onStartWorker: () => void;
 };
 
-export function OfficeCanvas({ agents, connection, demo, selection, onTryDemo, onExitDemo }: OfficeCanvasProps) {
+export function OfficeCanvas({ agents, connection, demo, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
   const scheme = useScheme();
   const reduced = useReducedMotion();
   const [supported] = useState(webglAvailable);
@@ -197,6 +199,10 @@ export function OfficeCanvas({ agents, connection, demo, selection, onTryDemo, o
   const hidden = agents.length - shown.length;
   const families = familyIndexes(agents);
   const empty = agents.length === 0 && connection === "connected" && !demo;
+
+  useEffect(() => {
+    if (resetSignal > 0) rig.current?.reset();
+  }, [resetSignal]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const api = rig.current;
@@ -272,7 +278,7 @@ export function OfficeCanvas({ agents, connection, demo, selection, onTryDemo, o
         </div>
 
         {demo && <div className="office-watermark" aria-hidden="true">DEMO</div>}
-        {demo && <pre className="office-stats" ref={stats} aria-hidden="true" />}
+        {demo && supported && !lost && <pre className="office-stats" ref={stats} aria-hidden="true" />}
         {connection === "connecting" && agents.length === 0 && !demo && <p className="office-overlay" role="status">Connecting…</p>}
         {frozen && <p className="office-banner" role="status">Showing last known state</p>}
         {hidden > 0 && <p className="office-chip">+{hidden} more in the list</p>}
@@ -281,7 +287,7 @@ export function OfficeCanvas({ agents, connection, demo, selection, onTryDemo, o
             <h2>No sessions yet</h2>
             <p>A session appears here when it starts working.</p>
             <div className="office-empty-actions">
-              <button type="button" onClick={() => document.getElementById("start-form")?.scrollIntoView({ block: "center" })}>
+              <button type="button" onClick={onStartWorker}>
                 Start a worker
               </button>
               <button type="button" onClick={onTryDemo}>
@@ -289,20 +295,6 @@ export function OfficeCanvas({ agents, connection, demo, selection, onTryDemo, o
               </button>
             </div>
           </div>
-        )}
-      </div>
-      <div className="office-toolbar">
-        <button type="button" onClick={() => rig.current?.reset()}>
-          Reset view
-        </button>
-        {demo ? (
-          <button type="button" onClick={onExitDemo}>
-            Exit demo
-          </button>
-        ) : (
-          <button type="button" onClick={onTryDemo}>
-            Try demo
-          </button>
         )}
       </div>
     </section>

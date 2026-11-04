@@ -4,7 +4,7 @@ export type Scheme = "light" | "dark";
 
 /** Colours of the paper-model scene. The page's own colours live in CSS. */
 export const SCENE = {
-  light: { canvas: "#F3EEE2", floor: "#D9D0BC", lip: "#B9AE96", grid: "#C4BAA3", desk: "#E6D9BC", deskDark: "#B89F78", ink: "#1F4E8C", selection: "#C2410C", skin: "#EADBC2", text: "#1B2430" },
+  light: { canvas: "#F3EEE2", floor: "#D9D0BC", lip: "#B9AE96", grid: "#C4BAA3", desk: "#E6D9BC", deskDark: "#B89F78", ink: "#1F4E8C", selection: "#B0380A", skin: "#EADBC2", text: "#1B2430" },
   dark: { canvas: "#12161C", floor: "#2A323D", lip: "#1C222B", grid: "#3A4452", desk: "#566274", deskDark: "#3D4756", ink: "#7FB0F0", selection: "#FF9A5C", skin: "#CDBA9B", text: "#E8E4D8" },
 } as const satisfies Record<Scheme, Record<string, string | number>>;
 

@@ -1,9 +1,9 @@
 // Looks at the office in a real browser. Run with:  node tools/browser/check-office.ts <output folder> [scenario...]
 // Scenarios: shots (screenshots), perf (frame rate and draw calls), reduced (reduced motion), click (picking), all
-import { execSync, spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
+import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
 if (!out) throw new Error("usage: node tools/browser/check-office.ts <output folder> [shots|narrow|perf|reduced|click|all]");
@@ -11,50 +11,12 @@ const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-let nextPort = 4793;
-
-// The real server, so the page connects, shows "Connected", and is served like for a user.
-// The login URL works once, so every browser gets its own server.
-async function startServer() {
-  const port = nextPort++;
-  const child = spawn(process.execPath, ["server/src/main.ts"], {
-    env: { ...process.env, OFFICE_PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  let output = "";
-  child.stdout.on("data", (d) => (output += d));
-  child.stderr.on("data", (d) => (output += d));
-  await until(() => /session\?t=/.test(output), 20000, "the server");
-  const stop = () => {
-    try {
-      if (process.platform === "win32") execSync(`taskkill /PID ${child.pid} /T /F`, { stdio: "ignore" });
-      else child.kill("SIGKILL");
-    } catch {
-      // already gone
-    }
-  };
-  return { base: `http://127.0.0.1:${port}`, token: /session\?t=([0-9a-f]+)/.exec(output)?.[1] ?? "", stop };
-}
-
-async function until(check: () => Promise<boolean> | boolean, ms: number, what: string) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await check()) return;
-    await sleep(100);
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
-
 type Stats = { fps: number; cpuMs: number; calls: number; triangles: number };
 
 let base = "";
-const servers: (() => void)[] = [];
 
 async function open(page: Page, agents: number) {
   const server = await startServer();
-  servers.push(server.stop);
   base = server.base;
   await page.goto(`${base}/api/session?t=${server.token}`); // sets the cookie, redirects to /
   await page.goto(`${base}/?demo=${agents}`);
@@ -113,7 +75,7 @@ try {
       await page.click(spot.x, spot.y);
       await page.wait(500);
       const selected = await page.evaluate<{ bar: string; pressed: string; tag: string }>(`({
-        bar: document.querySelector(".selected-bar strong")?.textContent ?? "",
+        bar: document.querySelector(".panel h2")?.textContent ?? "",
         pressed: document.querySelector("button[aria-pressed='true']")?.textContent ?? "",
         tag: document.querySelector(".office-tag[data-state='selected'] .tag-name")?.textContent ?? "",
       })`);
@@ -149,5 +111,5 @@ try {
     }
   }
 } finally {
-  for (const stop of servers) stop();
+  stopAllServers();
 }
