@@ -17,6 +17,8 @@ The terminal prints a **one-time URL**. Open it: the server swaps the token for 
 
 For a production-style run: `npm run build`, then `npm start` (page and server both on 4777).
 
+Settings can go in a `.env` file in the project folder (git-ignored), one `NAME=value` per line, for example `OFFICE_VAULT_DIR=C:\Users\you\Documents\Obsidian Vault`. Both `npm run dev` and `npm start` read it if it exists; variables already set in the terminal win. Do not put an API key there: workers never use one.
+
 ## Starting workers from the page
 
 Needs Claude Code installed and logged in with your Claude subscription. Workers never use an API key: key and cloud-provider variables are removed from their environment, and a session that reports an API key source is ended.
