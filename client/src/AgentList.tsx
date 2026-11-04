@@ -54,6 +54,7 @@ function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
       </div>
       <p className="agent-meta">
         <span className="project">{agent.project}</span>
+        {agent.role === "master" && <span className="origin role-text">master</span>}
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </p>
       {agent.note && <p className="note">{agent.note}</p>}

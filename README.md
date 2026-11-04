@@ -23,7 +23,9 @@ Settings can go in a `.env` file in the project folder (git-ignored), one `NAME=
 
 Needs Claude Code installed and logged in with your Claude subscription. Workers never use an API key: key and cloud-provider variables are removed from their environment, and a session that reports an API key source is ended.
 
-A worker can read, search, edit and write files in its folder and search the web. It cannot run commands or fetch pages. By default it may only use the folder the server was started in; to allow others set `OFFICE_ALLOWED_ROOTS` (several folders separated by `;` on Windows, `:` elsewhere). `MAX_MANAGED` (default 6) limits how many run at once.
+A worker can read, search, edit and write files in its folder and search the web. It cannot run commands or fetch pages. By default it may only use the folder the server was started in; to allow others set `OFFICE_ALLOWED_ROOTS` (several folders separated by `;` on Windows, `:` elsewhere). `MAX_MANAGED` (default 8) limits how many run at once.
+
+A **master** is a session started with "Start a master" that can also run workers of its own through five built-in tools (`spawn_worker`, `assign_task`, `wait_for_workers`, `stop_worker`, `list_workers`). It has the same lockdown as a worker; the tools run inside the server, not on a network port. It can only control the workers it started, a worker's folder must lie inside the master's own folder, and workers get no such tools. Stopping a master stops its workers. At most `MAX_MASTERS` (default 1) masters run at once, each with at most `MAX_WORKERS_PER_MASTER` (default 5) workers; a master counts toward `MAX_MANAGED`. A worker's result text (cut to 2000 characters) is kept in memory only. The usage caps count master and workers together.
 
 Search results are untrusted text. A worker that can edit files could be steered by instructions hidden in them, so keep its folder to something you can restore.
 
@@ -57,7 +59,7 @@ npm run build
 
 The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`.
 
-Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED`, `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
+Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED` (default 8), `MAX_MASTERS` (default 1), `MAX_WORKERS_PER_MASTER` (default 5), `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
 
 ## Obsidian vault
 

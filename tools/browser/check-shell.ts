@@ -152,6 +152,7 @@ try {
         await page.viewport(w, h);
         const server = await login(page);
         await demo(page, server.base);
+        await page.evaluate(`document.querySelector("details.start") && (document.querySelector("details.start").open = true)`);
         await selectFirst(page);
         await page.wait(600);
         await page.evaluate(source);
@@ -216,7 +217,7 @@ try {
     await demo(page, server.base);
     const small = async (label: string) => {
       const r = await page.evaluate<string[]>(
-        `[...document.querySelectorAll("button, summary, [role=tab], input, textarea")].filter(e => e.offsetParent !== null).map(e => { const b = e.getBoundingClientRect(); return { n: (e.getAttribute("aria-label") || e.textContent || e.tagName).trim().slice(0, 30), w: Math.round(b.width), h: Math.round(b.height) }; }).filter(x => x.h < 44 || x.w < 44).map(x => x.n + " " + x.w + "x" + x.h)`,
+        `[...document.querySelectorAll("button, summary, [role=tab], input, textarea")].filter(e => e.offsetParent !== null).map(e => { const b = (e.closest("label") || e).getBoundingClientRect(); return { n: (e.getAttribute("aria-label") || e.textContent || e.tagName).trim().slice(0, 30), w: Math.round(b.width), h: Math.round(b.height) }; }).filter(x => x.h < 44 || x.w < 44).map(x => x.n + " " + x.w + "x" + x.h)`,
       );
       expect(r.length === 0, `touch(${label}): ${r.join("; ")}`);
       console.log(`touch(${label}): ${r.length} controls under 44px`, JSON.stringify(r));

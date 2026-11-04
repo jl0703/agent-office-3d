@@ -1,4 +1,4 @@
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft, Network, X } from "lucide-react";
 import { useEffect, useRef, useState, type Ref } from "react";
 import type { ActivityEntry, Agent } from "../../shared/events.ts";
 import { getAgentEvents } from "./api.ts";
@@ -86,6 +86,12 @@ export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOf
       </header>
       <div className="panel-chips">
         <StatusChip status={agent.status} />
+        {agent.role === "master" && (
+          <span className="role-chip">
+            <Network size={16} strokeWidth={1.75} aria-hidden="true" />
+            Master
+          </span>
+        )}
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </div>
       {agent.note && <p className="panel-note">{agent.note}</p>}

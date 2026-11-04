@@ -38,7 +38,7 @@ export async function resolveAllowedFolder(requested: string, roots: string[]): 
   return { ok: false, reason: "outside_roots" };
 }
 
-function isInside(root: string, target: string): boolean {
+export function isInside(root: string, target: string): boolean {
   const rel = relative(root, target);
   if (rel === "") return true;
   return rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel);

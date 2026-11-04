@@ -11,8 +11,8 @@ export type Verdict = { ok: true } | { ok: false; reason: string };
 const DENY = (reason: string): Verdict => ({ ok: false, reason });
 
 /** Checks one tool call against the worker's folder. `root` must already be a real path. */
-export async function checkToolCall(root: string, tool: string, input: unknown): Promise<Verdict> {
-  if (tool === "WebSearch") return { ok: true };
+export async function checkToolCall(root: string, tool: string, input: unknown, extraTools: readonly string[] = []): Promise<Verdict> {
+  if (tool === "WebSearch" || extraTools.includes(tool)) return { ok: true };
   if (!isRecord(input)) return DENY("tool input was not understood");
 
   switch (tool) {
@@ -89,12 +89,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * The hook to give a session. `onFailure: "block"` makes a hook that errors block the call
  * instead of letting it through (the default would let it through).
  */
-export function folderGuardHooks(root: string, onDeny: (tool: string, reason: string) => void = () => {}): NonNullable<Options["hooks"]> {
+export function folderGuardHooks(
+  root: string,
+  onDeny: (tool: string, reason: string) => void = () => {},
+  extraTools: readonly string[] = [],
+): NonNullable<Options["hooks"]> {
   const guard: HookCallback = async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
     let verdict: Verdict;
     try {
-      verdict = await checkToolCall(root, input.tool_name, input.tool_input);
+      verdict = await checkToolCall(root, input.tool_name, input.tool_input, extraTools);
     } catch {
       verdict = DENY("the path could not be checked");
     }

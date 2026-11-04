@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignTask, describeFailure, getAgentEvents, getVault, resumeAgent, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, describeFailure, getAgentEvents, getVault, resumeAgent, startMaster, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -106,5 +106,14 @@ describe("api helpers", () => {
     assert.equal(await getVault(false, fakeFetch(403, {}).fn), null);
     assert.equal(await getVault(false, fakeFetch(200, { hello: 1 }).fn), null);
     assert.equal(await getVault(false, async () => Promise.reject(new Error("offline"))), null);
+  });
+
+  it("starts a master with its goal as the prompt, and explains a second master", async () => {
+    const f = fakeFetch(201, { id: "m" });
+    assert.deepEqual(await startMaster("C:\\work", "do the big job", f.fn), { ok: true });
+    assert.deepEqual(JSON.parse(String(f.calls[0]?.init?.body)), { role: "master", cwd: "C:\\work", prompt: "do the big job" });
+    const refused = fakeFetch(409, { reason: "master_running" });
+    assert.deepEqual(await startMaster("C:\\w", "x", refused.fn), { ok: false, message: describeFailure(409, "master_running") });
+    assert.ok(describeFailure(409, "master_running").includes("master"));
   });
 });
