@@ -1,66 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DESKS_PER_ROW, VISIBLE_DESKS, deskPosition, fitCamera, floorBounds, rowsFor, truncateTag } from "../src/office/layout.ts";
+import { fitCamera, truncateTag } from "../src/office/layout.ts";
 import { ACCESSORIES, CHARACTER_COLORS, FAMILY_COLORS, FAMILY_LETTERS, STATUS_COLOR, STATUSES, characterStyle, hashId } from "../src/office/palette.ts";
 import { REST_POSE, blendPose, poseFor, type Pose } from "../src/office/poses.ts";
 import { createSelection } from "../src/office/selection.ts";
 
 describe("office layout", () => {
-  it("gives every desk its own place, with the stated aisles", () => {
-    const all = Array.from({ length: VISIBLE_DESKS }, (_, i) => deskPosition(i));
-    const keys = new Set(all.map((p) => `${p.x.toFixed(3)},${p.z.toFixed(3)}`));
-    assert.equal(keys.size, VISIBLE_DESKS);
-    // Columns: normal gap 2.4, central aisle 4.0.
-    const row = all.slice(0, DESKS_PER_ROW).map((p) => p.x);
-    const gaps = row.slice(1).map((x, i) => +(x - (row[i] as number)).toFixed(3));
-    assert.deepEqual(gaps, [2.4, 2.4, 4.0, 2.4, 2.4]);
-    // Rows: gap 3.0 inside a pair, 4.6 across the aisle between pairs.
-    const zs = Array.from({ length: 8 }, (_, r) => deskPosition(r * DESKS_PER_ROW).z);
-    const rowGaps = zs.slice(1).map((z, i) => +(z - (zs[i] as number)).toFixed(3));
-    assert.deepEqual(rowGaps, [3.0, 4.6, 3.0, 4.6, 3.0, 4.6, 3.0]);
-  });
-
-  it("never moves a desk because of other desks", () => {
-    assert.deepEqual(deskPosition(7), deskPosition(7));
-    assert.notDeepEqual(deskPosition(7), deskPosition(8));
-  });
-
-  it("refuses a desk number that cannot exist", () => {
-    for (const bad of [-1, 1.5, NaN, Infinity]) assert.throws(() => deskPosition(bad), RangeError, String(bad));
-  });
-
-  it("draws just enough rows for the highest occupied desk, between 1 and 8", () => {
-    assert.equal(rowsFor(-1), 1);
-    assert.equal(rowsFor(0), 1);
-    assert.equal(rowsFor(5), 1);
-    assert.equal(rowsFor(6), 2);
-    assert.equal(rowsFor(47), 8);
-    assert.equal(rowsFor(500), 8);
-  });
-
-  it("makes the floor grow with the rows and keep every desk on it", () => {
-    for (let rows = 1; rows <= 8; rows++) {
-      const b = floorBounds(rows);
-      for (let i = 0; i < rows * DESKS_PER_ROW; i++) {
-        const p = deskPosition(i);
-        assert.ok(p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ, `desk ${i} on the floor for ${rows} rows`);
-      }
-    }
-    assert.ok(floorBounds(8).maxZ > floorBounds(2).maxZ);
-  });
-
-  it("frames more rows from further away, and a narrow window from further away too", () => {
-    let last = 0;
-    for (let rows = 1; rows <= 8; rows++) {
-      const d = fitCamera(rows, 1.6).distance;
-      assert.ok(d > last, `rows ${rows}`);
-      last = d;
-    }
-    assert.ok(fitCamera(3, 0.5).distance > fitCamera(3, 1.8).distance);
-    const t = fitCamera(4, 1.5).target;
-    assert.equal(t[0], 0);
-    assert.ok(t[2] > 0 && t[2] < floorBounds(4).maxZ);
-    for (const bad of [0, -3, NaN]) assert.ok(Number.isFinite(fitCamera(2, bad).distance), `aspect ${bad}`);
+  it("frames a bigger area from further away, and a narrow window from further away too", () => {
+    const small = { minX: -5, maxX: 5, minZ: -5, maxZ: 5 };
+    const big = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
+    assert.ok(fitCamera(big, 1.6).distance > fitCamera(small, 1.6).distance);
+    assert.ok(fitCamera(big, 0.5).distance > fitCamera(big, 1.8).distance);
+    const t = fitCamera({ minX: 0, maxX: 10, minZ: 4, maxZ: 8 }, 1.5).target;
+    assert.equal(t[0], 5);
+    assert.equal(t[2], 6);
+    for (const bad of [0, -3, NaN]) assert.ok(Number.isFinite(fitCamera(small, bad).distance), `aspect ${bad}`);
   });
 
   it("shortens a tag to 18 characters plus an ellipsis without splitting a character", () => {
@@ -163,19 +117,24 @@ describe("selection", () => {
     const store = createSelection();
     let calls = 0;
     const off = store.subscribe(() => calls++);
-    assert.deepEqual(store.get(), { selected: null, hovered: null });
+    assert.deepEqual(store.get(), { selected: null, hovered: null, room: null });
     store.select("a");
     store.select("a");
     assert.equal(calls, 1);
     store.hover("b");
-    assert.deepEqual(store.get(), { selected: "a", hovered: "b" });
+    assert.deepEqual(store.get(), { selected: "a", hovered: "b", room: null });
     store.select(null);
-    assert.deepEqual(store.get(), { selected: null, hovered: "b" });
+    assert.deepEqual(store.get(), { selected: null, hovered: "b", room: null });
     const before = store.get();
     store.hover("b");
     assert.equal(store.get(), before, "the same state object when nothing changed");
+    store.focusRoom("web");
+    assert.equal(store.get().room, "web");
+    assert.equal(calls, 4);
+    store.focusRoom("web");
+    assert.equal(calls, 4, "no call when the room is unchanged");
     off();
     store.select("c");
-    assert.equal(calls, 3, "no calls after unsubscribing");
+    assert.equal(calls, 4, "no calls after unsubscribing");
   });
 });

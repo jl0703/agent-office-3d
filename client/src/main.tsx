@@ -1,12 +1,15 @@
-import { FlaskConical, LocateFixed, OctagonX, Wifi, WifiOff } from "lucide-react";
+import { BookOpen, FlaskConical, LayoutGrid, LocateFixed, OctagonX, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { EVENT_TYPES, type ServerEvent } from "../../shared/events.ts";
-import { AgentList, canStop } from "./AgentList.tsx";
+import { EVENT_TYPES, type Agent, type ServerEvent } from "../../shared/events.ts";
+import { AgentList, canStop, type RoomGroup } from "./AgentList.tsx";
 import { AgentPanel, useActivityLog } from "./AgentPanel.tsx";
-import { stopAgent, stopAll } from "./api.ts";
+import { getVault, stopAgent, stopAll } from "./api.ts";
+import { HubPanel } from "./HubPanel.tsx";
+import { demoVault } from "./vault.ts";
+import type { VaultInfo } from "../../shared/vault.ts";
 import { applyEvent, buildTree, initialState } from "./agents.ts";
-import { VISIBLE_DESKS } from "./office/layout.ts";
+import { assignRooms, emptyAssignment, roomName } from "./office/rooms.ts";
 import { useDemo, useMediaQuery } from "./office/hooks.ts";
 import { OfficeCanvas } from "./office/OfficeCanvas.tsx";
 import { selection, useSelection } from "./office/selection.ts";
@@ -43,8 +46,10 @@ function App() {
   const [tab, setTab] = useState<Tab>("office");
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [hubOpen, setHubOpen] = useState(false);
+  const [vaultInfo, setVaultInfo] = useState<VaultInfo | "loading" | null>("loading");
   const demo = useDemo();
-  const { selected, hovered } = useSelection();
+  const { selected, hovered, room } = useSelection();
   const narrow = useMediaQuery("(max-width: 600px)");
   const docked = useMediaQuery("(min-width: 1440px)");
   const startForm = useRef<HTMLDetailsElement>(null);
@@ -69,33 +74,78 @@ function App() {
     return () => source.close();
   }, []);
 
+  const loadVault = useCallback((refresh: boolean) => {
+    void getVault(refresh).then(setVaultInfo);
+  }, []);
+  useEffect(() => loadVault(false), [loadVault]);
+
   // In demo mode the page shows fake agents only; the real stream is ignored, not mixed in.
   const state = demo.active ? demo.state : live;
+  const demoNotes = useMemo(() => demoVault(), []);
+  const shownVault: VaultInfo | "loading" | null = demo.active ? demoNotes : vaultInfo;
+  const vault = shownVault !== null && shownVault !== "loading" && shownVault.connected ? shownVault : null;
   useEffect(() => {
     selection.select(null);
+    selection.focusRoom(null);
   }, [demo.active]);
 
   const tree = useMemo(() => buildTree(state), [state]);
   const agents = useMemo(() => Object.values(state.agents), [state]);
   const current = selected ? state.agents[selected] : undefined;
+
+  // Rooms keep their places while agents come and go, so the previous answer is part of the input.
+  const placed = useRef(emptyAssignment);
+  const assignment = useMemo(() => {
+    const next = assignRooms(placed.current, agents);
+    placed.current = next;
+    return next;
+  }, [agents]);
+  const groups = useMemo<RoomGroup[]>(() => {
+    const byRoom = new Map<string, typeof tree>();
+    for (const node of tree) byRoom.set(assignment.roomOf.get(node.agent.id) ?? "", [...(byRoom.get(assignment.roomOf.get(node.agent.id) ?? "") ?? []), node]);
+    const count = (nodes: typeof tree): Agent[] => nodes.flatMap((n) => [n.agent, ...count(n.children)]);
+    return [...byRoom]
+      .sort(([a], [b]) => (assignment.roomSlot.get(a) ?? 99) - (assignment.roomSlot.get(b) ?? 99))
+      .map(([key, nodes]) => {
+        const members = count(nodes);
+        return { key: key === "" ? "hidden" : key, title: key === "" ? "Not shown in the office view" : roomName(key), count: members.length, errors: members.filter((m) => m.status === "error").length, nodes };
+      });
+  }, [tree, assignment]);
+  const shownGroups = room === null ? groups : groups.filter((g) => g.key === room);
   const runningHere = demo.active ? 0 : agents.filter(canStop).length;
 
   // Why Start and Stop are switched off, shown next to them.
   const off = demo.active ? "Switched off in demo mode." : connection !== "connected" ? (connection === "connecting" ? "Connecting…" : "Disconnected, retrying.") : null;
 
   // On a phone the panel opens from the strip under the office; elsewhere selecting opens it.
-  useEffect(() => setExpanded(false), [selected]);
-  const panelOpen = Boolean(current) && (!narrow || expanded);
+  useEffect(() => {
+    if (selected !== null) {
+      setExpanded(false);
+      setHubOpen(false);
+    }
+  }, [selected]);
+  const panelOpen = (Boolean(current) || hubOpen) && (!narrow || expanded);
+  const openHub = () => {
+    selection.select(null);
+    setHubOpen(true);
+    setExpanded(true);
+  };
 
   useEffect(() => {
-    if (current && panelOpen && !docked) heading.current?.focus(); // the panel covers content: move into it
-  }, [selected, panelOpen, docked]);
+    if ((current || hubOpen) && panelOpen && !docked) heading.current?.focus(); // the panel covers content: move into it
+  }, [selected, panelOpen, docked, hubOpen]);
 
   useEffect(() => {
     if (selected) lastOpener.current = selected;
   }, [selected]);
 
   const close = useCallback(() => {
+    if (hubOpen) {
+      setHubOpen(false);
+      setExpanded(false);
+      requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-hub-button]")?.focus());
+      return;
+    }
     const id = selected ?? lastOpener.current;
     selection.select(null);
     setExpanded(false);
@@ -104,16 +154,18 @@ function App() {
       const row = id ? visible(document.querySelector<HTMLElement>(`[data-agent-id="${CSS.escape(id)}"]`)) : null;
       (row ?? visible(document.querySelector<HTMLElement>(".office-stage")) ?? document.querySelector<HTMLElement>("[role=tab][aria-selected=true]"))?.focus();
     });
-  }, [selected]);
+  }, [selected, hubOpen]);
 
   useEffect(() => {
-    if (!panelOpen) return;
+    if (!panelOpen && room === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !confirming) close();
+      if (e.key !== "Escape" || confirming) return;
+      if (panelOpen) close();
+      else selection.focusRoom(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [panelOpen, confirming, close]);
+  }, [panelOpen, room, confirming, close]);
 
   const stopAllButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -213,6 +265,15 @@ function App() {
               <FlaskConical size={20} strokeWidth={1.75} aria-hidden="true" /> Demo
             </button>
           )}
+          <button type="button" data-hub-button className="label-from-768 tip" aria-label="Knowledge hub" data-tip="Knowledge hub" aria-pressed={hubOpen} onClick={openHub}>
+            <BookOpen size={20} strokeWidth={1.75} aria-hidden="true" />
+            <span>Knowledge hub</span>
+          </button>
+          {room !== null && (
+            <button type="button" onClick={() => selection.focusRoom(null)}>
+              <LayoutGrid size={20} strokeWidth={1.75} aria-hidden="true" /> Overview
+            </button>
+          )}
           <button type="button" className="label-from-768 tip" aria-label="Reset view" data-tip="Reset view" onClick={() => setResetSignal((n) => n + 1)}>
             <LocateFixed size={20} strokeWidth={1.75} aria-hidden="true" />
             <span>Reset view</span>
@@ -265,7 +326,9 @@ function App() {
             </h2>
             <p className="note">Sessions marked "started here" can be stopped. Sessions started anywhere else are view-only.</p>
             <AgentList
-              tree={tree}
+              groups={shownGroups}
+            focusedRoom={room}
+            onFocusRoom={(key) => selection.focusRoom(room === key ? null : key)}
               stopping={stopping}
               onStop={(id) => void onStop(id)}
               stopOff={off}
@@ -278,8 +341,8 @@ function App() {
           </section>
 
           <section className="pane pane-office" id="pane-office" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-office" : undefined}>
-            <OfficeCanvas agents={agents} connection={connection} demo={demo.active} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
-            {current && narrow && !expanded && (
+            <OfficeCanvas agents={agents} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
+            {current && !hubOpen && narrow && !expanded && (
               <button type="button" className="peek" onClick={() => setExpanded(true)}>
                 <strong>{current.name}</strong> · {STATUS_WORD[current.status]} · Details
               </button>
@@ -287,14 +350,16 @@ function App() {
           </section>
 
           <div className={`panel-slot${panelOpen ? " open" : ""}`}>
-            {panelOpen && current ? (
+            {panelOpen && hubOpen ? (
+            <HubPanel id={PANEL_ID} vault={shownVault} demo={demo.active} headingRef={heading} onClose={close} onRescan={() => loadVault(true)} />
+          ) : panelOpen && current ? (
               <AgentPanel
                 id={PANEL_ID}
                 agent={current}
                 parent={parent}
                 subagents={subagents}
                 log={log}
-                notShown={current.desk >= VISIBLE_DESKS}
+                notShown={!assignment.seat.has(current.id)}
                 stopOff={off}
                 stopping={stopping.has(current.id)}
                 headingRef={heading}
