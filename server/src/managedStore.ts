@@ -71,7 +71,7 @@ export async function saveStore(dir: string, workers: StoredWorker[], ops: Write
   const tmp = join(dir, `${STORE_FILE}.${process.pid}.tmp`);
   try {
     await ops.writeFile(tmp, JSON.stringify({ version: 1, workers: newest }));
-    await ops.rename(tmp, join(dir, STORE_FILE));
+    await renameWithRetry(ops, tmp, join(dir, STORE_FILE));
   } catch (error) {
     await rm(tmp, { force: true });
     throw error;
@@ -83,5 +83,18 @@ function safeJson(text: string): unknown {
     return JSON.parse(text);
   } catch {
     return undefined;
+  }
+}
+
+/** On Windows a rename can fail for a moment while another program (or reader) has the target open. */
+async function renameWithRetry(ops: WriteOps, from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await ops.rename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 12 || (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+    }
   }
 }

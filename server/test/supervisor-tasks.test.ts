@@ -144,6 +144,7 @@ describe("usage caps", () => {
     assert.match(r.registry.get(id)?.note ?? "", /this session/);
     assert.deepEqual(await r.supervisor.resume(id), { ok: false, status: 429, code: "budget" });
     assert.equal(r.calls.length, 2, "the refused resume never reached the SDK");
+    await r.supervisor.settled();
     assert.ok(Math.abs(((await r.readFile())[0]?.costUsdTotal ?? 0) - 3.1) < 1e-9, "the total is kept in the file");
   });
 
@@ -283,7 +284,8 @@ describe("recovery after a restart", () => {
     await r.restartWith(r.stored("ancient", { pid: 4242, processName: "node", pidStartedAt: 5000, updatedAt: Date.now() - 25 * 3_600_000 }));
     assert.deepEqual(killed, [4242]);
     assert.equal(r.registry.has("ancient"), false);
-    await waitFor(async () => (await r.readFile()).length === 0);
+    await r.supervisor.settled();
+    assert.equal((await r.readFile()).length, 0);
   });
 
   it("starts empty, and sets the file aside, when it is damaged", async () => {
