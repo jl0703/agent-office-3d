@@ -1,6 +1,7 @@
 // Types shared by the server and the browser. Type-only: nothing here runs.
 
-export type AgentStatus = "working" | "idle" | "done" | "stopped" | "error";
+// "waiting" and "detached" are reported from ticket 05 on; the office already knows how to show them.
+export type AgentStatus = "working" | "idle" | "done" | "stopped" | "error" | "waiting" | "detached";
 
 export type Agent = {
   id: string;
@@ -18,8 +19,13 @@ export type Agent = {
   tool: string | null;
   /** Summary of the latest tool call, at most 200 characters. */
   activity: string | null;
+  /** Stable seat in the office: the smallest free number, freed when the agent leaves. */
+  desk: number;
   updatedAt: string;
 };
+
+/** One tool call in an agent's recent history. */
+export type ActivityEntry = { ts: string; tool: string | null; summary: string };
 
 export type ServerEvent =
   | { type: "snapshot"; agents: Agent[] }

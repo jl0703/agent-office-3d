@@ -124,6 +124,60 @@ describe("agent registry", () => {
     assert.ok(registry.pendingCount("s1") <= 200);
   });
 
+  it("gives every agent its own desk, the smallest free number, and frees it when the agent leaves", () => {
+    const { registry } = setup();
+    for (const id of ["a", "b", "c"]) registry.upsert(id, init);
+    assert.deepEqual(["a", "b", "c"].map((id) => registry.get(id)?.desk), [0, 1, 2]);
+    registry.remove("b");
+    registry.upsert("d", init);
+    assert.equal(registry.get("d")?.desk, 1, "the freed desk is reused first");
+    registry.upsert("e", init);
+    assert.equal(registry.get("e")?.desk, 3);
+    assert.equal(registry.get("a")?.desk, 0, "nobody else moves");
+    registry.remove("ghost");
+    registry.upsert("f", init);
+    assert.equal(registry.get("f")?.desk, 4, "removing an unknown agent frees nothing");
+  });
+
+  it("keeps desks unique through many arrivals and departures", () => {
+    const { registry } = setup();
+    let n = 0;
+    const live: string[] = [];
+    for (let i = 0; i < 300; i++) {
+      if (live.length > 0 && i % 3 === 0) registry.remove(live.splice((i * 7) % live.length, 1)[0] ?? "");
+      else {
+        const taken = new Set(registry.snapshot().map((a) => a.desk));
+        let smallestFree = 0;
+        while (taken.has(smallestFree)) smallestFree++;
+        const id = `s${n++}`;
+        registry.upsert(id, init);
+        live.push(id);
+        assert.equal(registry.get(id)?.desk, smallestFree, "a newcomer takes the smallest free desk");
+      }
+      const desks = registry.snapshot().map((a) => a.desk);
+      assert.equal(new Set(desks).size, desks.length, "no two agents share a desk");
+    }
+  });
+
+  it("remembers the last 50 tool calls, oldest first, and only for known agents", () => {
+    const { registry } = setup();
+    registry.upsert("s1", init);
+    for (let i = 0; i < 60; i++) {
+      registry.apply("s1", [{ kind: "tool_start", id: `t${i}`, name: "Read", summary: `Read file${i}.ts` }], null);
+    }
+    const log = registry.events("s1");
+    assert.ok(log);
+    assert.equal(log.length, 50);
+    assert.equal(log[0]?.summary, "Read file10.ts");
+    assert.equal(log[49]?.summary, "Read file59.ts");
+    assert.deepEqual(Object.keys(log[0] ?? {}).sort(), ["summary", "tool", "ts"]);
+    assert.equal(registry.events("nobody"), undefined);
+    log.length = 0;
+    assert.equal(registry.events("s1")?.length, 50, "callers get a copy");
+    registry.remove("s1");
+    assert.equal(registry.events("s1"), undefined);
+  });
+
   it("stops notifying after unsubscribe", () => {
     const { registry, events } = setup();
     const extra: ServerEvent[] = [];

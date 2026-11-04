@@ -15,6 +15,7 @@ const agent = (id: string, extra: Partial<Agent> = {}): Agent => ({
   currentTask: null,
   tool: null,
   activity: null,
+  desk: 0,
   updatedAt: "2026-11-03T10:00:00.000Z",
   ...extra,
 });

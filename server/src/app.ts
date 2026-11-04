@@ -32,6 +32,7 @@ type Options = {
 };
 
 const SESSION_COOKIE = "office_session";
+const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume)$/;
 
 const StartBody = z
@@ -120,6 +121,11 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         return deny(res, 403, "no-session", req);
       }
       if (url.pathname === "/events" && method === "GET") return openStream(res);
+      const history = AGENT_EVENTS.exec(url.pathname);
+      if (history?.[1] && method === "GET") {
+        const events = opts.registry?.events(history[1]);
+        return events ? json(res, 200, { events }) : json(res, 404, { error: "not_found" });
+      }
       if (method === "POST" && opts.supervisor) {
         if (url.pathname === "/api/agents") return run(req, res, () => startWorker(req, res));
         if (url.pathname === "/api/agents/stop-all") {

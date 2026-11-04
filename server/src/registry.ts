@@ -1,4 +1,4 @@
-import type { Agent, AgentStatus, ServerEvent } from "../../shared/events.ts";
+import type { ActivityEntry, Agent, AgentStatus, ServerEvent } from "../../shared/events.ts";
 import type { Fact } from "./transcript.ts";
 
 type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role">>;
@@ -9,15 +9,25 @@ type Entry = {
   finished: boolean;
   /** Set when an agent we started has ended; it overrides everything else. */
   terminal: "stopped" | "error" | null;
+  /** The last MAX_LOG tool calls, oldest first. */
+  log: ActivityEntry[];
 };
 
 const MAX_PENDING = 200;
+const MAX_LOG = 50;
 
 export function createRegistry(opts: { now?: () => number; idleMs?: number } = {}) {
   const now = opts.now ?? Date.now;
   const idleMs = opts.idleMs ?? 15_000;
   const entries = new Map<string, Entry>();
   const listeners = new Set<(event: ServerEvent) => void>();
+  const usedDesks = new Set<number>();
+
+  const freeDesk = (): number => {
+    let desk = 0;
+    while (usedDesks.has(desk)) desk++;
+    return desk;
+  };
 
   const emit = (event: ServerEvent) => {
     for (const listener of listeners) {
@@ -46,6 +56,8 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
   return {
     upsert(id: string, init: Init) {
       if (entries.has(id)) return;
+      const desk = freeDesk();
+      usedDesks.add(desk);
       const agent: Agent = {
         id,
         kind: init.kind,
@@ -58,9 +70,10 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
         currentTask: init.currentTask,
         tool: null,
         activity: null,
+        desk,
         updatedAt: new Date(now()).toISOString(),
       };
-      entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null });
+      entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null, log: [] });
       emit({ type: "agent.spawned", agent: { ...agent } });
     },
 
@@ -82,7 +95,10 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
           e.agent.tool = fact.name;
           e.agent.activity = fact.summary;
           e.lastEventAt = Math.max(e.lastEventAt, at);
-          emit({ type: "agent.activity", id, tool: fact.name, summary: fact.summary, ts: new Date(at).toISOString() });
+          const ts = new Date(at).toISOString();
+          e.log.push({ ts, tool: fact.name, summary: fact.summary });
+          if (e.log.length > MAX_LOG) e.log.shift();
+          emit({ type: "agent.activity", id, tool: fact.name, summary: fact.summary, ts });
         } else if (fact.kind === "tool_end") {
           e.pending.delete(fact.id);
         } else if (fact.kind === "event") {
@@ -123,7 +139,10 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
     },
 
     remove(id: string) {
-      if (entries.delete(id)) emit({ type: "agent.removed", id });
+      const e = entries.get(id);
+      if (!e || !entries.delete(id)) return;
+      usedDesks.delete(e.agent.desk);
+      emit({ type: "agent.removed", id });
     },
 
     get: (id: string): Agent | undefined => {
@@ -131,6 +150,8 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
       return e ? { ...e.agent } : undefined;
     },
     has: (id: string) => entries.has(id),
+    /** The agent's recent tool calls, oldest first, or undefined for an unknown agent. */
+    events: (id: string): ActivityEntry[] | undefined => entries.get(id)?.log.map((entry) => ({ ...entry })),
     size: () => entries.size,
     pendingCount: (id: string) => entries.get(id)?.pending.size ?? 0,
     snapshot: (): Agent[] => [...entries.values()].map((e) => ({ ...e.agent })),
