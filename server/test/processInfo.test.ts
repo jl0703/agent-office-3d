@@ -36,7 +36,7 @@ describe("process lookup", () => {
   it("reports the name and start time of a live process, and nothing for a missing one", async () => {
     const info = await inspectProcess(process.pid);
     assert.ok(info && info.name.length > 0);
-    assert.ok(info.startedAtMs < Date.now() && info.startedAtMs > Date.now() - 24 * 3_600_000);
+    assert.ok(info.startedAtMs <= Date.now() && info.startedAtMs > Date.now() - 24 * 3_600_000);
     assert.equal(await inspectProcess(2 ** 31 - 2), null);
     assert.equal(await inspectProcess(-1), null);
     assert.equal(await inspectProcess(1.5), null);
