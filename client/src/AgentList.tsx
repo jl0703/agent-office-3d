@@ -7,11 +7,19 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
   done: "Done",
   stopped: "Stopped",
   error: "Error",
+  waiting: "Waiting",
+  detached: "Detached",
 };
 
 type Controls = {
   stopping: ReadonlySet<string>;
   onStop: (id: string) => void;
+  /** Demo agents cannot be stopped. */
+  readOnly?: boolean;
+  selectedId?: string | null;
+  hoveredId?: string | null;
+  onSelect?: (id: string) => void;
+  onHover?: (id: string | null) => void;
 };
 
 /** A worker started here that has not ended yet. */
@@ -20,13 +28,24 @@ export const canStop = (agent: Agent) => agent.origin === "managed" && (agent.st
 function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
   const { agent, children } = node;
   return (
-    <li className="agent">
+    <li className={`agent${controls.selectedId === agent.id ? " agent-selected" : ""}${controls.hoveredId === agent.id ? " agent-hover" : ""}`}>
       <p className="agent-head">
-        <strong>{agent.name}</strong>
+        <button
+          type="button"
+          className="row-name"
+          aria-pressed={controls.selectedId === agent.id}
+          onClick={() => controls.onSelect?.(agent.id)}
+          onMouseEnter={() => controls.onHover?.(agent.id)}
+          onMouseLeave={() => controls.onHover?.(null)}
+          onFocus={() => controls.onHover?.(agent.id)}
+          onBlur={() => controls.onHover?.(null)}
+        >
+          {agent.name}
+        </button>
         <span className="project">{agent.project}</span>
         {agent.origin === "managed" && <span className="origin">started here</span>}
         <span className={`status status-${agent.status}`}>{STATUS_LABEL[agent.status]}</span>
-        {canStop(agent) && (
+        {canStop(agent) && !controls.readOnly && (
           <button
             type="button"
             className="stop"

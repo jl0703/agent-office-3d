@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["server", "shared", "scripts", "vite.config.ts", "client/test"]
+  "include": ["server", "shared", "scripts", "vite.config.ts", "client/test", "tools"]
 }

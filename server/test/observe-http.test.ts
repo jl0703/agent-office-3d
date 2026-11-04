@@ -73,6 +73,29 @@ describe("observing sessions over HTTP", () => {
     assert.ok(!stream.events.some((e) => e.data.includes("SECRET_CODE")), "tool input never reaches the browser");
   });
 
+  it("serves an agent's recent tool calls, and refuses unknown ids and missing cookies", async () => {
+    const ok = await send(srv.port, `/api/agents/${SESSION}/events`, { headers: { host: auth.host, cookie: auth.cookie } });
+    assert.equal(ok.status, 200);
+    const body = JSON.parse(ok.body) as { events: { ts: string; tool: string; summary: string }[] };
+    assert.equal(body.events.length, 1);
+    assert.equal(body.events[0]?.summary, "Edit app.ts");
+    assert.equal(body.events[0]?.tool, "Edit");
+    assert.ok(!ok.body.includes("SECRET_CODE"), "only summaries, never tool inputs");
+
+    const unknown = await send(srv.port, "/api/agents/nope/events", { headers: { host: auth.host, cookie: auth.cookie } });
+    assert.equal(unknown.status, 404);
+    const odd = await send(srv.port, "/api/agents/a%20b/events", { headers: { host: auth.host, cookie: auth.cookie } });
+    assert.equal(odd.status, 404);
+    const noCookie = await send(srv.port, `/api/agents/${SESSION}/events`, { headers: { host: auth.host } });
+    assert.equal(noCookie.status, 403);
+    const post = await send(srv.port, `/api/agents/${SESSION}/events`, {
+      method: "POST",
+      headers: { host: auth.host, cookie: auth.cookie, origin: `http://${auth.host}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(post.status, 404, "read-only route");
+  });
+
   it("gives a later connection the current state in its snapshot", async () => {
     const stream = await open();
     const first = parse(await stream.next((e) => e.name === "snapshot")) as { agents: { id: string; activity: string }[] };

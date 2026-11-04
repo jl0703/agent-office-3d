@@ -25,6 +25,14 @@ A worker can read, search, edit and write files in its folder and search the web
 
 Search results are untrusted text. A worker that can edit files could be steered by instructions hidden in them, so keep its folder to something you can restore.
 
+## The office
+
+Each session is a low-poly character at its own desk; the desk stays the same while the agent exists. Click a character or its list entry to select it. Open `/?demo` (or `/?demo=40` for 40 fake agents) to see the office without real sessions; demo mode never mixes with real ones and cannot start or stop anything.
+
+## Browser checks
+
+`node tools/browser/check-office.ts <output folder> shots narrow click reduced perf` starts the server and a headless Edge or Chrome (set `BROWSER_PATH` if it is elsewhere), then writes screenshots and prints frame rate, draw calls and console problems.
+
 ## Checks
 
 

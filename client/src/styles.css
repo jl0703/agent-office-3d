@@ -143,3 +143,203 @@ button:disabled {
   min-height: 1.5rem;
   margin: 0;
 }
+
+.status-waiting {
+  border-style: dotted;
+  border-width: 3px;
+}
+
+.status-detached {
+  border-style: dashed dotted;
+  opacity: 0.8;
+}
+
+/* ---- The office view (the workspace shell restyles the page around it) ---- */
+.office {
+  margin: 1rem 0;
+}
+
+.office-stage {
+  position: relative;
+  height: min(70vh, 640px);
+  min-height: 340px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  overflow: hidden;
+}
+
+.office-stage:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 2px;
+}
+
+.office-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.office-frozen canvas {
+  filter: saturate(0.6);
+}
+
+.office-tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.office-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  max-width: 16rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: color-mix(in srgb, Canvas 88%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 2px;
+}
+
+.office-tag[data-state="selected"] {
+  border-color: currentColor;
+  border-width: 2px;
+  font-weight: 700;
+}
+
+.office-tag[data-state="hover"] {
+  border-color: currentColor;
+}
+
+.tag-family {
+  font-weight: 700;
+}
+
+.tag-status {
+  opacity: 0.75;
+}
+
+.office-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.office-overlay,
+.office-banner,
+.office-chip,
+.office-watermark,
+.office-stats {
+  position: absolute;
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  background: color-mix(in srgb, Canvas 85%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  font-size: 0.8125rem;
+}
+
+.office-overlay {
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+}
+
+.office-banner {
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.office-chip {
+  bottom: 0.5rem;
+  left: 0.5rem;
+}
+
+.office-watermark {
+  top: 0.5rem;
+  right: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.office-stats {
+  bottom: 0.5rem;
+  right: 0.5rem;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.office-empty,
+.office-notice {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  padding: 1rem 1.5rem;
+  text-align: center;
+  background: color-mix(in srgb, Canvas 92%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.office-empty h2 {
+  margin: 0 0 0.25rem;
+}
+
+.office-empty-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.demo-banner {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.75rem;
+  background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, currentColor 12%, transparent) 10px 20px);
+  border: 2px dashed currentColor;
+}
+
+.selected-bar {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 2px solid currentColor;
+}
+
+.selected-bar p {
+  margin: 0.15rem 0;
+}
+
+.row-name {
+  min-height: 0;
+  padding: 0.1rem 0.4rem;
+  font-weight: 700;
+  background: none;
+  border: 1px solid transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.row-name:hover,
+.agent-hover .row-name {
+  border-color: currentColor;
+}
+
+.agent-selected {
+  border-width: 3px;
+}
+
+/* On a narrow screen the tags would cover each other: show only the one being pointed at or selected. */
+@media (max-width: 600px) {
+  .office-tag[data-state=""] {
+    display: none !important;
+  }
+  .office-stats {
+    font-size: 0.65rem;
+    max-width: calc(100% - 16px);
+    overflow: hidden;
+  }
+}
