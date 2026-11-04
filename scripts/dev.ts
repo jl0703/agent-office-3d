@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 // The browser uses the Vite port; Vite proxies /api and /events to the server.
 const vite = fileURLToPath(new URL("../node_modules/vite/bin/vite.js", import.meta.url));
 const children = [
-  spawn(process.execPath, ["--watch", "server/src/main.ts"], {
+  spawn(process.execPath, ["--env-file-if-exists=.env", "--watch", "server/src/main.ts"], {
     stdio: "inherit",
     env: { ...process.env, OFFICE_PUBLIC_PORT: "5173" },
   }),
