@@ -1,4 +1,5 @@
 import type { ActivityEntry } from "../../shared/events.ts";
+import type { VaultInfo } from "../../shared/vault.ts";
 
 export type ActionResult = { ok: true } | { ok: false; message: string };
 
@@ -78,6 +79,18 @@ export async function getAgentEvents(id: string, fetchFn: FetchFn = fetch): Prom
     if (!res.ok) return null;
     const data = (await res.json()) as { events?: unknown };
     return Array.isArray(data.events) ? (data.events as ActivityEntry[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the knowledge hub shows, or null when the server cannot be reached or answers with something else. */
+export async function getVault(refresh = false, fetchFn: FetchFn = fetch): Promise<VaultInfo | null> {
+  try {
+    const res = await fetchFn(refresh ? "/api/vault?refresh=1" : "/api/vault");
+    if (!res.ok) return null;
+    const data = (await res.json()) as { connected?: unknown };
+    return typeof data.connected === "boolean" ? (data as VaultInfo) : null;
   } catch {
     return null;
   }

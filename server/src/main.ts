@@ -44,6 +44,7 @@ const app = await startServer({
   staticDir: fileURLToPath(new URL("../../client/dist", import.meta.url)),
   registry,
   supervisor,
+  ...(process.env["OFFICE_VAULT_DIR"] ? { vaultDir: process.env["OFFICE_VAULT_DIR"] } : {}),
 });
 
 // Only now, with the port bound: a second instance that fails to bind must not touch the first one's workers.

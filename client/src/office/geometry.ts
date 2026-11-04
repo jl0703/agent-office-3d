@@ -4,6 +4,7 @@ import {
   CapsuleGeometry,
   Color,
   ConeGeometry,
+  CylinderGeometry,
   Euler,
   Float32BufferAttribute,
   Matrix4,
@@ -180,3 +181,37 @@ export const flatRing = (inner: number, outer: number) => place(new RingGeometry
 export const flatPlane = (w: number, d: number) => place(new PlaneGeometry(w, d), 0, 0, 0, -Math.PI / 2);
 export const beaconGeometry = () => place(new ConeGeometry(0.09, 0.22, 8), 0, 0.11, 0);
 export const unitBox = () => new BoxGeometry(1, 1, 1);
+
+/** A potted plant, about 1 m tall. */
+export function plantGeometry(): BufferGeometry {
+  return merge([
+    { geometry: place(new CylinderGeometry(0.28, 0.2, 0.4, 7), 0, 0.2, 0), color: "#B5673F" },
+    { geometry: place(new SphereGeometry(0.42, 6, 5), 0, 0.78, 0), color: "#3F8F5A" },
+    { geometry: place(new SphereGeometry(0.28, 6, 5), 0.2, 1.05, 0.05), color: "#4FA56A" },
+  ]);
+}
+
+/** A bookshelf against a wall, facing +z, 1.8 m wide. */
+export function shelfGeometry(): BufferGeometry {
+  const parts: Part[] = [box(1.8, 1.7, 0.4, 0, 0.85, 0, "#8C6B4A")];
+  const books = ["#C8553D", "#2E86AB", "#D9A21B", "#8E6BAE", "#4C9A6A", "#D17A9E"];
+  for (let row = 0; row < 3; row++) {
+    parts.push(box(1.64, 0.04, 0.38, 0, 0.3 + row * 0.55, 0.02, "#6E5238"));
+    for (let i = 0; i < 6; i++) parts.push(box(0.2, 0.36, 0.28, -0.7 + i * 0.28, 0.5 + row * 0.55, 0.06, books[(i + row) % books.length] as string));
+  }
+  return merge(parts);
+}
+
+/** A standing lamp with a warm shade. */
+export function lampGeometry(): BufferGeometry {
+  return merge([
+    { geometry: place(new CylinderGeometry(0.18, 0.2, 0.05, 8), 0, 0.025, 0), color: "#2B3340" },
+    box(0.05, 1.5, 0.05, 0, 0.78, 0, "#2B3340"),
+    { geometry: place(new ConeGeometry(0.3, 0.32, 8, 1, true), 0, 1.6, 0), color: "#F2D58A" },
+  ]);
+}
+
+/** The hub: a low round dais. */
+export const daisGeometry = () => place(new CylinderGeometry(1, 1.06, 1, 48), 0, 0.5, 0);
+export const coreGeometry = () => new SphereGeometry(1, 16, 12);
+export const torusGeometry = (r: number, tube: number) => place(new TorusGeometry(r, tube, 6, 64), 0, 0, 0, Math.PI / 2);

@@ -1,14 +1,16 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useCallback, useEffect, useRef, useState, type ElementRef, type KeyboardEvent, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef, type KeyboardEvent, type MutableRefObject } from "react";
 import { Spherical, Vector3 } from "three";
 import type { Agent } from "../../../shared/events.ts";
 import { Office } from "./Office.tsx";
-import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, VISIBLE_DESKS, fitCamera, floorBounds, truncateTag } from "./layout.ts";
+import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, fitCamera, truncateTag } from "./layout.ts";
+import type { Vault } from "../vault.ts";
+import { overviewBounds, roomBounds, roomName, type Assignment, type Bounds } from "./rooms.ts";
 import { FAMILY_LETTERS } from "./palette.ts";
 import { familyIndexes } from "./families.ts";
 import { useReducedMotion, useScheme, webglAvailable } from "./hooks.ts";
-import type { Selection } from "./selection.ts";
+import { useSelection, type Selection } from "./selection.ts";
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const POLAR_MIN = rad(25);
@@ -19,14 +21,15 @@ const AZIMUTH_MAX = CAMERA_AZIMUTH + rad(60);
 type RigApi = { reset(): void; orbit(dTheta: number, dPhi: number): void; zoom(factor: number): void };
 
 /** Frames the occupied rows, keeps the user inside sensible limits, and eases between views. */
-function CameraRig({ rows, reduced, api }: { rows: number; reduced: boolean; api: MutableRefObject<RigApi | null> }) {
+function CameraRig({ view, limit, focusKey, reduced, api }: { view: Bounds; limit: Bounds; focusKey: string; reduced: boolean; api: MutableRefObject<RigApi | null> }) {
   const controls = useRef<ElementRef<typeof OrbitControls>>(null);
   const camera = useThree((s) => s.camera);
   const size = useThree((s) => s.size);
   const invalidate = useThree((s) => s.invalidate);
   const aspect = size.width / Math.max(size.height, 1);
   const goal = useRef({ distance: 30, fit: 30, target: new Vector3(), animating: false, userMoved: false, placed: false });
-  const bounds = useRef(floorBounds(rows));
+  const bounds = useRef(limit);
+  const lastFocus = useRef(focusKey);
 
   const place = useCallback(
     (distance: number, target: Vector3) => {
@@ -41,10 +44,14 @@ function CameraRig({ rows, reduced, api }: { rows: number; reduced: boolean; api
 
   // Aim at the new framing when the rows or the window shape change, unless the user has taken over.
   useEffect(() => {
-    const fit = fitCamera(rows, aspect);
+    const fit = fitCamera(view, aspect);
     const g = goal.current;
+    if (lastFocus.current !== focusKey) {
+      lastFocus.current = focusKey;
+      g.userMoved = false; // a new room (or the overview) is a request to look there
+    }
     g.fit = fit.distance;
-    bounds.current = floorBounds(rows);
+    bounds.current = limit;
     if (controls.current) {
       controls.current.minDistance = fit.distance * 0.5;
       controls.current.maxDistance = fit.distance * 1.5;
@@ -57,7 +64,7 @@ function CameraRig({ rows, reduced, api }: { rows: number; reduced: boolean; api
       g.placed = true;
     }
     invalidate();
-  }, [rows, aspect, reduced, place, invalidate]);
+  }, [view, limit, focusKey, aspect, reduced, place, invalidate]);
 
   useEffect(() => {
     const clampPolar = (v: number) => Math.min(POLAR_MAX, Math.max(POLAR_MIN, v));
@@ -77,7 +84,7 @@ function CameraRig({ rows, reduced, api }: { rows: number; reduced: boolean; api
       reset() {
         const g = goal.current;
         g.userMoved = false;
-        const fit = fitCamera(rows, aspect);
+        const fit = fitCamera(view, aspect);
         g.distance = fit.distance;
         g.target.set(...fit.target);
         // Back to the default angle at once; the distance and aim ease in.
@@ -99,7 +106,7 @@ function CameraRig({ rows, reduced, api }: { rows: number; reduced: boolean; api
     return () => {
       api.current = null;
     };
-  }, [api, camera, rows, aspect, reduced, place, invalidate]);
+  }, [api, camera, view, aspect, reduced, place, invalidate]);
 
   useFrame((_, delta) => {
     const g = goal.current;
@@ -176,6 +183,10 @@ export type OfficeCanvasProps = {
   agents: readonly Agent[];
   connection: "connecting" | "connected" | "disconnected";
   demo: boolean;
+  assignment: Assignment;
+  vault: Vault | null;
+  hubOpen: boolean;
+  onOpenHub: () => void;
   selection: Selection;
   /** Raised by one each time the header's Reset view is pressed. */
   resetSignal: number;
@@ -183,20 +194,30 @@ export type OfficeCanvasProps = {
   onStartWorker: () => void;
 };
 
-export function OfficeCanvas({ agents, connection, demo, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
+export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubOpen, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
   const scheme = useScheme();
   const reduced = useReducedMotion();
   const [supported] = useState(webglAvailable);
   const [lost, setLost] = useState(false);
-  const [rows, setRows] = useState(1);
   const [generation, setGeneration] = useState(0);
   const rig = useRef<RigApi | null>(null);
   const tagRefs = useRef(new Map<string, HTMLElement>());
+  const roomRefs = useRef(new Map<string, HTMLElement>());
+  const hubRef = useRef<HTMLElement | null>(null);
+  const { room } = useSelection(selection);
   const stats = useRef<HTMLPreElement | null>(null);
 
   const frozen = connection === "disconnected" && !demo;
-  const shown = agents.filter((a) => a.desk < VISIBLE_DESKS);
-  const hidden = agents.length - shown.length;
+  const shown = agents.filter((a) => assignment.seat.has(a.id));
+  const hidden = assignment.unseated;
+  const slotKey = [...assignment.roomSlot.values()].sort().join(",");
+  const limit = useMemo(() => overviewBounds(slotKey === "" ? [] : slotKey.split(",").map(Number)), [slotKey]);
+  const focusSlot = room === null ? undefined : assignment.roomSlot.get(room);
+  const view = useMemo(() => (focusSlot === undefined ? limit : roomBounds(focusSlot)), [focusSlot, limit]);
+  // A room that has emptied cannot keep the focus.
+  useEffect(() => {
+    if (room !== null && focusSlot === undefined) selection.focusRoom(null);
+  }, [room, focusSlot, selection]);
   const families = familyIndexes(agents);
   const empty = agents.length === 0 && connection === "connected" && !demo;
 
@@ -238,8 +259,8 @@ export function OfficeCanvas({ agents, connection, demo, selection, resetSignal,
               });
             }}
           >
-            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} onRows={setRows} />
-            <CameraRig rows={rows} reduced={reduced} api={rig} />
+            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} assignment={assignment} roomRefs={roomRefs} vault={vault} hubRef={hubRef} />
+            <CameraRig view={view} limit={limit} focusKey={room ?? ""} reduced={reduced} api={rig} />
             {demo && <Stats out={stats} />}
           </Canvas>
         ) : (
@@ -258,6 +279,49 @@ export function OfficeCanvas({ agents, connection, demo, selection, resetSignal,
             )}
           </div>
         )}
+
+        <div className="office-rooms">
+          {[...assignment.roomSlot.keys()].map((key) => {
+            const members = agents.filter((a) => assignment.roomOf.get(a.id) === key);
+            const errors = members.filter((a) => a.status === "error").length;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`room-sign${room === key ? " room-focused" : ""}${errors > 0 ? " room-error" : ""}`}
+                style={{ display: "none" }}
+                aria-pressed={room === key}
+                ref={(el) => {
+                  if (el) roomRefs.current.set(key, el);
+                  else roomRefs.current.delete(key);
+                }}
+                onClick={() => selection.focusRoom(room === key ? null : key)}
+              >
+                <span className="room-name">{roomName(key)}</span>
+                <span className="room-meta">
+                  {members.length} {members.length === 1 ? "agent" : "agents"}
+                  {errors > 0 ? ` · ${errors} error` : ""}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="office-rooms">
+          <button
+            type="button"
+            className={`room-sign hub-sign${hubOpen ? " room-focused" : ""}`}
+            style={{ display: "none" }}
+            aria-pressed={hubOpen}
+            ref={(el) => {
+              hubRef.current = el;
+            }}
+            onClick={onOpenHub}
+          >
+            <span className="room-name">Knowledge hub</span>
+            <span className="room-meta">{vault ? `${vault.noteCount} notes` : "no vault connected"}</span>
+          </button>
+        </div>
 
         <div className="office-tags" aria-hidden="true">
           {shown.map((a) => (

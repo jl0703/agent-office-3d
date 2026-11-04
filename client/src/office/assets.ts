@@ -1,10 +1,16 @@
-import { type BufferGeometry, DoubleSide, LineBasicMaterial, MeshBasicMaterial, MeshLambertMaterial } from "three";
+import { type BufferGeometry, DoubleSide, LineBasicMaterial, MeshBasicMaterial, MeshLambertMaterial, SphereGeometry } from "three";
 import type { AgentStatus } from "../../../shared/events.ts";
 import {
   accessoryGeometry,
   armGeometry,
   beaconGeometry,
   chairGeometry,
+  coreGeometry,
+  daisGeometry,
+  lampGeometry,
+  plantGeometry,
+  shelfGeometry,
+  torusGeometry,
   deskGeometry,
   flatPlane,
   flatRing,
@@ -46,6 +52,14 @@ export function createAssets(scheme: Scheme) {
     stripe: flatPlane(1.2, 0.34),
     beacon: beaconGeometry(),
     box: unitBox(),
+    node: new SphereGeometry(1, 8, 6),
+    plant: plantGeometry(),
+    shelf: shelfGeometry(),
+    lamp: lampGeometry(),
+    dais: daisGeometry(),
+    core: coreGeometry(),
+    hubRing: torusGeometry(2.3, 0.05),
+    hubRingOuter: torusGeometry(3.2, 0.04),
   };
 
   const mat = {
@@ -66,6 +80,15 @@ export function createAssets(scheme: Scheme) {
     grid: new LineBasicMaterial({ color: c.grid }),
     outline: new LineBasicMaterial({ color: c.lip }),
     // Drawn into nothing, but still hit by the pointer, so characters can be clicked.
+    room: lambert({}),
+    board: new MeshBasicMaterial({ color: scheme === "light" ? 0xfbf8f0 : 0xdfe6ee }),
+    road: new MeshBasicMaterial({ color: scheme === "light" ? 0x7d8794 : 0x4a586b }),
+    roadLit: new MeshBasicMaterial({ color: c.selection }),
+    dais: lambert({ color: scheme === "light" ? 0xcfd6df : 0x2b3646 }),
+    core: new MeshBasicMaterial({ color: scheme === "light" ? 0x4a90d9 : 0x7fd0ff, toneMapped: false }),
+    hubRing: new MeshBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x7fb0f0, toneMapped: false }),
+    node: new MeshBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x9fd0ff, toneMapped: false }),
+    graphLine: new LineBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x7fb0f0, transparent: true, opacity: 0.35 }),
     hit: new MeshBasicMaterial({ colorWrite: false, depthWrite: false }),
   };
 

@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -92,6 +92,55 @@ try {
     await plain.page.screenshot(join(out, "state-no-webgl.png"));
     console.log("states: no-webgl ->", await plain.page.evaluate(`document.querySelector(".office-notice")?.textContent ?? "(notice not shown)"`));
     await plain.close();
+  }
+
+  if (run("rooms")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const scheme of ["light", "dark"] as const) {
+      const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+      await page.emulate({ scheme });
+      await page.viewport(1440, 900);
+      const server = await login(page);
+      await demo(page, server.base);
+      const count = (selector: string) => page.evaluate<number>(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
+      const signs = await count(".room-sign:not(.hub-sign)");
+      const groupsBefore = await count(".room-head");
+      expect(signs >= 3, `rooms(${scheme}): room signs shown (${signs})`);
+      await page.screenshot(join(out, `rooms-${scheme}-overview.png`));
+      await page.evaluate(`document.querySelector(".room-sign:not(.hub-sign)").click()`);
+      await page.wait(900);
+      const groupsFocused = await count(".room-head");
+      const overview = await page.evaluate<boolean>(`[...document.querySelectorAll(".app-actions button")].some((b) => b.textContent.includes("Overview"))`);
+      expect(groupsFocused === 1 && groupsBefore > 1, `rooms(${scheme}): focusing a room filters the list (${groupsBefore} -> ${groupsFocused})`);
+      expect(overview, `rooms(${scheme}): Overview button appears`);
+      await page.screenshot(join(out, `rooms-${scheme}-focused.png`));
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(900);
+      expect((await count(".room-head")) === groupsBefore, `rooms(${scheme}): Escape returns to the overview`);
+      await page.evaluate(`document.querySelector(".hub-sign").click()`);
+      await page.wait(500);
+      const hub = await page.evaluate<string>(`document.querySelector(".panel")?.textContent ?? ""`);
+      expect(hub.includes("Knowledge hub") && hub.includes("Demo vault") && hub.includes("60 notes"), `rooms(${scheme}): hub panel shows the vault`);
+      await page.evaluate(`(() => { const i = document.querySelector(".panel input[type=search]"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, "note 7"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+      await page.wait(300);
+      const links = await page.evaluate<string[]>(`[...document.querySelectorAll("[aria-label='Matching notes'] a")].map((a) => a.getAttribute("href"))`);
+      expect(links.length > 0 && links.every((h) => h.startsWith("obsidian://open?vault=Demo%20vault&file=")), `rooms(${scheme}): search finds notes with obsidian links (${links.length})`);
+      await page.screenshot(join(out, `rooms-${scheme}-hub.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+      expect(violations.length === 0, `rooms(${scheme}): axe with the hub open: ${violations.join(", ")}`);
+      console.log(`rooms(${scheme}): signs=${signs} groups ${groupsBefore}->${groupsFocused} links=${links.length} axe=${violations.length} problems=${JSON.stringify(page.problems().filter((x) => !x.includes("THREE.Clock")))}`);
+      await close();
+    }
+    const big = await launchBrowser({ width: 1440, height: 900 });
+    await big.page.viewport(1440, 900);
+    const bigServer = await login(big.page);
+    await demo(big.page, bigServer.base, 60);
+    const chip = await big.page.evaluate<string>(`document.querySelector(".office-chip")?.textContent ?? ""`);
+    expect(chip.includes("more"), "rooms: 60 agents show the overflow chip");
+    await big.page.screenshot(join(out, "rooms-60.png"));
+    console.log("rooms: 60 agents chip =", chip);
+    await big.close();
   }
 
   if (run("axe")) {

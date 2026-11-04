@@ -8,20 +8,22 @@ import {
   type InstancedMesh,
   type LineSegments,
   Matrix4,
-  type Mesh,
   type Object3D,
   Quaternion,
   Vector3,
 } from "three";
 import type { Agent, AgentStatus } from "../../../shared/events.ts";
+import { graphLayout, MAX_GRAPH_NODES, type Vault } from "../vault.ts";
 import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
-import { VISIBLE_DESKS, deskPosition, floorBounds, rowsFor } from "./layout.ts";
+import { HUB_RADIUS, ROOM_COLORS, ROOM_D, ROOM_W, MAX_ROOMS, SEATS_PER_ROOM, SEAT_COUNT, roadSegment, roomCenter, seatPosition, type Assignment } from "./rooms.ts";
 import { ACCESSORIES, CHARACTER_COLORS, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, characterStyle, type Accessory, type Scheme } from "./palette.ts";
 import { blendPose, poseFor, type Pose } from "./poses.ts";
 import type { Selection } from "./selection.ts";
 
-const N = VISIBLE_DESKS;
+const N = SEAT_COUNT;
+const SEAT_POS = Array.from({ length: N }, (_, i) => seatPosition(i));
+const deskPosition = (seat: number) => SEAT_POS[seat] as { x: number; z: number };
 const NAMED: readonly Exclude<Accessory, "none">[] = ACCESSORIES.filter((a): a is Exclude<Accessory, "none"> => a !== "none");
 
 type Slot = { id: string; status: AgentStatus; since: number; appearedAt: number; pose: Pose; color: number; accessory: Accessory; family: number };
@@ -29,7 +31,8 @@ type World = {
   slots: (Slot | null)[];
   byId: Map<string, number>;
   first: boolean;
-  rows: number;
+  /** Rooms in use, in the order of their instances. */
+  rooms: { key: string; slot: number }[];
   pulse: number[];
   /** For each status, the desk numbers drawn in that status's instanced mesh. */
   onScreen: Record<AgentStatus, number[]>;
@@ -39,7 +42,7 @@ const newWorld = (): World => ({
   slots: Array.from({ length: N }, () => null),
   byId: new Map(),
   first: true,
-  rows: 1,
+  rooms: [],
   pulse: Array.from({ length: N }, () => -1),
   onScreen: Object.fromEntries(STATUSES.map((s) => [s, []])) as unknown as Record<AgentStatus, number[]>,
 });
@@ -76,10 +79,16 @@ export type OfficeProps = {
   frozen: boolean;
   selection: Selection;
   tagRefs: MutableRefObject<Map<string, HTMLElement>>;
-  onRows: (rows: number) => void;
+  assignment: Assignment;
+  /** The connected vault, drawn as notes orbiting the hub; null when there is none. */
+  vault: Vault | null;
+  /** The hub's sign, positioned over the scene by the frame loop. */
+  hubRef: MutableRefObject<HTMLElement | null>;
+  /** The room signs, positioned over the scene by the frame loop. */
+  roomRefs: MutableRefObject<Map<string, HTMLElement>>;
 };
 
-export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, onRows }: OfficeProps) {
+export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, assignment, roomRefs, vault, hubRef }: OfficeProps) {
   const invalidate = useThree((s) => s.invalidate);
   const [assets, setAssets] = useState<Assets | null>(null);
   useEffect(() => {
@@ -91,6 +100,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
   const meshes = useRef<Record<string, Object3D | null>>({});
   const bind = useCallback((name: string) => (node: Object3D | null) => void (meshes.current[name] = node), []);
   const world = useRef<World>(newWorld());
+  const assignmentRef = useRef(assignment);
+  assignmentRef.current = assignment;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const clock = useThree((s) => s.clock);
@@ -119,7 +130,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
         const { x, z } = deskPosition(d);
         if (!slot) {
           for (const name of ["desks", "monitors", "stripes", "shadows", "hit", "chairs", "torsos", "heads", "armsL", "armsR", "legs"]) set(name, d, ZERO);
-          if (d < w.rows * 6) {
+          if (w.rooms.some((r) => r.slot === Math.floor(d / SEATS_PER_ROOM))) {
             // A dim outline marks an empty desk.
             const [x0, x1, z0, z1] = [x - 0.75, x + 0.75, z - 0.4, z + 0.4];
             outline.push(x0, 0.01, z0, x1, 0.01, z0, x1, 0.01, z0, x1, 0.01, z1, x1, 0.01, z1, x0, 0.01, z1, x0, 0.01, z1, x0, 0.01, z0);
@@ -173,21 +184,39 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
 
-      // Floor and grid grow with the number of rows.
-      const b = floorBounds(w.rows);
-      const width = b.maxX - b.minX;
-      const depth = b.maxZ - b.minZ;
-      const floor = meshes.current.floor as Mesh | undefined;
-      const lip = meshes.current.lip as Mesh | undefined;
-      floor?.position.set(0, -0.15, (b.minZ + b.maxZ) / 2);
-      floor?.scale.set(width, 0.3, depth);
-      lip?.position.set(0, -0.24, (b.minZ + b.maxZ) / 2);
-      lip?.scale.set(width + 0.5, 0.18, depth + 0.5);
+      // Rooms: a floor tile, two walls, a whiteboard and a few props each, and a road from the hub.
+      const dark = scheme === "dark";
+      const settle = new Color(dark ? "#12161c" : "#f3eee2");
+      w.rooms.forEach(({ key, slot }, i) => {
+        const at = roomCenter(slot);
+        const hue = new Color(ROOM_COLORS[assignmentRef.current.colorOf.get(key) ?? 0] as string);
+        set("roomFloors", i, compose(m1, at.x, -0.15, at.z, 0, 0, 0, ROOM_W, 0.3, ROOM_D));
+        instanced("roomFloors")?.setColorAt(i, hue.clone().lerp(settle, dark ? 0.6 : 0.45));
+        const wall = hue.clone().multiplyScalar(dark ? 0.7 : 1);
+        set("roomBack", i, compose(m1, at.x, 1.3, at.z - ROOM_D / 2 + 0.125, 0, 0, 0, ROOM_W, 2.6, 0.25));
+        instanced("roomBack")?.setColorAt(i, wall);
+        set("roomLeft", i, compose(m1, at.x - ROOM_W / 2 + 0.125, 1.3, at.z, 0, 0, 0, 0.25, 2.6, ROOM_D - 0.25));
+        instanced("roomLeft")?.setColorAt(i, wall);
+        set("roomBoards", i, compose(m1, at.x, 1.75, at.z - ROOM_D / 2 + 0.28, 0, 0, 0, 3.4, 1.1, 0.06));
+        set("roomPlants", i, compose(m1, at.x + ROOM_W / 2 - 0.9, 0, at.z - ROOM_D / 2 + 0.9));
+        set("roomShelves", i, compose(m1, at.x - ROOM_W / 2 + 0.45, 0, at.z + 0.8, 0, Math.PI / 2, 0));
+        set("roomLamps", i, compose(m1, at.x + ROOM_W / 2 - 0.7, 0, at.z + 0.9));
+        const road = roadSegment(slot);
+        set("roads", i, compose(m1, road.x, 0.015, road.z, 0, road.angle, 0, 0.7, 0.03, road.length));
+      });
+      // Picking caches a bounding sphere per instanced mesh; rooms and seats move, so forget it.
+      for (const name of ["roomFloors", "hit"]) {
+        const mesh = instanced(name);
+        if (mesh) mesh.boundingSphere = null;
+      }
+      for (const name of ["roomFloors", "roomBack", "roomLeft", "roomBoards", "roomPlants", "roomShelves", "roomLamps", "roads"]) {
+        const mesh = instanced(name);
+        if (!mesh) continue;
+        mesh.count = w.rooms.length;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      }
 
-      const grid: number[] = [];
-      for (let gx = Math.ceil(b.minX / 1.2) * 1.2; gx <= b.maxX; gx += 1.2) grid.push(gx, 0.005, b.minZ, gx, 0.005, b.maxZ);
-      for (let gz = Math.ceil(b.minZ / 1.2) * 1.2; gz <= b.maxZ; gz += 1.2) grid.push(b.minX, 0.005, gz, b.maxX, 0.005, gz);
-      setLines(meshes.current.grid as LineSegments | undefined, grid);
       setLines(meshes.current.outlines as LineSegments | undefined, outline);
 
       // Cables join a session to its subagents. Those in the selected or hovered family are drawn bright.
@@ -201,9 +230,12 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
       const focusRoot = family(sel.selected) ?? family(sel.hovered);
       for (const agent of agentsRef.current) {
         const parent = agent.parentId ? lookup.get(agent.parentId) : undefined;
-        if (!parent || agent.desk >= N || parent.desk >= N) continue;
-        const p = deskPosition(parent.desk);
-        const q = deskPosition(agent.desk);
+        if (parent && assignmentRef.current.roomOf.get(agent.id) !== assignmentRef.current.roomOf.get(parent.id)) continue; // cables stay inside a room
+        const ps = parent ? w.byId.get(parent.id) : undefined;
+        const qs = w.byId.get(agent.id);
+        if (ps === undefined || qs === undefined) continue;
+        const p = deskPosition(ps);
+        const q = deskPosition(qs);
         const line = [p.x, 0.05, p.z, q.x, 0.05, q.z];
         (focusRoot !== null && family(agent.id) === focusRoot ? hot : cables).push(...line);
       }
@@ -213,18 +245,36 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
     [scheme, selection],
   );
 
+  // The vault's notes: small spheres and thin lines around the core, turned slowly as one group.
+  useLayoutEffect(() => {
+    if (!assets) return;
+    const nodes = instanced("graphNodes");
+    const layout = vault ? graphLayout(vault.nodes, vault.links) : { positions: [], sizes: [], lines: [] };
+    layout.sizes.forEach((size, i) => {
+      nodes?.setMatrixAt(i, compose(m1, layout.positions[i * 3] as number, layout.positions[i * 3 + 1] as number, layout.positions[i * 3 + 2] as number, 0, 0, 0, size, size, size));
+    });
+    if (nodes) {
+      nodes.count = layout.sizes.length;
+      nodes.instanceMatrix.needsUpdate = true;
+    }
+    setLines(meshes.current.graphLines as LineSegments | undefined, layout.lines);
+    invalidate();
+  }, [assets, vault, invalidate]);
+
   // ---- Follow the agents ----
   useLayoutEffect(() => {
     if (!assets) return;
     const w = world.current;
     const t = clock.elapsedTime;
     const byDesk = new Map<number, Agent>();
-    for (const a of agents) if (a.desk >= 0 && a.desk < N) byDesk.set(a.desk, a);
+    for (const a of agents) {
+      const seat = assignment.seat.get(a.id);
+      if (seat !== undefined) byDesk.set(seat, a);
+    }
     const families = familyIndexes(agents, FAMILY_COLORS.length);
 
     const instant = w.first && agents.length > 0; // the first picture shows everyone already seated
     const next: (Slot | null)[] = [];
-    let highest = -1;
     for (let d = 0; d < N; d++) {
       const a = byDesk.get(d);
       if (!a) {
@@ -232,7 +282,6 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
         w.pulse[d] = -1;
         continue;
       }
-      highest = d;
       const prev = w.slots[d];
       const family = families.get(a.id) ?? 0;
       if (prev && prev.id === a.id) {
@@ -261,14 +310,10 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
     w.slots = next;
     w.byId = new Map(next.flatMap((s, d) => (s ? [[s.id, d] as const] : [])));
     if (agents.length > 0) w.first = false;
-    const rows = rowsFor(highest);
-    if (rows !== w.rows) {
-      w.rows = rows;
-      onRows(rows);
-    }
+    w.rooms = [...assignment.roomSlot].map(([key, slot]) => ({ key, slot })).sort((x, y) => x.slot - y.slot);
     rebuild();
     invalidate();
-  }, [assets, agents, clock, rebuild, onRows, invalidate]);
+  }, [assets, agents, assignment, clock, rebuild, invalidate]);
 
   // Bright cables follow the selection.
   useEffect(
@@ -395,8 +440,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
       if (!el || !slot) continue;
       const { x, z } = deskPosition(d);
       pos.set(x, 1.95, z - 0.75).project(camera);
-      const hot = sel.selected === id || sel.hovered === id || slot.status === "error";
-      const visible = pos.z < 1 && Math.abs(pos.x) < 1.2 && Math.abs(pos.y) < 1.2 && (total <= 24 || hot);
+      const visible = pos.z < 1 && Math.abs(pos.x) < 1.2 && Math.abs(pos.y) < 1.2 && (total <= 6 || sel.selected === id || sel.hovered === id || (sel.room !== null && assignmentRef.current.roomOf.get(id) === sel.room));
       if (visible) {
         el.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
         el.style.display = "";
@@ -405,6 +449,34 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
       }
       const state2 = sel.selected === id ? "selected" : sel.hovered === id ? "hover" : "";
       if (el.dataset.state !== state2) el.dataset.state = state2;
+    }
+
+    // Room signs sit above each room's back wall.
+    for (const { key, slot } of w.rooms) {
+      const el = roomRefs.current.get(key);
+      if (!el) continue;
+      const at = roomCenter(slot);
+      pos.set(at.x, 2.9, at.z - ROOM_D / 2 + 0.2).project(camera);
+      if (pos.z < 1 && Math.abs(pos.x) < 1.3 && Math.abs(pos.y) < 1.3) {
+        el.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
+        el.style.display = "";
+      } else if (el.style.display !== "none") {
+        el.style.display = "none";
+      }
+    }
+    const hubRing = meshes.current.hubRing;
+    if (hubRing && !still) hubRing.rotation.y = t * 0.25;
+    const graph = meshes.current.graph;
+    if (graph && !still) graph.rotation.y = t * 0.12;
+    const sign = hubRef.current;
+    if (sign) {
+      pos.set(0, 3.9, 0).project(camera);
+      if (pos.z < 1 && Math.abs(pos.x) < 1.3 && Math.abs(pos.y) < 1.3) {
+        sign.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
+        sign.style.display = "";
+      } else if (sign.style.display !== "none") {
+        sign.style.display = "none";
+      }
     }
   });
 
@@ -422,11 +494,36 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, on
       <hemisphereLight args={["#ffffff", c.floor, 1.1]} />
       <directionalLight position={[6, 12, 8]} intensity={1.4} />
 
-      <mesh ref={bind("lip")} geometry={geo.box} material={mat.lip} />
-      <mesh ref={bind("floor")} geometry={geo.box} material={mat.floor} />
-      <lineSegments ref={bind("grid")} material={mat.grid}>
-        <bufferGeometry />
-      </lineSegments>
+      <instancedMesh
+        ref={bind("roomFloors")}
+        args={[geo.box, mat.room, MAX_ROOMS]}
+        frustumCulled={false}
+        onClick={(e) => {
+          const room = e.instanceId === undefined ? undefined : world.current.rooms[e.instanceId];
+          if (room) {
+            e.stopPropagation();
+            selection.focusRoom(selection.get().room === room.key ? null : room.key);
+          }
+        }}
+      />
+      <instancedMesh ref={bind("roomBack")} args={[geo.box, mat.room, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomLeft")} args={[geo.box, mat.room, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomBoards")} args={[geo.box, mat.board, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomPlants")} args={[geo.plant, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomShelves")} args={[geo.shelf, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomLamps")} args={[geo.lamp, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("roads")} args={[geo.box, mat.road, MAX_ROOMS]} frustumCulled={false} />
+
+      <mesh geometry={geo.dais} material={mat.dais} scale={[HUB_RADIUS, 0.3, HUB_RADIUS]} position={[0, -0.3, 0]} />
+      <mesh geometry={geo.core} material={mat.core} scale={0.9} position={[0, 1.7, 0]} />
+      <mesh ref={bind("hubRing")} geometry={geo.hubRing} material={mat.hubRing} position={[0, 1.7, 0]} />
+      <group ref={bind("graph")} position={[0, 1.7, 0]}>
+        <instancedMesh ref={bind("graphNodes")} args={[geo.node, mat.node, MAX_GRAPH_NODES]} frustumCulled={false} />
+        <lineSegments ref={bind("graphLines")} material={mat.graphLine} frustumCulled={false}>
+          <bufferGeometry />
+        </lineSegments>
+      </group>
+      <mesh geometry={geo.hubRingOuter} material={mat.hubRing} position={[0, 0.04, 0]} />
       <lineSegments ref={bind("outlines")} material={mat.outline}>
         <bufferGeometry />
       </lineSegments>

@@ -3,6 +3,8 @@ import type { Agent } from "../../shared/events.ts";
 import type { TreeNode } from "./agents.ts";
 import { StatusChip } from "./StatusChip.tsx";
 
+export type RoomGroup = { key: string; title: string; count: number; errors: number; nodes: TreeNode[] };
+
 type Controls = {
   stopping: ReadonlySet<string>;
   onStop: (id: string) => void;
@@ -12,6 +14,9 @@ type Controls = {
   hoveredId?: string | null;
   onSelect?: (id: string) => void;
   onHover?: (id: string | null) => void;
+  /** The room the office is focused on, and a way to focus one from here (the office offers the same by clicking). */
+  focusedRoom?: string | null;
+  onFocusRoom?: (key: string) => void;
   /** Id of the panel the rows open. */
   panelId?: string;
   rovingId: string | null;
@@ -79,18 +84,18 @@ function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
 
 const flatten = (tree: TreeNode[]): string[] => tree.flatMap((n) => [n.agent.id, ...flatten(n.children)]);
 
-export function AgentList({ tree, ...rest }: { tree: TreeNode[] } & Omit<Controls, "rovingId" | "setRovingId">) {
+export function AgentList({ groups, ...rest }: { groups: RoomGroup[] } & Omit<Controls, "rovingId" | "setRovingId">) {
   const [roving, setRoving] = useState<string | null>(null);
-  const list = useRef<HTMLUListElement>(null);
-  const ids = flatten(tree);
+  const list = useRef<HTMLDivElement>(null);
+  const ids = flatten(groups.flatMap((g) => g.nodes));
   // One row is a tab stop: the one last focused, else the selected one, else the first.
   const rovingId = ids.includes(roving ?? "") ? roving : ids.includes(rest.selectedId ?? "") ? (rest.selectedId ?? null) : (ids[0] ?? null);
 
-  if (tree.length === 0) {
+  if (ids.length === 0) {
     return <p className="empty-list">No active Claude Code sessions. A session appears here when it writes to its log.</p>;
   }
 
-  const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
     if (!keys.includes(e.key) || !(e.target instanceof HTMLElement) || !e.target.matches("button.row-name")) return;
     const rows = [...(list.current?.querySelectorAll<HTMLButtonElement>("button.row-name") ?? [])];
@@ -101,10 +106,31 @@ export function AgentList({ tree, ...rest }: { tree: TreeNode[] } & Omit<Control
   };
 
   return (
-    <ul aria-label="Claude Code sessions" className="agents" ref={list} onKeyDown={onKeyDown}>
-      {tree.map((node) => (
-        <Row key={node.agent.id} node={node} controls={{ ...rest, rovingId, setRovingId: setRoving }} />
+    <div className="agent-groups" ref={list} onKeyDown={onKeyDown}>
+      {groups.map((group, index) => (
+        <section key={group.key} className="room-group" aria-labelledby={`room-group-${index}`}>
+          <div className="room-head-row">
+            <h3 id={`room-group-${index}`} className="room-head">
+              {group.title}
+              <span className="count">
+                {" "}
+                ({group.count}
+                {group.errors > 0 ? `, ${group.errors} error` : ""})
+              </span>
+            </h3>
+            {group.key !== "hidden" && rest.onFocusRoom && (
+              <button type="button" className="link-btn" aria-pressed={rest.focusedRoom === group.key} onClick={() => rest.onFocusRoom?.(group.key)}>
+                {rest.focusedRoom === group.key ? "Show all rooms" : "Show in office"}
+              </button>
+            )}
+          </div>
+          <ul aria-label={`Sessions in ${group.title}`} className="agents">
+            {group.nodes.map((node) => (
+              <Row key={node.agent.id} node={node} controls={{ ...rest, rovingId, setRovingId: setRoving }} />
+            ))}
+          </ul>
+        </section>
       ))}
-    </ul>
+    </div>
   );
 }

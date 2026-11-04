@@ -57,6 +57,10 @@ The server listens on 127.0.0.1 only, rejects any request whose `Host` is not lo
 
 Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED`, `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
 
+## Obsidian vault
+
+Set `OFFICE_VAULT_DIR` to a vault folder (absolute path) and the hub shows its note count, newest notes and a link graph. Only `.md` files inside that folder are read, never written; hidden folders (`.obsidian`, `.trash`, `.git`) and links that leave the folder are skipped. Only titles, relative paths, times and `[[link]]` targets reach the page, never note text. At most 5000 notes are scanned (files over 256 KB are not searched for links), and 200 notes and 1000 links are returned. The scan is cached for 30 s; `/api/vault?refresh=1` rescans, at most once every 5 s. Unset or invalid, the hub says no vault is connected.
+
 ## Live check
 
 `OFFICE_LIVE_TESTS=1 node --test server/test/live.test.ts` starts a real worker in a temporary folder, to confirm the lockdown against the real Claude Agent SDK. It uses a little of your subscription, and each run leaves a small log folder under your Claude `projects` folder. Normal test runs and CI skip it.

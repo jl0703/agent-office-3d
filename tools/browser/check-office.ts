@@ -13,6 +13,11 @@ mkdirSync(out, { recursive: true });
 
 type Stats = { fps: number; cpuMs: number; calls: number; triangles: number };
 
+let failed = false;
+const expectSelected = (ok: boolean) => {
+  if (!ok) failed = true;
+};
+
 let base = "";
 
 async function open(page: Page, agents: number) {
@@ -69,19 +74,21 @@ try {
     })()`);
     console.log("click: tag found =", JSON.stringify(spot));
     if (spot) {
-      await page.move(spot.x, spot.y);
-      await page.wait(300);
-      const hover = await page.evaluate<string>(`document.querySelector(".office-tag[data-state='hover']")?.querySelector(".tag-name")?.textContent ?? ""`);
-      await page.click(spot.x, spot.y);
-      await page.wait(500);
-      const selected = await page.evaluate<{ bar: string; pressed: string; tag: string }>(`({
-        bar: document.querySelector(".panel h2")?.textContent ?? "",
-        pressed: document.querySelector("button[aria-pressed='true']")?.textContent ?? "",
-        tag: document.querySelector(".office-tag[data-state='selected'] .tag-name")?.textContent ?? "",
-      })`);
-      console.log("click: hovered tag =", JSON.stringify(hover), "| after click =", JSON.stringify(selected));
+      // The character is somewhere below its tag; the scale depends on the view, so try a few offsets.
+      let result = { bar: "", pressed: "", tag: "" };
+      for (const dy of [14, 24, 34, 46, 60]) {
+        await page.click(spot.x, spot.y - 70 + dy);
+        await page.wait(400);
+        result = await page.evaluate(`({
+          bar: document.querySelector(".panel h2")?.textContent ?? "",
+          pressed: document.querySelector("button.row-name[aria-pressed='true']")?.textContent ?? "",
+          tag: document.querySelector(".office-tag[data-state='selected'] .tag-name")?.textContent ?? "",
+        })`);
+        if (result.pressed !== "") break;
+      }
+      console.log("click: after click =", JSON.stringify(result));
+      expectSelected(result.pressed !== "" && result.pressed === result.bar);
       await page.screenshot(join(out, "selected-1440.png"));
-      await page.click(8, 8); // empty page area: nothing changes
     }
     console.log("click: problems =", JSON.stringify(page.problems()));
     await close();
@@ -112,4 +119,8 @@ try {
   }
 } finally {
   stopAllServers();
+}
+if (failed) {
+  console.error("FAILED: clicking a character did not select it");
+  process.exitCode = 1;
 }

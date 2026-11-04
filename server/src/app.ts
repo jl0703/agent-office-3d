@@ -9,6 +9,7 @@ import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import type { Registry } from "./registry.ts";
 import type { Supervisor } from "./supervisor.ts";
+import { createVault } from "./vault.ts";
 
 export type RunningServer = {
   server: http.Server;
@@ -28,6 +29,8 @@ type Options = {
   registry?: Registry;
   /** When given, the browser can start and stop workers. */
   supervisor?: Supervisor;
+  /** Obsidian vault folder to read titles and links from. Never taken from a request. */
+  vaultDir?: string;
   log?: (line: Record<string, unknown>) => void;
 };
 
@@ -67,6 +70,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   const sessions = new Set<string>();
   const streams = new Set<http.ServerResponse>();
   const allowedHosts = new Set<string>();
+  const vault = createVault(opts.vaultDir);
 
   const deny = (res: http.ServerResponse, status: number, reason: string, req: http.IncomingMessage) => {
     // Log the path only. The query string can hold the token.
@@ -123,6 +127,9 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         return deny(res, 403, "no-session", req);
       }
       if (url.pathname === "/events" && method === "GET") return openStream(res);
+      if (url.pathname === "/api/vault" && method === "GET") {
+        return run(req, res, async () => json(res, 200, await vault.get(url.searchParams.get("refresh") === "1")));
+      }
       const history = AGENT_EVENTS.exec(url.pathname);
       if (history?.[1] && method === "GET") {
         const events = opts.registry?.events(history[1]);

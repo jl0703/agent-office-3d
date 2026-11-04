@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignTask, describeFailure, getAgentEvents, resumeAgent, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, describeFailure, getAgentEvents, getVault, resumeAgent, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -95,5 +95,16 @@ describe("api helpers", () => {
     assert.equal(await getAgentEvents("a", fakeFetch(404, {}).fn), null);
     assert.equal(await getAgentEvents("a", fakeFetch(200, { events: "no" }).fn), null);
     assert.equal(await getAgentEvents("a", async () => Promise.reject(new Error("offline"))), null);
+  });
+
+  it("reads the vault, asking for a rescan only when told to, and gives null for anything unexpected", async () => {
+    const ok = fakeFetch(200, { connected: false });
+    assert.deepEqual(await getVault(false, ok.fn), { connected: false });
+    assert.equal(ok.calls[0]?.path, "/api/vault");
+    await getVault(true, ok.fn);
+    assert.equal(ok.calls[1]?.path, "/api/vault?refresh=1");
+    assert.equal(await getVault(false, fakeFetch(403, {}).fn), null);
+    assert.equal(await getVault(false, fakeFetch(200, { hello: 1 }).fn), null);
+    assert.equal(await getVault(false, async () => Promise.reject(new Error("offline"))), null);
   });
 });

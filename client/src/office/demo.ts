@@ -68,7 +68,8 @@ export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): De
       role: isSession ? "solo" : "worker",
       parentId: isSession ? null : `demo-${(i % sessions) + 1}`,
       name: isSession ? (i >= SESSION_NAMES.length ? `${base} ${Math.floor(i / SESSION_NAMES.length) + 1}` : base) : pick(SUBAGENT_NAMES),
-      project: pick(PROJECTS),
+      // A subagent works in its parent's folder, so it sits in its parent's room.
+      project: isSession ? pick(PROJECTS) : (world.agents.get(`demo-${(i % sessions) + 1}`)?.project ?? pick(PROJECTS)),
       status,
       currentTask: isSession ? "Work through the open items and report back" : "Help the main session with one part of the job",
       tool,
