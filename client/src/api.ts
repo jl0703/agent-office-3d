@@ -1,3 +1,5 @@
+import type { ActivityEntry } from "../../shared/events.ts";
+
 export type ActionResult = { ok: true } | { ok: false; message: string };
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
@@ -44,3 +46,15 @@ export const stopAgent = (id: string, fetchFn: FetchFn = fetch) =>
   post(`/api/agents/${encodeURIComponent(id)}/stop`, {}, fetchFn);
 
 export const stopAll = (fetchFn: FetchFn = fetch) => post("/api/agents/stop-all", {}, fetchFn);
+
+/** The last 50 tool calls of one agent, or null when the server has no such agent or cannot be reached. */
+export async function getAgentEvents(id: string, fetchFn: FetchFn = fetch): Promise<ActivityEntry[] | null> {
+  try {
+    const res = await fetchFn(`/api/agents/${encodeURIComponent(id)}/events`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { events?: unknown };
+    return Array.isArray(data.events) ? (data.events as ActivityEntry[]) : null;
+  } catch {
+    return null;
+  }
+}

@@ -9,6 +9,9 @@ import { join } from "node:path";
 // Used to look at the real page: screenshots, clicks, key presses, measurements, console output.
 // Nothing here ships with the app.
 
+process.setMaxListeners(0); // one exit handler per browser and server
+process.once("SIGINT", () => process.exit(130)); // Ctrl+C runs the exit handlers that clean up
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const CANDIDATES = [
@@ -44,6 +47,8 @@ export type LaunchOptions = {
   software?: boolean;
   /** Do not hold the frame rate to the screen's refresh rate, to see how much headroom there is. */
   uncapped?: boolean;
+  /** Start with WebGL switched off, to see the page's fallback. */
+  noWebgl?: boolean;
 };
 
 export type Page = {
@@ -59,6 +64,8 @@ export type Page = {
   cpuThrottle(rate: number): Promise<void>;
   /** Everything written to the console, and every failed request, since the page was opened. */
   problems(): string[];
+  /** Every address the page asked for since it was opened. */
+  requests(): string[];
   wait(ms: number): Promise<void>;
 };
 
@@ -76,6 +83,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
     "--disable-gpu-sandbox",
     "--hide-scrollbars",
   ];
+  if (opts.noWebgl) args.push("--disable-3d-apis", "--disable-gpu", "--disable-software-rasterizer");
   if (opts.uncapped) args.push("--disable-frame-rate-limit", "--disable-gpu-vsync");
   if (opts.software) args.push("--disable-gpu", "--use-angle=swiftshader", "--enable-unsafe-swiftshader");
   args.push("about:blank");
@@ -122,6 +130,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
     let nextId = 1;
     const waiting = new Map<number, (message: { result?: unknown; error?: { message: string } }) => void>();
     const problems: string[] = [];
+    const requests: string[] = [];
     ws.onmessage = (event) => {
       const m = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: Record<string, any>; result?: unknown; error?: { message: string } };
       if (m.id !== undefined && waiting.has(m.id)) {
@@ -129,6 +138,8 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
         waiting.delete(m.id);
       } else if (m.method === "Runtime.consoleAPICalled" && ["error", "warning", "assert"].includes(m.params?.["type"])) {
         problems.push(`console.${m.params?.["type"]}: ${(m.params?.["args"] ?? []).map((a: any) => a.value ?? a.description ?? "").join(" ").slice(0, 200)}`);
+      } else if (m.method === "Network.requestWillBeSent") {
+        requests.push(String(m.params?.["request"]?.url ?? ""));
       } else if (m.method === "Runtime.exceptionThrown") {
         problems.push(`exception: ${m.params?.["exceptionDetails"]?.exception?.description?.slice(0, 200) ?? m.params?.["exceptionDetails"]?.text}`);
       } else if (m.method === "Log.entryAdded" && ["error", "warning"].includes(m.params?.["entry"]?.level)) {
@@ -142,11 +153,14 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
         ws.send(JSON.stringify({ id, method, params }));
       });
     for (const domain of ["Page", "Runtime", "Log", "Network"]) await send(`${domain}.enable`);
+    // A headless tab can fall into the "hidden" state after repeated navigations, which pauses drawing.
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
     const modifiers = (key: string) => ({ Tab: 9, Enter: 13, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 })[key] ?? 0;
 
     const page: Page = {
       async goto(url) {
+        await send("Page.bringToFront");
         await send("Page.navigate", { url });
         for (let i = 0; i < 150; i++) {
           if ((await page.evaluate<string>("document.readyState")) === "complete") return;
@@ -166,7 +180,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
       async key(key, options = {}) {
         const code = options.code ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key);
         const keyCode = options.keyCode ?? modifiers(key) ?? 0;
-        const text = key.length === 1 ? key : undefined;
+        const text = key.length === 1 ? key : key === "Enter" ? String.fromCharCode(13) : undefined;
         await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", key, code, windowsVirtualKeyCode: keyCode, ...(text ? { text } : {}) });
         await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
       },
@@ -193,6 +207,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
         await send("Emulation.setCPUThrottlingRate", { rate });
       },
       problems: () => [...problems],
+      requests: () => [...requests],
       wait: sleep,
     };
 

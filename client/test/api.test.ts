@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { describeFailure, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { describeFailure, getAgentEvents, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -55,5 +55,14 @@ describe("api helpers", () => {
   it("ignores an error field that is not text", async () => {
     const odd = fakeFetch(400, { error: { nested: true } });
     assert.deepEqual(await startWorker("C:\\w", "x", odd.fn), { ok: false, message: describeFailure(400, undefined) });
+  });
+
+  it("reads an agent's recent events, or null when the server says no or cannot be reached", async () => {
+    const ok = fakeFetch(200, { events: [{ ts: "t", tool: "Read", summary: "a.ts" }] });
+    assert.deepEqual(await getAgentEvents("a/b", ok.fn), [{ ts: "t", tool: "Read", summary: "a.ts" }]);
+    assert.equal(ok.calls[0]?.path, "/api/agents/a%2Fb/events");
+    assert.equal(await getAgentEvents("a", fakeFetch(404, {}).fn), null);
+    assert.equal(await getAgentEvents("a", fakeFetch(200, { events: "no" }).fn), null);
+    assert.equal(await getAgentEvents("a", async () => Promise.reject(new Error("offline"))), null);
   });
 });
