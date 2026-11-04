@@ -1,6 +1,6 @@
 // Types shared by the server and the browser. Type-only: nothing here runs.
 
-// "waiting" and "detached" are reported from ticket 05 on; the office already knows how to show them.
+// "waiting" (usage limit reached) and "detached" (found again after a restart, not running) come from managed workers.
 export type AgentStatus = "working" | "idle" | "done" | "stopped" | "error" | "waiting" | "detached";
 
 export type Agent = {
@@ -22,6 +22,8 @@ export type Agent = {
   /** Stable seat in the office: the smallest free number, freed when the agent leaves. */
   desk: number;
   updatedAt: string;
+  /** Why the agent is waiting, stopped, or detached. At most 200 characters. */
+  note: string | null;
 };
 
 /** One tool call in an agent's recent history. */

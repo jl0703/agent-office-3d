@@ -17,6 +17,7 @@ const agent = (id: string, desk: number, parentId: string | null = null): Agent 
   activity: null,
   desk,
   updatedAt: "2026-11-04T10:00:00.000Z",
+  note: null,
 });
 
 describe("agent families", () => {

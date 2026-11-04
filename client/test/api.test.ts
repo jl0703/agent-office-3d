@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { describeFailure, getAgentEvents, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, describeFailure, getAgentEvents, resumeAgent, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -32,7 +32,9 @@ describe("api helpers", () => {
   });
 
   it("turns each server answer into a plain sentence", () => {
-    for (const code of ["invalid_request", "invalid_folder", "folder_not_allowed", "too_many", "start_failed", "too_large"]) {
+    const codes = ["invalid_request", "invalid_folder", "folder_not_allowed", "too_many", "start_failed", "too_large"];
+    const newCodes = ["busy", "stopped", "detached", "observed", "not_resumable", "transcript_active", "budget", "not_found"];
+    for (const code of [...codes, ...newCodes]) {
       const text = describeFailure(400, code);
       assert.match(text, /\.$/, code);
       assert.ok(!text.includes(code), "no raw code shown");
@@ -40,6 +42,35 @@ describe("api helpers", () => {
     assert.match(describeFailure(403, undefined), /expired/);
     assert.match(describeFailure(500, "internal"), /error 500/);
     assert.match(describeFailure(502, undefined), /error 502/);
+  });
+
+  it("gives a task or resumes a worker, sending only the message", async () => {
+    const task = fakeFetch(202, {});
+    assert.deepEqual(await assignTask("a/b", "next job", task.fn), { ok: true });
+    assert.equal(task.calls[0]?.path, "/api/agents/a%2Fb/tasks");
+    assert.equal(task.calls[0]?.init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(task.calls[0]?.init?.body)), { prompt: "next job" });
+    const resume = fakeFetch(202, {});
+    assert.deepEqual(await resumeAgent("a", "Continue where you left off.", resume.fn), { ok: true });
+    assert.equal(resume.calls[0]?.path, "/api/agents/a/resume");
+    assert.deepEqual(JSON.parse(String(resume.calls[0]?.init?.body)), { prompt: "Continue where you left off." });
+  });
+
+  it("explains a conflict from its reason, and a refusal from its error code", async () => {
+    const busy = fakeFetch(409, { reason: "busy" });
+    assert.deepEqual(await assignTask("a", "x", busy.fn), { ok: false, message: describeFailure(409, "busy") });
+    assert.match(describeFailure(409, "busy"), /occupied/);
+    const budget = fakeFetch(429, { error: "budget" });
+    assert.deepEqual(await resumeAgent("a", "x", budget.fn), { ok: false, message: describeFailure(429, "budget") });
+    assert.match(describeFailure(429, "budget"), /usage cap/);
+    const unknown = fakeFetch(409, { reason: "something-new" });
+    assert.deepEqual(await assignTask("a", "x", unknown.fn), { ok: false, message: describeFailure(409, undefined) });
+  });
+
+  it("explains folder refusals at resume, not as an expired session", () => {
+    assert.doesNotMatch(describeFailure(403, "folder_not_allowed"), /expired/);
+    assert.match(describeFailure(403, "folder_not_allowed"), /OFFICE_ALLOWED_ROOTS/);
+    assert.match(describeFailure(400, "invalid_folder"), /does not exist/);
   });
 
   it("reports a failure with the matching message, and a network failure", async () => {

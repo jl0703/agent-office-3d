@@ -75,6 +75,7 @@ export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): De
       activity,
       desk: i,
       updatedAt: new Date(nowMs).toISOString(),
+      note: null,
     });
     world.log.set(id, [{ ts: new Date(nowMs).toISOString(), tool, summary: activity }]);
     world.nextChange.set(id, nowMs + 2000 + rng() * 4000);

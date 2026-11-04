@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createChannel } from "../src/channel.ts";
+import type { StoredWorker } from "../src/managedStore.ts";
 import type { QueryFn } from "../src/supervisor.ts";
 
 export type FakeOptions = {
@@ -36,6 +37,32 @@ const THROW = { type: "__throw__" } as unknown as SDKMessage;
 
 export const initMessage = (sessionId: string, apiKeySource = "none") =>
   ({ type: "system", subtype: "init", session_id: sessionId, apiKeySource, cwd: "", tools: [] }) as unknown as SDKMessage;
+
+/** The end of a turn. `costUsd` is the run's total so far, as the SDK reports it. */
+export const resultMessage = (costUsd: number, subtype = "success") =>
+  ({ type: "result", subtype, total_cost_usd: costUsd, session_id: "x" }) as unknown as SDKMessage;
+
+export const rateLimitMessage = (status: string, resetsAt?: number) =>
+  ({ type: "rate_limit_event", rate_limit_info: { status, ...(resetsAt === undefined ? {} : { resetsAt }) }, uuid: "u", session_id: "x" }) as unknown as SDKMessage;
+
+export const rateLimitedReply = () =>
+  ({ type: "assistant", error: "rate_limit", parent_tool_use_id: null, session_id: "x", message: { content: [] } }) as unknown as SDKMessage;
+
+/** A worker as the file stores it. */
+export const storedWorker = (id: string, over: Partial<StoredWorker> = {}): StoredWorker => ({
+  id,
+  name: "Fixer",
+  project: "demo",
+  task: "fix the bug",
+  cwd: "C:\\work\\demo",
+  createdAt: Date.now() - 60_000,
+  updatedAt: Date.now() - 1000,
+  pid: null,
+  processName: null,
+  pidStartedAt: null,
+  costUsdTotal: 0,
+  ...over,
+});
 
 export const toolMessage = (id: string, name: string, input: object) =>
   ({
