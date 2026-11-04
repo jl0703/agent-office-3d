@@ -19,7 +19,7 @@ after(async () => {
   for (const s of streams) s.close();
   await Promise.all(closers.map((close) => close()));
   await Promise.all(servers.map((s) => s.close()));
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 async function rig(fake: FakeOptions = {}, extra: Partial<SupervisorOptions> = {}) {

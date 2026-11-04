@@ -7,7 +7,7 @@ import { checkToolCall, folderGuardHooks } from "../src/folderGuard.ts";
 
 const made: string[] = [];
 after(() => {
-  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function layout() {

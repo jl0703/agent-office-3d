@@ -7,7 +7,7 @@ import { createBudget } from "../src/budget.ts";
 import { transcriptActive } from "../src/transcriptActivity.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "activity-"));
-after(() => rmSync(dir, { recursive: true, force: true }));
+after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
 function logFile(project: string, id: string, ageMs: number) {
   mkdirSync(join(dir, project), { recursive: true });

@@ -20,7 +20,7 @@ const clients: Client[] = [];
 after(async () => {
   await Promise.all(clients.map((c) => c.close()));
   await Promise.all(supervisors.map((s) => s.close()));
-  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 const dir = (prefix: string) => {

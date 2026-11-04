@@ -8,7 +8,7 @@ import { cleanTmp, freshOnly, KEEP_MS, loadStore, MAX_STORED, saveStore, STORE_F
 import { storedWorker } from "./fakeQuery.ts";
 
 const dirs: string[] = [];
-after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 const tmp = () => {
   const d = mkdtempSync(join(tmpdir(), "store-"));
   dirs.push(d);

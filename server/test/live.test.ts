@@ -70,8 +70,8 @@ describe("live check with the real SDK", { skip: !live }, () => {
       assert.equal(supervisor.liveCount(), 0);
     } finally {
       await supervisor.close();
-      rmSync(root, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      rmSync(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -107,7 +107,7 @@ describe("live check with the real SDK", { skip: !live }, () => {
       assert.equal(supervisor.liveCount(), 0, "no worker is left running");
     } finally {
       await supervisor.close();
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });

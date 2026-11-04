@@ -13,6 +13,7 @@ import {
   Vector3,
 } from "three";
 import type { Agent, AgentStatus } from "../../../shared/events.ts";
+import { createStory, type StoryFrame, type Walker } from "./story.ts";
 import { graphLayout, MAX_GRAPH_NODES, type Vault } from "../vault.ts";
 import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
@@ -53,6 +54,7 @@ const m1 = new Matrix4();
 const m2 = new Matrix4();
 const m3 = new Matrix4();
 const m4 = new Matrix4();
+const m5 = new Matrix4();
 const pos = new Vector3();
 const one = new Vector3(1, 1, 1);
 const scl = new Vector3();
@@ -86,9 +88,11 @@ export type OfficeProps = {
   hubRef: MutableRefObject<HTMLElement | null>;
   /** The room signs, positioned over the scene by the frame loop. */
   roomRefs: MutableRefObject<Map<string, HTMLElement>>;
+  /** The speech bubbles: a few elements the frame loop fills in and places. */
+  bubbleRefs: MutableRefObject<(HTMLElement | null)[]>;
 };
 
-export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, assignment, roomRefs, vault, hubRef }: OfficeProps) {
+export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, assignment, roomRefs, vault, hubRef, bubbleRefs }: OfficeProps) {
   const invalidate = useThree((s) => s.invalidate);
   const [assets, setAssets] = useState<Assets | null>(null);
   useEffect(() => {
@@ -100,6 +104,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
   const meshes = useRef<Record<string, Object3D | null>>({});
   const bind = useCallback((name: string) => (node: Object3D | null) => void (meshes.current[name] = node), []);
   const world = useRef<World>(newWorld());
+  const story = useRef(createStory());
+  const walking = useRef(new Set<number>());
   const assignmentRef = useRef(assignment);
   assignmentRef.current = assignment;
   const agentsRef = useRef(agents);
@@ -310,10 +316,14 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
     w.slots = next;
     w.byId = new Map(next.flatMap((s, d) => (s ? [[s.id, d] as const] : [])));
     if (agents.length > 0) w.first = false;
+    story.current.observe(agents, assignment.seat, performance.now(), { reduced, frozen });
+    // With frames on demand, nothing redraws to take a bubble down: ask for one when it is due.
+    const redraw = reduced ? setTimeout(invalidate, 2200) : undefined;
     w.rooms = [...assignment.roomSlot].map(([key, slot]) => ({ key, slot })).sort((x, y) => x.slot - y.slot);
     rebuild();
     invalidate();
-  }, [assets, agents, assignment, clock, rebuild, invalidate]);
+    return () => clearTimeout(redraw);
+  }, [assets, agents, assignment, clock, rebuild, invalidate, reduced, frozen]);
 
   // Bright cables follow the selection.
   useEffect(
@@ -341,6 +351,13 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
     const accessory = Object.fromEntries(NAMED.map((k) => [k, instanced(`acc-${k}`)])) as Record<string, InstancedMesh | null | undefined>;
     const counts: Record<string, number> = Object.fromEntries(NAMED.map((k) => [k, 0]));
     if (!torsos || !heads || !armsL || !armsR || !chairs) return;
+    const nowMs = performance.now();
+    const told: StoryFrame = frozen ? { walkers: [], bubbles: [] } : story.current.frame(nowMs);
+    const walkerOf = new Map<string, Walker>(told.walkers.map((x) => [x.agentId, x]));
+    const walkLegs = instanced("walkLegs");
+    // Lets the browser tests (and curious people) see how many are out walking; written only when it changes.
+    if (document.documentElement.dataset["walkers"] !== String(told.walkers.length)) document.documentElement.dataset["walkers"] = String(told.walkers.length);
+    let legCount = 0;
 
     for (let d = 0; d < N; d++) {
       const slot = w.slots[d];
@@ -350,6 +367,41 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       const p = slot.pose;
       const arrived = still ? 1 : smooth(clamp01((t - slot.appearedAt) / 0.7)); // the sit-down
       const { x, z } = deskPosition(d);
+      const away = walkerOf.get(slot.id);
+      const legsMesh = instanced("legs");
+      if (away) {
+        // Standing and walking: the same figure, off its seat.
+        walking.current.add(d);
+        const swing = away.moving ? Math.sin(t * 8) : 0;
+        const bob = away.moving ? Math.abs(Math.sin(t * 8)) * 0.03 : 0;
+        compose(m1, away.x, 0.8 + bob, away.z, 0.06, away.heading, 0, 1, 1, 1, "YXZ");
+        torsos.setMatrixAt(d, m1);
+        m2.multiplyMatrices(m1, compose(m4, 0, 0.74, 0, 0, 0, 0, 1, 1, 1, "YXZ"));
+        heads.setMatrixAt(d, m2);
+        armsL.setMatrixAt(d, m3.multiplyMatrices(m1, compose(m4, 0.26, 0.42, 0, -0.7 * swing, 0, 0.05, 1, 1, 1, "ZXY")));
+        armsR.setMatrixAt(d, m3.multiplyMatrices(m1, compose(m4, -0.26, 0.42, 0, 0.7 * swing, 0, -0.05, 1, 1, 1, "ZXY")));
+        legsMesh?.setMatrixAt(d, ZERO);
+        chairs.setMatrixAt(d, compose(m3, x, 0, z - 0.8 - 0.3));
+        if (walkLegs && legCount < 8) {
+          compose(m3, away.x, 0.8 + bob, away.z, 0, away.heading, 0);
+          walkLegs.setMatrixAt(legCount++, m5.multiplyMatrices(m3, compose(m4, 0.11, 0, 0, 0.8 * swing, 0, 0)));
+          walkLegs.setMatrixAt(legCount++, m5.multiplyMatrices(m3, compose(m4, -0.11, 0, 0, -0.8 * swing, 0, 0)));
+        }
+        const kindAway = slot.accessory;
+        if (kindAway !== "none") {
+          const mesh = accessory[kindAway];
+          const i = counts[kindAway] ?? 0;
+          if (mesh) {
+            mesh.setMatrixAt(i, kindAway === "tie" ? m1 : m2);
+            counts[kindAway] = i + 1;
+          }
+        }
+        continue;
+      }
+      if (walking.current.delete(d) && legsMesh) {
+        legsMesh.setMatrixAt(d, compose(m3, x, 0, z - 0.75)); // back in the seat
+        legsMesh.instanceMatrix.needsUpdate = true;
+      }
 
       const charZ = z - 0.75 - (1 - arrived) * 0.5;
       // Hips, then torso leaning forward. m1 is the torso without breathing scale.
@@ -382,6 +434,12 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       mesh.instanceMatrix.needsUpdate = true;
     }
     for (const mesh of [torsos, heads, armsL, armsR, chairs]) mesh.instanceMatrix.needsUpdate = true;
+    if (walkLegs) {
+      walkLegs.count = legCount;
+      walkLegs.instanceMatrix.needsUpdate = true;
+    }
+    const seatedLegs = instanced("legs");
+    if (seatedLegs && walkerOf.size > 0) seatedLegs.instanceMatrix.needsUpdate = true;
 
     // Small effects: monitors and beacons.
     if (!still) {
@@ -439,7 +497,9 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       const slot = w.slots[d];
       if (!el || !slot) continue;
       const { x, z } = deskPosition(d);
-      pos.set(x, 1.95, z - 0.75).project(camera);
+      const away = walkerOf.get(id);
+      if (away) pos.set(away.x, 1.95, away.z).project(camera);
+      else pos.set(x, 1.95, z - 0.75).project(camera);
       const visible = pos.z < 1 && Math.abs(pos.x) < 1.2 && Math.abs(pos.y) < 1.2 && (total <= 6 || sel.selected === id || sel.hovered === id || (sel.room !== null && assignmentRef.current.roomOf.get(id) === sel.room));
       if (visible) {
         el.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
@@ -449,6 +509,30 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       }
       const state2 = sel.selected === id ? "selected" : sel.hovered === id ? "hover" : "";
       if (el.dataset.state !== state2) el.dataset.state = state2;
+    }
+
+    // Speech bubbles: plain text in a few elements, over the speaker (who may be walking).
+    told.bubbles.forEach((b, i) => {
+      const el = bubbleRefs.current[i];
+      const d = w.byId.get(b.agentId);
+      if (!el) return;
+      if (d === undefined) {
+        el.style.display = "none";
+        return;
+      }
+      const away = walkerOf.get(b.agentId);
+      const seat = deskPosition(d);
+      pos.set(away ? away.x : seat.x, 2.45, away ? away.z : seat.z - 0.75).project(camera);
+      if (el.dataset.text !== b.text) {
+        el.dataset.text = b.text;
+        el.textContent = b.text;
+      }
+      el.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
+      el.style.display = pos.z < 1 ? "" : "none";
+    });
+    for (let i = told.bubbles.length; i < bubbleRefs.current.length; i++) {
+      const el = bubbleRefs.current[i];
+      if (el && el.style.display !== "none") el.style.display = "none";
     }
 
     // Room signs sit above each room's back wall.
@@ -512,6 +596,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       <instancedMesh ref={bind("roomPlants")} args={[geo.plant, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
       <instancedMesh ref={bind("roomShelves")} args={[geo.shelf, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
       <instancedMesh ref={bind("roomLamps")} args={[geo.lamp, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("walkLegs")} args={[geo.walkLeg, mat.vertex, 8]} frustumCulled={false} />
       <instancedMesh ref={bind("roads")} args={[geo.box, mat.road, MAX_ROOMS]} frustumCulled={false} />
 
       <mesh geometry={geo.dais} material={mat.dais} scale={[HUB_RADIUS, 0.3, HUB_RADIUS]} position={[0, -0.3, 0]} />

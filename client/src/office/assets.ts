@@ -20,6 +20,7 @@ import {
   pennantGeometry,
   screenGeometry,
   torsoGeometry,
+  walkLegGeometry,
   unitBox,
 } from "./geometry.ts";
 import { ACCESSORIES, SCENE, STATUS_COLOR, STATUSES, type Accessory, type Scheme } from "./palette.ts";
@@ -52,6 +53,7 @@ export function createAssets(scheme: Scheme) {
     stripe: flatPlane(1.2, 0.34),
     beacon: beaconGeometry(),
     box: unitBox(),
+    walkLeg: walkLegGeometry(),
     node: new SphereGeometry(1, 8, 6),
     plant: plantGeometry(),
     shelf: shelfGeometry(),

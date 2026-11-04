@@ -40,7 +40,7 @@ describe("observing sessions over HTTP", () => {
     for (const s of streams) s.close();
     await watcher.close();
     await srv.close();
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const open = async () => {

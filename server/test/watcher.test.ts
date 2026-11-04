@@ -33,7 +33,7 @@ const roots: string[] = [];
 const watchers: Watcher[] = [];
 after(async () => {
   await Promise.all(watchers.map((w) => w.close()));
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+  for (const r of roots) rmSync(r, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function rig(opts: { idleMs?: number } = {}) {

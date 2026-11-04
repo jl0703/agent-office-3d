@@ -6,7 +6,7 @@ import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-office.ts <output folder> [shots|narrow|perf|reduced|click|all]");
+if (!out) throw new Error("usage: node tools/browser/check-office.ts <output folder> [shots|narrow|perf|reduced|click|walk|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -65,6 +65,9 @@ try {
   if (run("click")) {
     const { page, close } = await launchBrowser({ width: 1440, height: 900 });
     await open(page, 20);
+    // Tags show only for the focused room's agents (or the hovered and selected one): focus a room first.
+    await page.evaluate(`document.querySelector(".room-head-row button")?.click()`);
+    await page.wait(1500);
     // A name tag sits just above its character: click a little below its centre.
     const spot = await page.evaluate<{ x: number; y: number; name: string; id: string } | null>(`(() => {
       const tag = [...document.querySelectorAll(".office-tag")].find((t) => t.style.display !== "none");
@@ -73,6 +76,7 @@ try {
       return { x: r.left + r.width / 2, y: r.bottom + 70, name: tag.querySelector(".tag-name")?.textContent ?? "", id: "" };
     })()`);
     console.log("click: tag found =", JSON.stringify(spot));
+    expectSelected(spot !== null);
     if (spot) {
       // The character is somewhere below its tag; the scale depends on the view, so try a few offsets.
       let result = { bar: "", pressed: "", tag: "" };
@@ -92,6 +96,46 @@ try {
     }
     console.log("click: problems =", JSON.stringify(page.problems()));
     await close();
+  }
+
+  if (run("walk")) {
+    for (const reduced of [false, true]) {
+      const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+      await page.viewport(1440, 900);
+      await page.emulate({ scheme: "light", reducedMotion: reduced });
+      await open(page, 20);
+      let maxWalkers = 0;
+      let maxBubbles = 0;
+      let shots = 0;
+      let sawBubbleText = "";
+      for (let i = 0; i < 160 && (shots < 3 || maxBubbles === 0); i++) {
+        const now = await page.evaluate<{ walkers: number; bubbles: string[] }>(`({ walkers: Number(document.documentElement.dataset.walkers || 0), bubbles: [...document.querySelectorAll(".office-bubble")].filter((b) => b.style.display !== "none").map((b) => b.textContent) })`);
+        maxWalkers = Math.max(maxWalkers, now.walkers);
+        maxBubbles = Math.max(maxBubbles, now.bubbles.length);
+        if (now.bubbles[0]) sawBubbleText = now.bubbles[0];
+        if (!reduced && now.walkers > 0 && shots < 3 && i % 3 === 0) await page.screenshot(join(out, `walk-${shots++}.png`));
+        if (reduced && now.bubbles.length > 0 && shots < 1) {
+          await page.screenshot(join(out, "walk-reduced.png"));
+          shots++;
+        }
+        await page.wait(250);
+      }
+      if (!reduced) {
+        // Close up, to look at the figures themselves.
+        await page.evaluate(`document.querySelector(".room-head-row button")?.click()`);
+        await page.wait(1500);
+        let zoomed = 0;
+        for (let i = 0; i < 160 && zoomed < 3; i++) {
+          const walkers = await page.evaluate<number>(`Number(document.documentElement.dataset.walkers || 0)`);
+          if (walkers > 0) await page.screenshot(join(out, `walk-zoom-${zoomed++}.png`));
+          await page.wait(350);
+        }
+      }
+      console.log(`walk(reduced=${reduced}): max walkers ${maxWalkers}, max bubbles ${maxBubbles}, shots ${shots}, example bubble: ${JSON.stringify(sawBubbleText)}, problems ${JSON.stringify(page.problems().filter((p) => !p.includes("THREE.Clock")))}`);
+      if (reduced ? maxWalkers !== 0 : maxWalkers < 1 || maxWalkers > 4) failed = true;
+      if (maxBubbles < 1 || maxBubbles > 4) failed = true;
+      await close();
+    }
   }
 
   if (run("reduced")) {
@@ -121,6 +165,6 @@ try {
   stopAllServers();
 }
 if (failed) {
-  console.error("FAILED: clicking a character did not select it");
+  console.error("FAILED: a click did not select, or walking/bubbles were out of bounds");
   process.exitCode = 1;
 }

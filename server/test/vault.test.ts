@@ -48,7 +48,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.close()));
 });
 after(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
+  for (const d of temps) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("GET /api/vault access", () => {
