@@ -13,7 +13,7 @@ const made: string[] = [];
 const supervisors: ReturnType<typeof createSupervisor>[] = [];
 after(async () => {
   await Promise.all(supervisors.map((s) => s.close()));
-  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function rig(fake: FakeOptions = {}, extra: Partial<SupervisorOptions> = {}) {

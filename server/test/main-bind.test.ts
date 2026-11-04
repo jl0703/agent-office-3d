@@ -15,7 +15,7 @@ after(() => cleanup.forEach((fn) => fn()));
 describe("server startup", () => {
   it("does not touch the first instance's workers or file when the port is already taken", { timeout: 30_000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), "bind-"));
-    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
     // Stands in for a worker process of the instance that is already running.
     const worker = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", windowsHide: true });
     cleanup.push(() => worker.kill("SIGKILL"));

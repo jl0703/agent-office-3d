@@ -11,7 +11,7 @@ import { parseRoots, resolveAllowedFolder } from "../src/paths.ts";
 
 const made: string[] = [];
 after(() => {
-  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 const tmp = (prefix: string) => {
   const dir = mkdtempSync(join(tmpdir(), prefix));
