@@ -20,6 +20,8 @@ export function describeFailure(status: number, code: string | undefined): strin
       return "Claude Code did not start a session. Check that it is installed and logged in with your subscription.";
     case "too_large":
       return "The prompt is too large.";
+    case "master_running":
+      return "A master is already running. Stop it first, or give it a new goal.";
     case "busy":
       return "That worker is occupied with an earlier task. Wait for it to finish.";
     case "stopped":
@@ -60,6 +62,10 @@ async function post(path: string, body: unknown, fetchFn: FetchFn): Promise<Acti
 
 export const startWorker = (cwd: string, prompt: string, fetchFn: FetchFn = fetch) =>
   post("/api/agents", { role: "worker", cwd, prompt }, fetchFn);
+
+/** A master gets a goal, splits it up and runs workers of its own. */
+export const startMaster = (cwd: string, goal: string, fetchFn: FetchFn = fetch) =>
+  post("/api/agents", { role: "master", cwd, prompt: goal }, fetchFn);
 
 export const stopAgent = (id: string, fetchFn: FetchFn = fetch) =>
   post(`/api/agents/${encodeURIComponent(id)}/stop`, {}, fetchFn);

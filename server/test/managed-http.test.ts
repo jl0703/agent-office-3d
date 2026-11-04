@@ -105,7 +105,6 @@ describe("starting a worker over HTTP", () => {
       ["cwd not text", { role: "worker", cwd: 5, prompt: "x" }, 400, "invalid_request"],
       ["unknown field", { role: "worker", cwd: r.work, prompt: "x", extra: 1 }, 400, "invalid_request"],
       ["unknown role", { role: "admin", cwd: r.work, prompt: "x" }, 400, "invalid_request"],
-      ["master not available yet", { role: "master", cwd: r.work, prompt: "x" }, 400, "unsupported_role"],
       ["array", [1, 2], 400, "invalid_request"],
       ["null", "null", 400, "invalid_request"],
     ];
@@ -187,6 +186,30 @@ describe("starting a worker over HTTP", () => {
     const third = await r.start();
     assert.equal(third.status, 429);
     assert.deepEqual(JSON.parse(third.body), { error: "too_many" });
+    assert.equal(r.calls.length, 2);
+  });
+
+  it("starts a master as a master, allows one at a time (409 master_running), and keeps the other refusals", async () => {
+    const r = await rig({}, { maxManaged: 2 });
+    const stream = await r.stream();
+    const res = await r.post("/api/agents", { role: "master", cwd: r.work, prompt: "goal" });
+    assert.equal(res.status, 201);
+    const spawned = parse(await stream.next((e) => e.name === "agent.spawned")) as { agent: { id: string; role: string; name: string; parentId: null } };
+    assert.equal(spawned.agent.id, (JSON.parse(res.body) as { id: string }).id);
+    assert.deepEqual([spawned.agent.role, spawned.agent.name, spawned.agent.parentId], ["master", "Master", null]);
+    const second = await r.post("/api/agents", { role: "master", cwd: r.work, prompt: "again" });
+    assert.equal(second.status, 409);
+    assert.deepEqual(JSON.parse(second.body), { reason: "master_running" });
+    assert.equal((await r.start()).status, 201, "a worker still fits");
+    const full = await r.post("/api/agents", { role: "master", cwd: r.work, prompt: "x" });
+    assert.equal(full.status, 409, "master_running is checked before the global limit");
+    assert.equal((await r.start()).status, 429);
+    const outside = mkdtempSync(join(tmpdir(), "outside-"));
+    dirs.push(outside);
+    const denied = await r.post("/api/agents", { role: "master", cwd: outside, prompt: "x" });
+    assert.deepEqual([denied.status, JSON.parse(denied.body)], [403, { error: "folder_not_allowed" }]);
+    const missing = await r.post("/api/agents", { role: "master", cwd: join(r.root, "nope"), prompt: "x" });
+    assert.deepEqual([missing.status, JSON.parse(missing.body)], [400, { error: "invalid_folder" }]);
     assert.equal(r.calls.length, 2);
   });
 

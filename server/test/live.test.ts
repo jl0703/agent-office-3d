@@ -74,4 +74,40 @@ describe("live check with the real SDK", { skip: !live }, () => {
       rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  it("runs a master that starts three workers in parallel, collects their results and stops them", { timeout: 420_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "live-master-"));
+    const registry = createRegistry();
+    const logs: Record<string, unknown>[] = [];
+    const supervisor = createSupervisor({ registry, query, roots: [root], env: process.env, log: (line) => logs.push(line) });
+    try {
+      const started = await supervisor.startMaster({
+        cwd: root,
+        name: "live master",
+        prompt:
+          "You are testing your office tools. Start exactly three workers with spawn_worker, named w1, w2 and w3, all with the folder `.`. " +
+          "Give w1 the task: create the file out1.txt containing the word one. Give w2: create out2.txt containing two. Give w3: create out3.txt containing three. " +
+          "Then call wait_for_workers until none is still working, read the results, stop all three workers with stop_worker, and answer with the word DONE and one short sentence.",
+      });
+      assert.ok(started.ok, `start failed: ${JSON.stringify(started)}`);
+      const session = logs.find((l) => l["event"] === "managed-session");
+      const tools = (session?.["tools"] ?? []) as string[];
+      for (const office of ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers"]) assert.ok(tools.some((t) => t.endsWith(office)), `missing ${office}: ${tools.join(",")}`);
+
+      const end = Date.now() + 380_000;
+      while (!logs.some((l) => l["event"] === "managed-turn-end" && l["id"] === started.id) && Date.now() < end) await new Promise((r) => setTimeout(r, 1000));
+      assert.ok(logs.some((l) => l["event"] === "managed-turn-end" && l["id"] === started.id), "the master finished its turn");
+
+      const workers = registry.snapshot().filter((a: { parentId: string | null }) => a.parentId === started.id);
+      console.log(JSON.stringify({ workers: workers.map((w: { name: string; status: string }) => ({ name: w.name, status: w.status })), refusals: logs.filter((l) => l["event"] === "managed-refused").length, denied: logs.filter((l) => l["event"] === "managed-tool-denied").map((l) => l["tool"]) }));
+      assert.equal(workers.length, 3, "three workers were started by the master");
+      for (const n of [1, 2, 3]) assert.ok(existsSync(join(root, `out${n}.txt`)), `out${n}.txt was written`);
+
+      await supervisor.stop(started.id);
+      assert.equal(supervisor.liveCount(), 0, "no worker is left running");
+    } finally {
+      await supervisor.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

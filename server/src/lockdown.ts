@@ -7,9 +7,12 @@ export const WORKER_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "WebSearch
 export const DENIED_TOOLS = ["Bash", "PowerShell", "WebFetch", "Agent", "Task", "NotebookEdit"];
 
 export const MAX_TURNS = 30;
+/** A master spends turns on tool calls to its workers (spawn, wait, collect), so it gets more. */
+export const MASTER_MAX_TURNS = 80;
 export const MAX_BUDGET_USD = 2;
 
-export function lockdownOptions(): Pick<
+/** `extraTools` are extra pre-approved tool names (a master's office tools). Workers pass none. */
+export function lockdownOptions(extraTools: readonly string[] = []): Pick<
   Options,
   | "permissionMode"
   | "settingSources"
@@ -26,10 +29,10 @@ export function lockdownOptions(): Pick<
     settingSources: [],
     // Ignore MCP servers from the global config, the repository, and claude.ai connectors.
     strictMcpConfig: true,
-    tools: [...WORKER_TOOLS],
-    allowedTools: [...WORKER_TOOLS],
+    tools: [...WORKER_TOOLS, ...extraTools],
+    allowedTools: [...WORKER_TOOLS, ...extraTools],
     disallowedTools: [...DENIED_TOOLS],
-    maxTurns: MAX_TURNS,
+    maxTurns: extraTools.length > 0 ? MASTER_MAX_TURNS : MAX_TURNS,
     maxBudgetUsd: MAX_BUDGET_USD,
   };
 }

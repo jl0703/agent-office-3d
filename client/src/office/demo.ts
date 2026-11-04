@@ -65,7 +65,7 @@ export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): De
       id,
       kind: isSession ? "session" : "subagent",
       origin: i % 3 === 0 ? "managed" : "observed",
-      role: isSession ? "solo" : "worker",
+      role: isSession ? (i === 0 ? "master" : "solo") : "worker",
       parentId: isSession ? null : `demo-${(i % sessions) + 1}`,
       name: isSession ? (i >= SESSION_NAMES.length ? `${base} ${Math.floor(i / SESSION_NAMES.length) + 1}` : base) : pick(SUBAGENT_NAMES),
       // A subagent works in its parent's folder, so it sits in its parent's room.

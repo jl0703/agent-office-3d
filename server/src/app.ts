@@ -195,11 +195,12 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   async function startWorker(req: http.IncomingMessage, res: http.ServerResponse) {
     const parsed = StartBody.safeParse(await readJson(req));
     if (!parsed.success) return json(res, 400, { error: "invalid_request" });
-    if (parsed.data.role !== "worker") return json(res, 400, { error: "unsupported_role" });
-    const { cwd, prompt, name } = parsed.data;
-    const result = await opts.supervisor?.start(name === undefined ? { cwd, prompt } : { cwd, prompt, name });
+    const { role, cwd, prompt, name } = parsed.data;
+    const request = name === undefined ? { cwd, prompt } : { cwd, prompt, name };
+    const result = await (role === "master" ? opts.supervisor?.startMaster(request) : opts.supervisor?.start(request));
     if (!result) return json(res, 404, { error: "not_found" });
-    if (!result.ok) return json(res, result.status, { error: result.code });
+    // A conflict says why in `reason`; every other refusal is an `error` code.
+    if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
     json(res, 201, { id: result.id });
   }
 

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isAbsolute, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createBudget, DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD, type Cap } from "./budget.ts";
 import { createChannel } from "./channel.ts";
@@ -7,7 +8,8 @@ import { folderGuardHooks } from "./folderGuard.ts";
 import { killTree as defaultKillTree } from "./killTree.ts";
 import { lockdownOptions, MAX_BUDGET_USD } from "./lockdown.ts";
 import { cleanTmp, freshOnly, loadStore, saveStore, type StoredWorker } from "./managedStore.ts";
-import { resolveAllowedFolder } from "./paths.ts";
+import { createOfficeServer, MASTER_SYSTEM_PROMPT, MAX_RESULT_CHARS, MAX_WAIT_SECONDS, OFFICE_SERVER, OFFICE_TOOL_NAMES, type OfficeApi, type Reply } from "./officeTools.ts";
+import { isInside, resolveAllowedFolder } from "./paths.ts";
 import { inspectProcess, killLeftovers, type ProcessInfo } from "./processInfo.ts";
 import type { Registry } from "./registry.ts";
 import { clean, parseValue } from "./transcript.ts";
@@ -19,7 +21,11 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 export type StartResult =
   | { ok: true; id: string }
-  | { ok: false; status: 400 | 403 | 429 | 502; code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" };
+  | {
+      ok: false;
+      status: 400 | 403 | 409 | 429 | 502;
+      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped";
+    };
 
 export type CommandResult =
   | { ok: true }
@@ -44,6 +50,10 @@ export type SupervisorOptions = {
   roots: string[];
   env: Record<string, string | undefined>;
   maxManaged?: number;
+  /** Masters running at once. */
+  maxMasters?: number;
+  /** Live workers one master may have. */
+  maxWorkersPerMaster?: number;
   /** How long a polite stop may take before the process tree is killed. */
   stopGraceMs?: number;
   /** How long to wait for a session to report its id. */
@@ -81,6 +91,12 @@ type Managed = {
   project: string;
   cwd: string;
   task: string;
+  role: "worker" | "master";
+  /** The master that started this worker. Set by the server, never by a model. */
+  owner: Managed | null;
+  /** Final text of the last finished task, at most MAX_RESULT_CHARS. In memory only. */
+  result: string | null;
+  lastText: string;
   createdAt: number;
   updatedAt: number;
   procName: string | null;
@@ -101,11 +117,13 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; owner?: Managed | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
-  const maxManaged = opts.maxManaged ?? 6;
+  const maxManaged = opts.maxManaged ?? 8;
+  const maxMasters = opts.maxMasters ?? 1;
+  const maxWorkersPerMaster = opts.maxWorkersPerMaster ?? 5;
   const stopGraceMs = opts.stopGraceMs ?? 10_000;
   const startTimeoutMs = opts.startTimeoutMs ?? 30_000;
   const forgetAfterMs = opts.forgetAfterMs ?? 24 * 3_600_000;
@@ -123,6 +141,7 @@ export function createSupervisor(opts: SupervisorOptions) {
   const byId = new Map<string, Managed>();
   const detached = new Map<string, StoredWorker>(); // found in the file after a restart, not running
   const resuming = new Set<string>();
+  const waiters = new Set<() => void>(); // wait_for_workers calls to wake when a worker settles
   const timers = new Set<NodeJS.Timeout>();
   let saving: Promise<void> = Promise.resolve();
 
@@ -195,10 +214,21 @@ export function createSupervisor(opts: SupervisorOptions) {
     persist();
   }
 
+  const notify = () => {
+    for (const wake of [...waiters]) wake();
+  };
+  const ownedBy = (owner: Managed) => [...all].filter((w) => w.owner === owner);
+  /** A master that stops or dies leaves no running worker behind. */
+  function stopWorkersOf(owner: Managed) {
+    for (const w of ownedBy(owner)) if (w.state !== "ended" && !w.stopRequested) void terminate(w);
+  }
+
   function finalize(m: Managed, status: "stopped" | "error") {
     if (m.state === "ended") return;
     m.state = "ended";
     m.updatedAt = now();
+    if (m.role === "master") stopWorkersOf(m);
+    notify();
     if (m.id) {
       registry.setTerminal(m.id, status);
       registry.setNote(m.id, m.endNote ?? (status === "error" ? "The session ended with an error." : null));
@@ -217,6 +247,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     if (m.id === null) return;
     m.busy = false;
     m.waiting = true;
+    notify();
     registry.setWaiting(m.id, true);
     const reset = resetsAt ? ` Resets around ${resetTime(resetsAt)}.` : "";
     registry.setNote(m.id, `Usage limit reached.${reset} Give it a task to try again.`);
@@ -270,8 +301,8 @@ export function createSupervisor(opts: SupervisorOptions) {
           registry.upsert(id, {
             kind: "session",
             origin: "managed",
-            role: "worker",
-            parentId: null,
+            role: m.role,
+            parentId: m.owner?.id ?? null,
             project: m.project,
             name: m.name,
             currentTask: m.task,
@@ -289,10 +320,13 @@ export function createSupervisor(opts: SupervisorOptions) {
       if (message.rate_limit_info.status === "rejected") pause(m, message.rate_limit_info.resetsAt);
     } else if (message.type === "assistant" || message.type === "user") {
       if (message.type === "assistant" && message.error === "rate_limit") pause(m, undefined);
+      if (message.type === "assistant" && message.parent_tool_use_id === null) m.lastText = textOf(message);
       const parsed = parseValue(message);
       if (parsed.ok) registry.apply(m.id, parsed.facts, null);
     } else if (message.type === "result") {
       m.busy = false;
+      m.result = (("result" in message && typeof message.result === "string" && message.result) || m.lastText).slice(0, MAX_RESULT_CHARS);
+      notify();
       registry.apply(m.id, [{ kind: "event" }], null);
       const run = message.total_cost_usd;
       if (Number.isFinite(run) && run > m.runCost) {
@@ -354,6 +388,10 @@ export function createSupervisor(opts: SupervisorOptions) {
       waiting: false,
       endNote: null,
       forgetTimer: null,
+      role: "worker",
+      owner: null,
+      result: null,
+      lastText: "",
       ...init,
       createdAt: init.createdAt ?? now(),
     };
@@ -364,14 +402,22 @@ export function createSupervisor(opts: SupervisorOptions) {
   /** Starts the session and waits for its id. Returns null, leaving nothing behind, when it does not start. */
   async function launch(m: Managed, prompt: string): Promise<string | null> {
     m.input.push(userMessage(prompt));
+    const extra = m.role === "master" ? OFFICE_TOOL_NAMES : [];
     try {
       m.query = opts.query({
         prompt: m.input.iterable,
         options: {
-          ...lockdownOptions(),
+          ...lockdownOptions(extra),
+          ...(m.role === "master"
+            ? {
+                // In-process tools only; strictMcpConfig (from the lockdown) keeps every other MCP server out.
+                mcpServers: { [OFFICE_SERVER]: createOfficeServer(officeApi(m)) },
+                systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: MASTER_SYSTEM_PROMPT },
+              }
+            : {}),
           ...(m.expectedId ? { resume: m.expectedId } : {}),
           // Keeps every file tool inside this folder; permission rules alone would allow any path.
-          hooks: folderGuardHooks(m.cwd, (tool, reason) => log({ event: "managed-tool-denied", tool, reason })),
+          hooks: folderGuardHooks(m.cwd, (tool, reason) => log({ event: "managed-tool-denied", tool, reason }), extra),
           cwd: m.cwd,
           env: buildChildEnv(env),
           abortController: m.abort,
@@ -412,59 +458,132 @@ export function createSupervisor(opts: SupervisorOptions) {
     finalize(m, "stopped"); // in case the stream never finished
   }
 
+  /** Starts a session after all checks. A session with an owner must stay inside the owner's folder. */
+  async function begin(req: StartRequest, role: Managed["role"], owner: Managed | null): Promise<StartResult> {
+    const refuse = (status: 400 | 403 | 409 | 429, code: Extract<StartResult, { ok: false }>["code"]): StartResult => {
+      log({ event: "managed-refused", reason: code });
+      return { ok: false, status, code };
+    };
+    if (budget.refuses(0)) return refuse(429, "budget");
+    const requested = owner && !isAbsolute(req.cwd) ? resolve(owner.cwd, req.cwd) : req.cwd;
+    const folder = await resolveAllowedFolder(requested, roots);
+    if (!folder.ok) return folder.reason === "outside_roots" ? refuse(403, "folder_not_allowed") : refuse(400, "invalid_folder");
+    // No await between these checks and adding the session, so two starts cannot both pass.
+    if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
+    if (owner && owner.state !== "running") return refuse(409, "master_stopped");
+    if (role === "master" && live().filter((x) => x.role === "master").length >= maxMasters) return refuse(409, "master_running");
+    if (owner && ownedBy(owner).filter((w) => w.state !== "ended").length >= maxWorkersPerMaster) return refuse(429, "worker_limit");
+    if (live().length >= maxManaged) return refuse(429, "too_many");
+    const m = newManaged({
+      cwd: folder.path,
+      project: clean(folder.path.split(/[\\/]/).filter(Boolean).pop() ?? "") || "unknown",
+      name: req.name ? clean(req.name) : role === "master" ? "Master" : "Worker",
+      task: clean(req.prompt),
+      expectedId: null,
+      baseCost: 0,
+      role,
+      owner,
+    });
+    const id = await launch(m, req.prompt);
+    return id ? { ok: true, id } : { ok: false, status: 502, code: "start_failed" };
+  }
+
+  function assignTask(id: string, prompt: string): CommandResult {
+    const m = byId.get(id);
+    if (!m) return detached.has(id) ? { ok: false, status: 409, code: "detached" } : { ok: false, status: 404, code: "not_found" };
+    if (m.state === "ended" || m.state === "stopping") return { ok: false, status: 409, code: "stopped" };
+    if (m.state === "starting" || (m.busy && !m.waiting)) return { ok: false, status: 409, code: "busy" };
+    if (budget.refuses(sessionCost(m))) {
+      log({ event: "managed-refused", reason: "budget", id });
+      return { ok: false, status: 429, code: "budget" };
+    }
+    m.waiting = false;
+    m.busy = true;
+    m.result = null;
+    m.task = clean(prompt);
+    m.updatedAt = now();
+    registry.setWaiting(id, false);
+    registry.setNote(id, null);
+    registry.apply(id, [{ kind: "prompt", text: m.task }, { kind: "event" }], null);
+    m.input.push(userMessage(prompt));
+    log({ event: "managed-assign", id });
+    persist();
+    return { ok: true };
+  }
+
+  const REFUSALS: Record<string, string> = {
+    busy: "That worker is still busy. Wait for it to finish.",
+    stopped: "That worker has stopped.",
+    detached: "That worker is detached and cannot take tasks.",
+    budget: "The usage cap was reached.",
+    too_many: "Too many sessions are running. Stop one first.",
+    worker_limit: `You already have ${maxWorkersPerMaster} running workers. Stop one first.`,
+    folder_not_allowed: "That folder is not allowed. It must be inside your own folder.",
+    invalid_folder: "That folder does not exist.",
+    master_stopped: "You have been stopped.",
+  };
+  const failed = (code: string): Reply => ({ ok: false, error: REFUSALS[code] ?? "The worker could not be started." });
+  const NOT_YOURS: Reply = { ok: false, error: "Not yours: none of your workers has that id." };
+
+  const stateOf = (w: Managed) =>
+    w.state === "ended" ? (w.failed || w.refused ? "error" : "stopped") : w.state === "stopping" ? "stopped" : w.waiting ? "waiting" : w.busy ? "working" : "idle";
+  const isSettled = (w: Managed) => w.state === "ended" || w.state === "stopping" || !w.busy || w.waiting;
+
+  /** The tools of one master. Every lookup goes through ownedBy(owner), so only its own workers can be reached. */
+  function officeApi(owner: Managed): OfficeApi {
+    const mine = (id: string) => ownedBy(owner).find((w) => w.id === id);
+    const row = (w: Managed) => ({ id: w.id, name: w.name, state: stateOf(w), ...(isSettled(w) && w.result !== null ? { result: w.result } : {}) });
+    return {
+      async spawn({ name, folder, task }) {
+        const res = await begin({ cwd: folder, prompt: task, name }, "worker", owner);
+        return res.ok ? { ok: true, data: { id: res.id } } : failed(res.code);
+      },
+      assign(id, task) {
+        if (!mine(id)) return NOT_YOURS;
+        const res = assignTask(id, task);
+        return res.ok ? { ok: true, data: { id } } : failed(res.code);
+      },
+      async wait(ids, seconds) {
+        const picked = ids ? ids.map(mine) : ownedBy(owner);
+        const workers = picked.filter((w): w is Managed => w !== undefined);
+        if (workers.length !== picked.length) return NOT_YOURS;
+        const done = () => owner.state === "ended" || workers.every(isSettled);
+        if (!done()) {
+          const ms = Math.min(Math.max(seconds, 1), MAX_WAIT_SECONDS) * 1000;
+          await new Promise<void>((resolveWait) => {
+            const finish = () => {
+              clearTimeout(timer);
+              waiters.delete(check);
+              resolveWait();
+            };
+            const check = () => done() && finish();
+            const timer = setTimeout(finish, ms);
+            timer.unref();
+            waiters.add(check);
+          });
+        }
+        return { ok: true, data: { still_working: !workers.every(isSettled), workers: workers.map(row) } };
+      },
+      async stop(id) {
+        const w = mine(id);
+        if (!w) return NOT_YOURS;
+        await terminate(w);
+        return { ok: true, data: { id, state: stateOf(w) } };
+      },
+      list() {
+        return { ok: true, data: { workers: ownedBy(owner).map((w) => ({ ...row(w), task: w.task })) } };
+      },
+    };
+  }
+
   return {
-    async start(req: StartRequest): Promise<StartResult> {
-      if (budget.refuses(0)) {
-        log({ event: "managed-refused", reason: "budget" });
-        return { ok: false, status: 429, code: "budget" };
-      }
-      const folder = await resolveAllowedFolder(req.cwd, roots);
-      if (!folder.ok) {
-        const refused = folder.reason === "outside_roots";
-        log({ event: "managed-refused", reason: folder.reason });
-        return refused
-          ? { ok: false, status: 403, code: "folder_not_allowed" }
-          : { ok: false, status: 400, code: "invalid_folder" };
-      }
-      // No await between this check and adding the worker, so two starts cannot both pass.
-      if (live().length >= maxManaged) {
-        log({ event: "managed-refused", reason: "too_many" });
-        return { ok: false, status: 429, code: "too_many" };
-      }
-      const m = newManaged({
-        cwd: folder.path,
-        project: clean(folder.path.split(/[\\/]/).filter(Boolean).pop() ?? "") || "unknown",
-        name: req.name ? clean(req.name) : "Worker",
-        task: clean(req.prompt),
-        expectedId: null,
-        baseCost: 0,
-      });
-      const id = await launch(m, req.prompt);
-      return id ? { ok: true, id } : { ok: false, status: 502, code: "start_failed" };
-    },
+    start: (req: StartRequest) => begin(req, "worker", null),
+
+    /** Starts a master: a session with the office tools. Only the page does this, never a model. */
+    startMaster: (req: StartRequest) => begin(req, "master", null),
 
     /** Gives an idle worker a new task. Answers at once; the work continues in the background. */
-    assign(id: string, prompt: string): CommandResult {
-      const m = byId.get(id);
-      if (!m) return detached.has(id) ? { ok: false, status: 409, code: "detached" } : { ok: false, status: 404, code: "not_found" };
-      if (m.state === "ended" || m.state === "stopping") return { ok: false, status: 409, code: "stopped" };
-      if (m.state === "starting" || (m.busy && !m.waiting)) return { ok: false, status: 409, code: "busy" };
-      if (budget.refuses(sessionCost(m))) {
-        log({ event: "managed-refused", reason: "budget", id });
-        return { ok: false, status: 429, code: "budget" };
-      }
-      m.waiting = false;
-      m.busy = true;
-      m.task = clean(prompt);
-      m.updatedAt = now();
-      registry.setWaiting(id, false);
-      registry.setNote(id, null);
-      registry.apply(id, [{ kind: "prompt", text: m.task }, { kind: "event" }], null);
-      m.input.push(userMessage(prompt));
-      log({ event: "managed-assign", id });
-      persist();
-      return { ok: true };
-    },
+    assign: assignTask,
 
     /** Continues a stopped or detached conversation under the same session id. Nothing resumes by itself. */
     async resume(id: string, prompt = DEFAULT_RESUME_PROMPT): Promise<CommandResult> {
@@ -582,4 +701,13 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** The text blocks of an assistant message, joined. */
+function textOf(message: Extract<SDKMessage, { type: "assistant" }>): string {
+  const content: unknown = message.message?.content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block: unknown) => (typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text" ? String((block as { text?: unknown }).text ?? "") : ""))
+    .join("");
 }

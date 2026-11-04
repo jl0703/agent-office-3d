@@ -8,7 +8,7 @@ export type Agent = {
   kind: "session" | "subagent";
   /** Seen through its log file (view-only), or started by this app (controllable). */
   origin: "observed" | "managed";
-  role: "solo" | "worker";
+  role: "solo" | "worker" | "master";
   parentId: string | null;
   name: string;
   /** Base name of the working folder, never the full path. */
