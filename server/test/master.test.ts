@@ -20,7 +20,13 @@ const clients: Client[] = [];
 after(async () => {
   await Promise.all(clients.map((c) => c.close()));
   await Promise.all(supervisors.map((s) => s.close()));
-  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  for (const dir of made) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Windows can keep a folder busy for a while after a test (a junction or a worker that just ended); the system temp folder is cleaned up eventually, and a failed cleanup must not fail the run.
+    }
+  }
 });
 
 const dir = (prefix: string) => {
