@@ -61,6 +61,8 @@ const supervisor = createSupervisor({
 const app = await startServer({
   port: numberFromEnv("OFFICE_PORT", 4777, 1, 65535),
   publicPort,
+  // Set by `npm run dev` only, so the link and login survive its auto-restarts.
+  ...(process.env["OFFICE_SESSION_SECRET"] ? { sessionSecret: process.env["OFFICE_SESSION_SECRET"] } : {}),
   staticDir: fileURLToPath(new URL("../../client/dist", import.meta.url)),
   registry,
   supervisor,
@@ -80,8 +82,10 @@ const watcher = await startWatcher({
 
 console.log(`Workers may use these folders: ${roots.join(", ")}`);
 // The only place the token is printed. It works once.
+const stable = Boolean(process.env["OFFICE_SESSION_SECRET"]);
+if (stable) console.log("Stable dev login is on: this link can be used again and logins survive restarts. For development only; unset OFFICE_SESSION_SECRET to get one-time links.");
 console.log(
-  `Open this one-time URL in your browser:\nhttp://127.0.0.1:${publicPort ?? app.port}/api/session?t=${app.token}`,
+  `Open this ${stable ? "dev" : "one-time"} URL in your browser:\nhttp://127.0.0.1:${publicPort ?? app.port}/api/session?t=${app.token}`,
 );
 
 // Stop every worker before leaving, so no agent process is left running.

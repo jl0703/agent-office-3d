@@ -172,6 +172,116 @@ describe("request guard", () => {
     assert.equal(r.headers["set-cookie"], undefined);
   });
 
+  it("answers a refused token with a friendly static page that echoes nothing", async () => {
+    const s = await fresh();
+    const host = `127.0.0.1:${s.port}`;
+    await send(s.port, `/api/session?t=${s.token}`, { headers: { host } });
+    const used = await send(s.port, `/api/session?t=${s.token}`, { headers: { host } });
+    const wrong = await send(s.port, "/api/session?t=wrongtoken", { headers: { host } });
+    for (const r of [used, wrong]) {
+      assert.equal(r.status, 403);
+      assert.match(String(r.headers["content-type"]), /^text\/html/);
+      assert.equal(r.headers["cache-control"], "no-store");
+      assert.match(String(r.headers["content-security-policy"]), /default-src 'none'/);
+      assert.match(r.body, /Open this/);
+      assert.match(r.body, /already used/);
+      assert.ok(!/<script/i.test(r.body));
+      assert.ok(!r.body.includes(s.token) && !r.body.includes("wrongtoken") && !r.body.includes("/api/session"));
+    }
+    assert.equal(used.body, wrong.body, "used and wrong tokens must look the same");
+  });
+
+  it("does not use the token up on prefetch, prerender or other non-navigation requests", async () => {
+    const s = await fresh();
+    const host = `127.0.0.1:${s.port}`;
+    const preloads: Record<string, string>[] = [
+      { "sec-purpose": "prefetch" },
+      { "sec-purpose": "prefetch;prerender" },
+      { purpose: "prefetch" },
+      { "sec-fetch-mode": "cors" },
+      { "sec-fetch-dest": "empty" },
+      { "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" },
+    ];
+    for (const h of preloads) {
+      const r = await send(s.port, `/api/session?t=${s.token}`, { headers: { host, ...h } });
+      assert.equal(r.status, 204, JSON.stringify(h));
+      assert.equal(r.headers["set-cookie"], undefined);
+      assert.equal(r.headers["cache-control"], "no-store");
+    }
+    const real = await send(s.port, `/api/session?t=${s.token}`, {
+      headers: { host, "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" },
+    });
+    assert.equal(real.status, 302);
+    assert.match(String(real.headers["set-cookie"]), /^office_session=/);
+  });
+
+  describe("stable dev login (OFFICE_SESSION_SECRET)", () => {
+    const SECRET = "s".repeat(32);
+    const stable = async (sessionSecret: string) => {
+      const s = await startServer({ port: 0, staticDir, sessionSecret });
+      extra.push(s);
+      return s;
+    };
+    const cookieOf = async (s: RunningServer) => (await loginTo(s)).cookie;
+    const eventsWith = (s: RunningServer, cookie: string) =>
+      send(s.port, "/api/usage", { headers: { host: `127.0.0.1:${s.port}`, cookie } });
+
+    it("keeps the same token across instances and lets it be used again", async () => {
+      const a = await stable(SECRET);
+      const b = await stable(SECRET);
+      assert.equal(a.token, b.token);
+      assert.match(a.token, /^[0-9a-f]{64}$/);
+      assert.notEqual(a.token, (await stable("t".repeat(32))).token);
+      assert.ok((await cookieOf(a)).startsWith("office_session="));
+      assert.ok((await cookieOf(a)).startsWith("office_session="), "second use works");
+    });
+
+    it("accepts a cookie from another instance with the same secret", async () => {
+      const a = await stable(SECRET);
+      const b = await stable(SECRET);
+      const cookie = await cookieOf(a);
+      assert.notEqual((await eventsWith(b, cookie)).status, 403);
+    });
+
+    it("rejects forged, tampered, malformed and other-secret cookies", async () => {
+      const a = await stable(SECRET);
+      const other = await stable("t".repeat(32));
+      const good = (await cookieOf(a)).slice("office_session=".length);
+      const [id = "", sig = ""] = good.split(".");
+      const flip = sig.startsWith("0") ? "1" : "0";
+      const bad = [
+        "",
+        id,
+        `${id}.`,
+        `.${sig}`,
+        `${id}.${flip}${sig.slice(1)}`,
+        `x${id.slice(1)}.${sig}`,
+        `${good}.${sig}`,
+        `${id}.${"0".repeat(64)}`,
+        await cookieOf(other).then((c) => c.slice("office_session=".length)),
+        `token.${a.token}`, // the login token must never double as a signed session
+      ];
+      for (const value of bad) {
+        assert.equal((await eventsWith(a, `office_session=${value}`)).status, 403, value);
+      }
+    });
+
+    it("refuses a secret shorter than 32 characters", async () => {
+      await assert.rejects(startServer({ port: 0, staticDir, sessionSecret: "short" }), /at least 32/);
+    });
+
+    it("default mode: token is single use and a cookie from another instance is rejected", async () => {
+      const a = await fresh();
+      const b = await fresh();
+      assert.notEqual(a.token, b.token);
+      const cookie = await cookieOf(a);
+      assert.equal((await eventsWith(b, cookie)).status, 403);
+      assert.equal((await eventsWith(a, cookie)).status !== 403, true);
+      const again = await send(a.port, `/api/session?t=${a.token}`, { headers: { host: `127.0.0.1:${a.port}` } });
+      assert.equal(again.status, 403);
+    });
+  });
+
   it("streams a heartbeat with a valid cookie", async () => {
     const s = await fresh({ heartbeatMs: 20 });
     const { host, cookie } = await loginTo(s);

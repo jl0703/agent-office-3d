@@ -15,6 +15,7 @@ const REMOVED = new Set(
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
     "GITHUB_TOKEN", // only the server's GitHub client uses it
+    "OFFICE_SESSION_SECRET", // with it anyone can compute the login token and sign session cookies
   ].map((name) => name.toUpperCase()),
 );
 

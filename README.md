@@ -13,7 +13,7 @@ npm ci
 npm run dev      # server on 4777, page on 5173
 ```
 
-The terminal prints a **one-time URL**. Open it: the server swaps the token for a session cookie and sends you to the page. Restarting the server (including the dev auto-restart on a code change) invalidates the session, so open the new URL it prints.
+The terminal prints a **one-time URL**. Open it: the server swaps the token for a session cookie and sends you to the page. `npm run dev` keeps the same link and login across its auto-restarts (see Security). With `npm start` the URL is strictly one-time and a restart invalidates it: open the newest URL it prints, once, in one tab. A link that was already used or is out of date shows a short explanation page (status 403) instead of a blank error.
 
 For a production-style run: `npm run build`, then `npm start` (page and server both on 4777).
 
@@ -57,7 +57,7 @@ npm run build
 
 ## Security
 
-The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`.
+The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`. Pre-load requests (prefetch, prerender, anything that is not a page navigation) never use the token up. `npm run dev` generates a random secret per run and gives it to the server only (never to Vite, never logged or written to disk); the token is then derived from it and sessions are signed cookies, so the link can be reopened and sessions survive restarts until you stop `npm run dev`. That is weaker than the one-time token and is meant for development only; `npm start` never sets it. `OFFICE_SESSION_SECRET` (32+ characters) can enable the same mode by hand; a shorter value stops the server at startup.
 
 Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED` (default 8), `MAX_MASTERS` (default 1), `MAX_WORKERS_PER_MASTER` (default 5), `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
 

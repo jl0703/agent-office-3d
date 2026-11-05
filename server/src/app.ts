@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import http from "node:http";
@@ -31,6 +31,11 @@ type Options = {
   supervisor?: Supervisor;
   /** Obsidian vault folder to read titles and links from. Never taken from a request. */
   vaultDir?: string;
+  /**
+   * Dev only. At least 32 characters: the token becomes HMAC(secret, "token") and sessions become signed
+   * cookies, so the same link and login survive a restart. Omit it for the strict one-time token.
+   */
+  sessionSecret?: string;
   log?: (line: Record<string, unknown>) => void;
 };
 
@@ -62,6 +67,9 @@ const CONTENT_TYPES: Record<string, string> = {
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
 };
+const MIN_SECRET_LENGTH = 32;
+const REFUSED_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Link not valid</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a;background:#fff}</style></head><body><main><h1>This link does not work</h1><p>It was already used, or the server was restarted since it was printed.</p><p>Copy the newest line that starts with <strong>Open this</strong> from the terminal and open it once, in one tab.</p></main></body></html>`;
+const REFUSED_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'";
 const CSP =
   "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
 
@@ -69,9 +77,26 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   const { staticDir, heartbeatMs = 5000 } = opts;
   const root = resolve(staticDir);
   const log = opts.log ?? ((line) => console.log(JSON.stringify(line)));
-  const token = randomBytes(32).toString("hex");
+  const secret = opts.sessionSecret;
+  if (secret !== undefined && secret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`sessionSecret must be at least ${MIN_SECRET_LENGTH} characters`);
+  }
+  const token = secret ? hmac(secret, "token:v1") : randomBytes(32).toString("hex");
   let tokenUsed = false;
   const sessions = new Set<string>();
+  const newSession = () => {
+    const id = randomBytes(32).toString("hex");
+    if (!secret) {
+      sessions.add(id);
+      return id;
+    }
+    return `${id}.${hmac(secret, `session:${id}`)}`;
+  };
+  const validSession = (value: string) => {
+    if (!secret) return sessions.has(value);
+    const [id, sig, ...extra] = value.split(".");
+    return id !== undefined && sig !== undefined && extra.length === 0 && sameSecret(sig, hmac(secret, `session:${id}`));
+  };
   const streams = new Set<http.ServerResponse>();
   const allowedHosts = new Set<string>();
   const vault = createVault(opts.vaultDir);
@@ -113,11 +138,23 @@ export async function startServer(opts: Options): Promise<RunningServer> {
 
     if (url.pathname === "/api/session") {
       if (method !== "GET") return deny(res, 405, "method", req);
+      // Browsers prefetch or prerender a pasted URL. Only a real navigation may use the token up.
+      if (isPreload(req)) {
+        res.writeHead(204, { "Cache-Control": "no-store" });
+        return res.end();
+      }
       const given = url.searchParams.get("t") ?? "";
-      if (tokenUsed || !sameSecret(given, token)) return deny(res, 403, "token", req);
+      if ((tokenUsed && !secret) || !sameSecret(given, token)) {
+        log({ event: "denied", status: 403, reason: "token", method, path: pathOf(req) });
+        res.writeHead(403, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Content-Security-Policy": REFUSED_CSP,
+        });
+        return res.end(REFUSED_PAGE);
+      }
       tokenUsed = true;
-      const session = randomBytes(32).toString("hex");
-      sessions.add(session);
+      const session = newSession();
       res.writeHead(302, {
         Location: "/",
         "Set-Cookie": `${SESSION_COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/`,
@@ -127,7 +164,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
     }
 
     if (url.pathname === "/events" || url.pathname.startsWith("/api/")) {
-      if (!sessions.has(cookieValue(req.headers.cookie, SESSION_COOKIE))) {
+      if (!validSession(cookieValue(req.headers.cookie, SESSION_COOKIE))) {
         return deny(res, 403, "no-session", req);
       }
       if (url.pathname === "/events" && method === "GET") return openStream(res);
@@ -301,6 +338,23 @@ function json(res: http.ServerResponse, status: number, body: unknown, headers: 
 
 function pathOf(req: http.IncomingMessage): string {
   return (req.url ?? "").split("?")[0] ?? "";
+}
+
+function hmac(secret: string, data: string): string {
+  return createHmac("sha256", secret).update(data).digest("hex");
+}
+
+/** True for prefetch/prerender and any other request that is not a top-level page navigation. */
+function isPreload(req: http.IncomingMessage): boolean {
+  const h = req.headers;
+  const mode = h["sec-fetch-mode"];
+  const dest = h["sec-fetch-dest"];
+  return (
+    h["sec-purpose"] !== undefined ||
+    String(h["purpose"]).toLowerCase() === "prefetch" ||
+    (mode !== undefined && mode !== "navigate") ||
+    (dest !== undefined && dest !== "document")
+  );
 }
 
 function sameSecret(given: string, secret: string): boolean {

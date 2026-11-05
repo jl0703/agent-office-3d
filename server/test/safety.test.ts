@@ -30,6 +30,8 @@ describe("child environment", () => {
       CLAUDE_CODE_USE_BEDROCK: "1",
       CLAUDE_CODE_USE_VERTEX: "1",
       CLAUDE_CODE_USE_FOUNDRY: "1",
+      OFFICE_SESSION_SECRET: "s".repeat(64),
+      office_session_secret: "lowercase twin",
     });
     assert.deepEqual(Object.keys(env).sort(), ["CLAUDE_CODE_DISABLE_AUTO_MEMORY", "ENABLE_CLAUDEAI_MCP_SERVERS", "HOME", "PATH"]);
   });
