@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -169,6 +169,32 @@ try {
     }
     await page.key("Escape", { keyCode: 27 });
     console.log(`needs: title=${JSON.stringify(title)} rows=${rows} axe=${violations.length}`);
+    await close();
+  }
+
+  if (run("panel")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+    await page.viewport(1440, 900);
+    const server = await login(page);
+    await demo(page, server.base);
+    await page.wait(3000);
+    await selectFirst(page);
+    await page.wait(600);
+    const teamBefore = await page.evaluate<string[]>(`[...document.querySelectorAll(".team li button")].map((b) => b.textContent)`);
+    const rows = await page.evaluate<string[]>(`[...document.querySelectorAll(".timeline li")].map((li) => li.querySelector("time")?.textContent + " | " + li.querySelector(".mono")?.textContent)`);
+    expect(teamBefore.length >= 2, `panel: team lists the lead and its workers (${teamBefore.length})`);
+    expect(rows.length >= 1 && rows.every((r) => /(just now|ago| \d{4}|\d+\/\d+\/\d+)/.test(r)), `panel: timeline rows with relative times (${rows.length})`);
+    await page.screenshot(join(out, "panel-team-timeline.png"));
+    const before = await page.evaluate<string>(`document.querySelector(".panel h2")?.textContent ?? ""`);
+    await page.evaluate(`document.querySelectorAll(".team li button")[1]?.click()`);
+    await page.wait(500);
+    const after = await page.evaluate<string>(`document.querySelector(".panel h2")?.textContent ?? ""`);
+    expect(after !== before, "panel: choosing a team member opens its details");
+    await page.evaluate(source);
+    const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+    expect(violations.length === 0, `panel: axe: ${violations.join(", ")}`);
+    console.log(`panel: team=${teamBefore.length} timeline=${rows.length} sample=${JSON.stringify(rows[0])} axe=${violations.length}`);
     await close();
   }
 
