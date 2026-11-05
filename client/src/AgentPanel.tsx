@@ -4,6 +4,7 @@ import type { ActivityEntry, Agent } from "../../shared/events.ts";
 import { getAgentEvents, getAgentResult, type Usage } from "./api.ts";
 import { canStop } from "./AgentList.tsx";
 import { StatusChip } from "./StatusChip.tsx";
+import { relativeTime, shortDuration, timelineOf, type Family } from "./timeline.ts";
 import { WorkerControls } from "./WorkerControls.tsx";
 
 const LOG_REFRESH_MS = 1000;
@@ -46,6 +47,16 @@ export function useActivityLog(agent: Agent | undefined, demoLog: (id: string) =
   }, [id, stamp, demo, demoLog]);
 
   return log;
+}
+
+/** The current time, refreshed every few seconds so "12 s ago" stays true. */
+function useNow(everyMs = 5000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(timer);
+  }, [everyMs]);
+  return now;
 }
 
 const FINISHED = ["idle", "done", "stopped", "error"];
@@ -106,6 +117,8 @@ type PanelProps = {
   /** The worker's last final answer: text, null for none yet, undefined when it could not be read. */
   result: string | null | undefined;
   usage: Usage | null;
+  /** The session this agent belongs to and everyone below it, or null when it is on its own. */
+  family: Family | null;
   /** The agent has no desk in the office view. */
   notShown: boolean;
   stopOff: string | null;
@@ -118,9 +131,10 @@ type PanelProps = {
   onStop: (id: string) => void;
 };
 
-export function AgentPanel({ id, agent, parent, subagents, log, result, usage, notShown, stopOff, stopping, headingRef, narrow, onClose, onSelect, onStop }: PanelProps) {
+export function AgentPanel({ id, agent, parent, subagents, log, result, usage, family, notShown, stopOff, stopping, headingRef, narrow, onClose, onSelect, onStop }: PanelProps) {
   const [fullTask, setFullTask] = useState(false);
   useEffect(() => setFullTask(false), [agent.id]);
+  const now = useNow();
   const task = agent.currentTask;
   const longTask = task !== null && task.length > TASK_PREVIEW;
 
@@ -193,17 +207,49 @@ export function AgentPanel({ id, agent, parent, subagents, log, result, usage, n
       {canStop(agent) && stopOff && <p className="panel-note">{stopOff}</p>}
       {typeof result === "string" && result !== "" && <ResultBox text={result} />}
       {result === undefined && <p className="panel-note">The result could not be read.</p>}
+      {family && (
+        <>
+          <h3>Team</h3>
+          <ul className="team" aria-label="The team this agent belongs to">
+            <li>
+              <button type="button" className="link-btn" onClick={() => onSelect(family.root.id)} aria-current={family.root.id === agent.id ? "true" : undefined}>
+                {family.root.name}
+              </button>
+              <StatusChip status={family.root.status} />
+            </li>
+            {family.members.map((m) => (
+              <li key={m.agent.id} style={{ paddingLeft: `${m.depth * 16}px` }}>
+                <button type="button" className="link-btn" onClick={() => onSelect(m.agent.id)} aria-current={m.agent.id === agent.id ? "true" : undefined}>
+                  {m.agent.name}
+                </button>
+                <StatusChip status={m.agent.status} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <h3>Activity</h3>
       {log === "loading" && <p className="panel-note">Loading…</p>}
       {log === "error" && <p className="panel-note">The activity log could not be loaded.</p>}
       {Array.isArray(log) && log.length === 0 && <p className="panel-note">No activity yet.</p>}
       {Array.isArray(log) && log.length > 0 && (
-        <ol className="log" aria-label="Recent activity, newest first">
-          {[...log].reverse().map((entry, i) => (
-            <li key={`${entry.ts}-${i}`}>
-              <time dateTime={entry.ts}>{new Date(entry.ts).toLocaleTimeString()}</time>
-              <span className="mono">{entry.tool ?? "tool"}</span>
-              <span className="clamp-2">{entry.summary}</span>
+        <ol className="log timeline" aria-label="Recent activity, newest first">
+          {timelineOf(log, now, agent.status === "working").map((item) => (
+            <li key={item.key}>
+              <div className="tl-row">
+                {relativeTime(item.ts, now) !== "" ? <time dateTime={item.ts}>{relativeTime(item.ts, now)}</time> : <span>unknown time</span>}
+                <span className="mono">
+                  {item.tool}
+                  {item.count > 1 ? ` ×${item.count}` : ""}
+                </span>
+                {item.durationMs !== null && <span className="tl-dur">{shortDuration(item.durationMs)}</span>}
+              </div>
+              <span className="clamp-2">{item.summary}</span>
+              {item.durationMs !== null && (
+                <span className="tl-bar" aria-hidden="true">
+                  <span style={{ width: `${Math.max(2, Math.round(item.share * 100))}%` }} />
+                </span>
+              )}
             </li>
           ))}
         </ol>

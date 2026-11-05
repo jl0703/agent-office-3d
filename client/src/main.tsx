@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { EVENT_TYPES, type Agent, type AgentStatus, type ServerEvent } from "../../shared/events.ts";
 import { AgentList, canStop, type RoomGroup } from "./AgentList.tsx";
 import { attentionOf, pageTitle, trackFinished } from "./attention.ts";
+import { familyOf } from "./timeline.ts";
 import { AgentPanel, useActivityLog, useAgentResult } from "./AgentPanel.tsx";
 import { getUsage, getVault, stopAgent, stopAll, type Usage } from "./api.ts";
 import { UsageMeter } from "./UsageMeter.tsx";
@@ -233,6 +234,7 @@ function App() {
 
   const log = useActivityLog(current, demo.log, demo.active);
   const result = useAgentResult(current, !demo.active);
+  const family = useMemo(() => (current ? familyOf(agents, current.id) : null), [agents, current]);
 
   const onStop = useCallback(async (id: string) => {
     setNotice("");
@@ -394,6 +396,7 @@ function App() {
                 log={log}
               result={result}
               usage={usage}
+              family={family}
                 notShown={!assignment.seat.has(current.id)}
                 stopOff={off}
                 stopping={stopping.has(current.id)}
