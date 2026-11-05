@@ -41,11 +41,14 @@ const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resum
 const StartBody = z
   .object({
     role: z.enum(["worker", "master"]),
-    cwd: z.string().min(1).max(1000),
+    cwd: z.string().min(1).max(1000).optional(),
+    team: z.literal("research").optional(),
     prompt: z.string().min(1).max(10_000),
     name: z.string().min(1).max(100).optional(),
   })
-  .strict();
+  .strict()
+  // A team belongs to a master. Only a research team may leave the folder out (it defaults to the research folder).
+  .refine((b) => (b.team === undefined || b.role === "master") && (b.cwd !== undefined || b.team !== undefined));
 const TaskBody = z.object({ prompt: z.string().min(1).max(10_000) }).strict();
 const ResumeBody = z.object({ prompt: z.string().min(1).max(10_000).optional() }).strict();
 const CONTENT_TYPES: Record<string, string> = {
@@ -195,9 +198,11 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   async function startWorker(req: http.IncomingMessage, res: http.ServerResponse) {
     const parsed = StartBody.safeParse(await readJson(req));
     if (!parsed.success) return json(res, 400, { error: "invalid_request" });
-    const { role, cwd, prompt, name } = parsed.data;
-    const request = name === undefined ? { cwd, prompt } : { cwd, prompt, name };
-    const result = await (role === "master" ? opts.supervisor?.startMaster(request) : opts.supervisor?.start(request));
+    const { role, cwd, team, prompt, name } = parsed.data;
+    const request = { prompt, ...(name === undefined ? {} : { name }) };
+    const result = await (role === "master"
+      ? opts.supervisor?.startMaster({ ...request, ...(cwd === undefined ? {} : { cwd }), ...(team === undefined ? {} : { team }) })
+      : opts.supervisor?.start({ ...request, cwd: cwd as string }));
     if (!result) return json(res, 404, { error: "not_found" });
     // A conflict says why in `reason`; every other refusal is an `error` code.
     if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });

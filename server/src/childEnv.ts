@@ -14,6 +14,7 @@ const REMOVED = new Set(
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "GITHUB_TOKEN", // only the server's GitHub client uses it
   ].map((name) => name.toUpperCase()),
 );
 

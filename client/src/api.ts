@@ -20,6 +20,8 @@ export function describeFailure(status: number, code: string | undefined): strin
       return "Claude Code did not start a session. Check that it is installed and logged in with your subscription.";
     case "too_large":
       return "The prompt is too large.";
+    case "no_research_folder":
+      return "There is no research folder yet. Set OFFICE_VAULT_DIR (or OFFICE_RESEARCH_DIR) in the .env file and restart the server.";
     case "master_running":
       return "A master is already running. Stop it first, or give it a new goal.";
     case "busy":
@@ -62,6 +64,10 @@ async function post(path: string, body: unknown, fetchFn: FetchFn): Promise<Acti
 
 export const startWorker = (cwd: string, prompt: string, fetchFn: FetchFn = fetch) =>
   post("/api/agents", { role: "worker", cwd, prompt }, fetchFn);
+
+/** A research team: a lead and up to three scouts that look at GitHub and write a report in the research folder. */
+export const startResearch = (topic: string, fetchFn: FetchFn = fetch) =>
+  post("/api/agents", { role: "master", team: "research", prompt: topic }, fetchFn);
 
 /** A master gets a goal, splits it up and runs workers of its own. */
 export const startMaster = (cwd: string, goal: string, fetchFn: FetchFn = fetch) =>

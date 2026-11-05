@@ -3,10 +3,11 @@
 //   OFFICE_LIVE_TESTS=1 node --test server/test/live.test.ts
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { createGithub } from "../src/github.ts";
 import { createRegistry } from "../src/registry.ts";
 import { createSupervisor } from "../src/supervisor.ts";
 
@@ -162,6 +163,44 @@ describe("live check with the real SDK", { skip: !live }, () => {
     } finally {
       rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it("runs a research team that reads real star counts from GitHub and writes a report", { timeout: 540_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "live-research-"));
+    const researchDir = join(root, "research");
+    mkdirSync(researchDir);
+    const registry = createRegistry();
+    const logs: Record<string, unknown>[] = [];
+    const supervisor = createSupervisor({ registry, query, roots: [root, researchDir], env: process.env, researchDir, github: createGithub({ token: process.env["GITHUB_TOKEN"] }), log: (line) => logs.push(line) });
+    try {
+      const started = await supervisor.startMaster({
+        team: "research",
+        name: "live research",
+        prompt:
+          "Quick test run, keep it small: start exactly ONE researcher named repo-scout. Its task: use the github tools to list the 5 most starred repositories with the topic mcp-server (exact star counts) and report them. " +
+          "Then write the report file with your template (keep every section to a few lines) and answer with the word DONE.",
+      });
+      assert.ok(started.ok, `start failed: ${JSON.stringify(started)}`);
+      const end = Date.now() + 480_000;
+      while (!logs.some((l) => l["event"] === "managed-turn-end" && l["id"] === started.id) && Date.now() < end) await new Promise((r) => setTimeout(r, 1000));
+      assert.ok(logs.some((l) => l["event"] === "managed-turn-end" && l["id"] === started.id), "the lead finished its turn");
+      const workers = registry.snapshot().filter((a: { parentId: string | null }) => a.parentId === started.id);
+      const reports = readdirSync(researchDir).filter((f) => f.endsWith(".md"));
+      const text = reports.length > 0 ? readFileSync(join(researchDir, reports[0] as string), "utf8") : "";
+      console.log(JSON.stringify({ workers: workers.length, reports, reportChars: text.length, hasStars: /\d{3,}/.test(text), hasRecommendations: /recommendation/i.test(text), denied: logs.filter((l) => l["event"] === "managed-tool-denied").map((l) => l["tool"]), refusals: logs.filter((l) => l["event"] === "managed-refused").length }));
+      console.log(`--- report ---
+${text}
+--- end ---`);
+      assert.ok(workers.length >= 1, "the lead started a researcher");
+      assert.ok(reports.length >= 1, "a report was written in the research folder");
+      assert.ok(/\d{3,}/.test(text), "the report contains star counts");
+      assert.ok(!JSON.stringify(logs).includes(process.env["GITHUB_TOKEN"] ?? "no-token-set"), "the token is in no log line");
+      await supervisor.stop(started.id);
+      assert.equal(supervisor.liveCount(), 0);
+    } finally {
+      await supervisor.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });

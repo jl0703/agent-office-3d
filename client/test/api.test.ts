@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignTask, describeFailure, getAgentEvents, getVault, resumeAgent, startMaster, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, describeFailure, getAgentEvents, getVault, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -115,5 +115,14 @@ describe("api helpers", () => {
     const refused = fakeFetch(409, { reason: "master_running" });
     assert.deepEqual(await startMaster("C:\\w", "x", refused.fn), { ok: false, message: describeFailure(409, "master_running") });
     assert.ok(describeFailure(409, "master_running").includes("master"));
+  });
+
+  it("starts a research team with only the topic, and explains a missing research folder", async () => {
+    const f = fakeFetch(201, { id: "r" });
+    assert.deepEqual(await startResearch("top MCP servers for code review", f.fn), { ok: true });
+    assert.deepEqual(JSON.parse(String(f.calls[0]?.init?.body)), { role: "master", team: "research", prompt: "top MCP servers for code review" });
+    const none = fakeFetch(400, { error: "no_research_folder" });
+    assert.deepEqual(await startResearch("x", none.fn), { ok: false, message: describeFailure(400, "no_research_folder") });
+    assert.ok(describeFailure(400, "no_research_folder").includes("OFFICE_VAULT_DIR"));
   });
 });

@@ -68,3 +68,11 @@ Set `OFFICE_VAULT_DIR` to a vault folder (absolute path) and the hub shows its n
 ## Live check
 
 `OFFICE_LIVE_TESTS=1 node --test server/test/live.test.ts` starts a real worker in a temporary folder, to confirm the lockdown against the real Claude Agent SDK. It uses a little of your subscription, and each run leaves a small log folder under your Claude `projects` folder. Normal test runs and CI skip it.
+
+## Research team
+
+"Start a research team" (`POST /api/agents` with `role:"master"`, `team:"research"`, no `cwd`) starts a Research Lead that can start up to three researchers (repo-scout, skills-mcp-scout, integration-analyst) and writes one markdown report named `YYYY-MM-DD-<slug>.md` in the research folder. The team only recommends; it installs nothing.
+
+- **Research folder:** `OFFICE_RESEARCH_DIR`, else `<OFFICE_VAULT_DIR>/agent-workspace/research` (created if missing). Only this folder is added to the allowed roots; the rest of the vault stays read-only to the app. The Lead's folder is this folder, a given `cwd` must lie inside it, and so must its researchers' folders. With neither variable set, starting a team answers `400 no_research_folder`.
+- **GitHub tools:** only the researchers (never the Lead, ordinary workers or ordinary masters) get `mcp__github__github_search_repos` and `mcp__github__github_repo`. They run inside the server, talk only to `api.github.com` over https, return metadata only (no README or file contents), cache for 10 minutes and allow 8 GitHub calls a minute for the whole app (the answer is `{"error":"rate_limited","retry_after_s":N}`).
+- **`GITHUB_TOKEN`** (optional, read-only, no scopes needed) in `.env` raises GitHub's own limit. It is sent only to `api.github.com`, removed from every worker's environment, and never appears in a tool result, log or event.

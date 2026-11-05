@@ -5,13 +5,16 @@ import { createBudget, DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD, typ
 import { createChannel } from "./channel.ts";
 import { buildChildEnv } from "./childEnv.ts";
 import { folderGuardHooks } from "./folderGuard.ts";
+import type { Github } from "./github.ts";
+import { createGithubServer, GITHUB_SERVER, GITHUB_TOOL_NAMES } from "./githubTools.ts";
 import { killTree as defaultKillTree } from "./killTree.ts";
-import { lockdownOptions, MAX_BUDGET_USD } from "./lockdown.ts";
+import { lockdownOptions, MAX_BUDGET_USD, MAX_TURNS } from "./lockdown.ts";
 import { cleanTmp, freshOnly, loadStore, saveStore, type StoredWorker } from "./managedStore.ts";
 import { createOfficeServer, MASTER_SYSTEM_PROMPT, MAX_RESULT_CHARS, MAX_WAIT_SECONDS, OFFICE_SERVER, OFFICE_TOOL_NAMES, type OfficeApi, type Reply } from "./officeTools.ts";
 import { isInside, resolveAllowedFolder } from "./paths.ts";
 import { inspectProcess, killLeftovers, type ProcessInfo } from "./processInfo.ts";
 import type { Registry } from "./registry.ts";
+import { RESEARCH_LEAD_PROMPT, RESEARCHER_PROMPT } from "./research.ts";
 import { clean, parseValue } from "./transcript.ts";
 import { transcriptActive } from "./transcriptActivity.ts";
 
@@ -19,12 +22,14 @@ import { transcriptActive } from "./transcriptActivity.ts";
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
+/** A research team's master: the folder is optional and defaults to the research folder. */
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research" };
 export type StartResult =
   | { ok: true; id: string }
   | {
       ok: false;
       status: 400 | 403 | 409 | 429 | 502;
-      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped";
+      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder";
     };
 
 export type CommandResult =
@@ -64,6 +69,10 @@ export type SupervisorOptions = {
   dataDir?: string;
   /** The Claude log folder, to see whether a conversation is still being written to. Without it that check is skipped. */
   projectsDir?: string;
+  /** The research team's folder. Must also be one of `roots`. Without it a research team cannot start. */
+  researchDir?: string;
+  /** GitHub client for the research workers' tools. */
+  github?: Github;
   sessionBudgetUsd?: number;
   totalBudgetUsd?: number;
   inspect?: (pid: number) => Promise<ProcessInfo | null>;
@@ -92,6 +101,8 @@ type Managed = {
   cwd: string;
   task: string;
   role: "worker" | "master";
+  /** Set for a research team's master and the workers it starts. */
+  team: "research" | null;
   /** The master that started this worker. Set by the server, never by a model. */
   owner: Managed | null;
   /** Final text of the last finished task, at most MAX_RESULT_CHARS. In memory only. */
@@ -117,7 +128,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; owner?: Managed | null };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; owner?: Managed | null; team?: Managed["team"] };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -302,6 +313,7 @@ export function createSupervisor(opts: SupervisorOptions) {
             kind: "session",
             origin: "managed",
             role: m.role,
+            ...(m.team ? { team: m.team } : {}),
             parentId: m.owner?.id ?? null,
             project: m.project,
             name: m.name,
@@ -389,6 +401,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       endNote: null,
       forgetTimer: null,
       role: "worker",
+      team: null,
       owner: null,
       result: null,
       lastText: "",
@@ -402,7 +415,9 @@ export function createSupervisor(opts: SupervisorOptions) {
   /** Starts the session and waits for its id. Returns null, leaving nothing behind, when it does not start. */
   async function launch(m: Managed, prompt: string): Promise<string | null> {
     m.input.push(userMessage(prompt));
-    const extra = m.role === "master" ? OFFICE_TOOL_NAMES : [];
+    // Only workers of a research team get the GitHub tools; the Lead only delegates, so it does not.
+    const github = m.role === "worker" && m.team === "research" ? opts.github : undefined;
+    const extra = m.role === "master" ? OFFICE_TOOL_NAMES : github ? GITHUB_TOOL_NAMES : [];
     try {
       m.query = opts.query({
         prompt: m.input.iterable,
@@ -412,7 +427,20 @@ export function createSupervisor(opts: SupervisorOptions) {
             ? {
                 // In-process tools only; strictMcpConfig (from the lockdown) keeps every other MCP server out.
                 mcpServers: { [OFFICE_SERVER]: createOfficeServer(officeApi(m)) },
-                systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: MASTER_SYSTEM_PROMPT },
+                systemPrompt: {
+                  type: "preset" as const,
+                  preset: "claude_code" as const,
+                  append: m.team === "research" ? `${MASTER_SYSTEM_PROMPT}
+
+${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
+                },
+              }
+            : {}),
+          ...(github
+            ? {
+                mcpServers: { [GITHUB_SERVER]: createGithubServer(github) },
+                systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: RESEARCHER_PROMPT },
+                maxTurns: MAX_TURNS,
               }
             : {}),
           ...(m.expectedId ? { resume: m.expectedId } : {}),
@@ -459,15 +487,26 @@ export function createSupervisor(opts: SupervisorOptions) {
   }
 
   /** Starts a session after all checks. A session with an owner must stay inside the owner's folder. */
-  async function begin(req: StartRequest, role: Managed["role"], owner: Managed | null): Promise<StartResult> {
+  async function begin(req: StartMasterRequest, role: Managed["role"], owner: Managed | null): Promise<StartResult> {
     const refuse = (status: 400 | 403 | 409 | 429, code: Extract<StartResult, { ok: false }>["code"]): StartResult => {
       log({ event: "managed-refused", reason: code });
       return { ok: false, status, code };
     };
     if (budget.refuses(0)) return refuse(429, "budget");
-    const requested = owner && !isAbsolute(req.cwd) ? resolve(owner.cwd, req.cwd) : req.cwd;
+    const team = owner?.team ?? req.team ?? null;
+    // A research team lives in the research folder: that is its default and its limit.
+    let teamRoot: string | null = null;
+    if (team && !owner) {
+      const research = opts.researchDir ? await resolveAllowedFolder(opts.researchDir, roots) : null;
+      if (!research?.ok) return refuse(400, "no_research_folder");
+      teamRoot = research.path;
+    }
+    const cwd = req.cwd ?? teamRoot;
+    if (cwd === null) return refuse(400, "invalid_folder");
+    const requested = owner && !isAbsolute(cwd) ? resolve(owner.cwd, cwd) : cwd;
     const folder = await resolveAllowedFolder(requested, roots);
     if (!folder.ok) return folder.reason === "outside_roots" ? refuse(403, "folder_not_allowed") : refuse(400, "invalid_folder");
+    if (teamRoot !== null && !isInside(teamRoot, folder.path)) return refuse(403, "folder_not_allowed");
     // No await between these checks and adding the session, so two starts cannot both pass.
     if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
     if (owner && owner.state !== "running") return refuse(409, "master_stopped");
@@ -483,6 +522,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       baseCost: 0,
       role,
       owner,
+      team,
     });
     const id = await launch(m, req.prompt);
     return id ? { ok: true, id } : { ok: false, status: 502, code: "start_failed" };
@@ -580,7 +620,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     start: (req: StartRequest) => begin(req, "worker", null),
 
     /** Starts a master: a session with the office tools. Only the page does this, never a model. */
-    startMaster: (req: StartRequest) => begin(req, "master", null),
+    startMaster: (req: StartMasterRequest) => begin(req, "master", null),
 
     /** Gives an idle worker a new task. Answers at once; the work continues in the background. */
     assign: assignTask,
