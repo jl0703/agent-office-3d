@@ -177,7 +177,9 @@ describe("live check with the real SDK", { skip: !live }, () => {
       const started = await supervisor.startMaster({
         team: "research",
         name: "live research",
+        // OFFICE_LIVE_RESEARCH_PROMPT lets you try a real question; the default is a small fixed one.
         prompt:
+          process.env["OFFICE_LIVE_RESEARCH_PROMPT"] ??
           "Quick test run, keep it small: start exactly ONE researcher named repo-scout. Its task: use the github tools to list the 5 most starred repositories with the topic mcp-server (exact star counts) and report them. " +
           "Then write the report file with your template (keep every section to a few lines) and answer with the word DONE.",
       });

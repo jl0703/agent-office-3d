@@ -14,6 +14,7 @@ const item = (name: string, extra: Record<string, unknown> = {}) => ({
   license: { spdx_id: "MIT", name: "MIT License", url: "https://x" },
   language: "TypeScript",
   pushed_at: "2026-10-01T00:00:00Z",
+  created_at: "2026-10-01T00:00:00Z",
   html_url: "https://evil.example/" + name,
   owner: { login: "o" },
   secret_extra: "nope",
@@ -40,7 +41,7 @@ describe("GitHub client: fields and validation (R1)", () => {
     const res = await createGithub({ fetch: g.fetchFn }).searchRepos({ ...search(), topic: "mcp-server", language: "C#", limit: 3 });
     assert.ok(res.ok);
     const repo = res.data.repos[0]!;
-    assert.deepEqual(Object.keys(repo).sort(), ["description", "forks", "full_name", "html_url", "language", "license", "open_issues", "pushed_at", "stars", "topics"]);
+    assert.deepEqual(Object.keys(repo).sort(), ["description", "forks", "full_name", "html_url", "language", "license", "open_issues", "pushed_at", "created_at", "stars", "stars_per_day", "topics"].sort());
     assert.equal(repo.stars, 1234);
     assert.equal(repo.license, "MIT");
     assert.equal(repo.html_url, "https://github.com/a/b");
@@ -66,7 +67,7 @@ describe("GitHub client: fields and validation (R1)", () => {
       { ...search(), language: "Go stars:>5" },
       { ...search(), limit: 11 },
       { ...search(), limit: 0 },
-      { ...search(), sort: "forks" as never },
+      { ...search(), sort: "watchers" as never },
     ];
     for (const args of bad) assert.deepEqual(await gh.searchRepos(args), { ok: false, error: "invalid_input" }, JSON.stringify(args));
     for (const name of ["noslash", "a/b/c", "a/b?x=1", "../x/y", "../user", "../..", "a/..", "./x", "a/.", "../", "a/" + "b".repeat(101), "a b/c"]) {
@@ -165,6 +166,79 @@ describe("GitHub client: host, cache, limit, token (R2)", () => {
     assert.deepEqual(await createGithub({ fetch: big.fetchFn }).searchRepos(search()), { ok: false, error: "too_large" });
     const missing = scripted(() => json({}, 404));
     assert.deepEqual(await createGithub({ fetch: missing.fetchFn }).getRepo("a/b"), { ok: false, error: "not_found" });
+  });
+});
+
+describe("GitHub client: recently popular proxies", () => {
+  const NOW = Date.parse("2026-11-05T12:00:00Z");
+  const gh = (g: ReturnType<typeof scripted>) => createGithub({ fetch: g.fetchFn, now: () => NOW });
+
+  it("rejects bad, impossible, future, too old and injected dates with no request", async () => {
+    const g = scripted();
+    const c = gh(g);
+    const dates = ["2026/01/01", "26-01-01", "2026-1-1", "2026-02-31", "2026-13-01", "2026-11-06", "2027-01-01", "2016-11-04", "2026-01-01 stars:>1", "2026-01-01\n", " 2026-01-01", "", "20260101"];
+    for (const d of dates) {
+      for (const key of ["created_after", "pushed_after"] as const) {
+        assert.deepEqual(await c.searchRepos({ ...search(), [key]: d }), { ok: false, error: "invalid_input" }, `${key} ${JSON.stringify(d)}`);
+      }
+    }
+    assert.deepEqual(await c.searchRepos({ ...search(), created_after: 20260101 as never }), { ok: false, error: "invalid_input" });
+    assert.equal(g.requests.length, 0);
+  });
+
+  it("builds the qualifiers exactly and accepts today and the 10-year edge", async () => {
+    const g = scripted();
+    const c = gh(g);
+    assert.ok((await c.searchRepos({ ...search("mcp"), topic: "mcp-server", created_after: "2026-10-06", pushed_after: "2026-11-05" })).ok);
+    assert.equal(g.requests[0]!.url.searchParams.get("q"), "mcp topic:mcp-server created:>=2026-10-06 pushed:>=2026-11-05");
+    assert.ok((await c.searchRepos({ ...search("old"), created_after: "2016-11-05" })).ok);
+  });
+
+  it("accepts sort=forks and passes it on", async () => {
+    const g = scripted();
+    assert.ok((await gh(g).searchRepos({ query: "x", sort: "forks" })).ok);
+    assert.equal(g.requests[0]!.url.searchParams.get("sort"), "forks");
+  });
+
+  it("computes stars_per_day: age 0, under one day, rounding, and a missing date", async () => {
+    const day = 86_400_000;
+    const at = (ms: number) => new Date(NOW - ms).toISOString();
+    const g = scripted(() =>
+      json({
+        items: [
+          item("a/zero", { stargazers_count: 50, created_at: at(0) }),
+          item("a/half", { stargazers_count: 50, created_at: at(day / 2) }),
+          item("a/ten", { stargazers_count: 100, created_at: at(10 * day) }),
+          item("a/third", { stargazers_count: 10, created_at: at(3 * day) }),
+          item("a/none", { created_at: undefined }),
+          item("a/junk", { created_at: "not a date" }),
+        ],
+      }),
+    );
+    const res = await gh(g).searchRepos(search());
+    assert.ok(res.ok);
+    assert.deepEqual(res.data.repos.map((r) => r.stars_per_day), [50, 50, 10, 3.3, null, null]);
+    assert.equal(res.data.repos[2]!.created_at, at(10 * day).slice(0, 10));
+    assert.equal(res.data.repos[4]!.created_at, null);
+  });
+
+  it("getRepo has created_at and stars_per_day and nothing else new", async () => {
+    const g = scripted((url) => (url.pathname.endsWith("/releases/latest") ? json({}, 404) : json(item("a/b", { stargazers_count: 30, created_at: new Date(NOW - 4 * 86_400_000).toISOString() }))));
+    const res = await gh(g).getRepo("a/b");
+    assert.ok(res.ok);
+    assert.equal(res.data.stars_per_day, 7.5);
+    assert.deepEqual(Object.keys(res.data).sort(), ["created_at", "description", "forks", "full_name", "html_url", "language", "latest_release", "license", "open_issues", "pushed_at", "stars", "stars_per_day", "topics"]);
+  });
+
+  it("does not share a cache entry between different date filters or sorts", async () => {
+    const g = scripted();
+    const c = gh(g);
+    await c.searchRepos({ ...search(), created_after: "2026-10-01" });
+    await c.searchRepos({ ...search(), created_after: "2026-10-02" });
+    await c.searchRepos({ ...search(), pushed_after: "2026-10-01" });
+    await c.searchRepos({ ...search(), created_after: "2026-10-01" });
+    await c.searchRepos({ query: "mcp servers", sort: "forks", created_after: "2026-10-01" });
+    assert.equal(g.requests.length, 4, "the repeat is cached, the rest are separate");
   });
 });
 

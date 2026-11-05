@@ -18,19 +18,21 @@ export function createGithubServer(github: Github) {
     tools: [
       tool(
         "github_search_repos",
-        "Search public GitHub repositories. Returns stars, forks, open issues, short description, topics, licence, language, last push and URL. Use this for exact star counts.",
+        "Search public GitHub repositories. Returns stars, forks, open issues, short description, topics, licence, language, last push, created_at and stars_per_day, URL. Use this for exact star counts. There are NO per-day star counts and no view or clone numbers on GitHub: stars_per_day is a proxy (stars since creation divided by age in days, not stars gained today). For recently popular repos use created_after with sort=stars and rank by stars_per_day. sort=forks is a proxy for how many people copied a repo. created_after and pushed_after are YYYY-MM-DD dates (not in the future, at most 10 years old).",
         {
           query: z.string().min(1).max(120).regex(/^[A-Za-z0-9 _.-]+$/),
-          sort: z.enum(["stars", "updated"]),
+          sort: z.enum(["stars", "updated", "forks"]),
           topic: z.string().regex(/^[a-z0-9][a-z0-9-]{0,49}$/).optional(),
           language: z.string().regex(/^[A-Za-z0-9+#.-]{1,30}$/).optional(),
+          created_after: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          pushed_after: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
           limit: z.number().int().min(1).max(MAX_LIMIT).optional(),
         },
         async (args) => text(await github.searchRepos(args)),
       ),
       tool(
         "github_repo",
-        "Get one public GitHub repository by owner/name, with its latest release tag.",
+        "Get one public GitHub repository by owner/name, with its latest release tag, created_at and stars_per_day (a proxy: stars since creation divided by age in days, not stars gained today).",
         { full_name: z.string().regex(FULL_NAME) },
         async (args) => text(await github.getRepo(args.full_name)),
       ),

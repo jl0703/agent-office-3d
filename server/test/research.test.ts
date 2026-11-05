@@ -125,6 +125,12 @@ describe("the research team (R3, R4)", () => {
     assert.equal((await checkToolCall(r.research, GITHUB_TOOL_NAMES[0] as string, {})).ok, false);
   });
 
+  it("tells the researcher about the stars_per_day proxy and the recent-popularity search", () => {
+    for (const word of ["created_after", "stars_per_day", "no per-day star counts", "view or clone", "claude-skills", "reverse-engineering", "ghidra", "sort=forks"]) {
+      assert.ok(RESEARCHER_PROMPT.includes(word), word);
+    }
+  });
+
   it("gives no GitHub tools to an ordinary worker, an ordinary master, or the workers of an ordinary master", async () => {
     const r = rig();
     assert.ok((await r.supervisor.start({ cwd: r.other, prompt: "x" })).ok);
