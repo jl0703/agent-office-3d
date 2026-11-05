@@ -107,3 +107,33 @@ export async function getVault(refresh = false, fetchFn: FetchFn = fetch): Promi
     return null;
   }
 }
+
+export type Usage = { totalUsd: number; caps: { runUsd: number; sessionUsd: number; totalUsd: number } };
+
+const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Estimated usage since the server started, with the caps; null when the server cannot be reached or answers oddly. */
+export async function getUsage(fetchFn: FetchFn = fetch): Promise<Usage | null> {
+  try {
+    const res = await fetchFn("/api/usage");
+    if (!res.ok) return null;
+    const data = (await res.json()) as { totalUsd?: unknown; caps?: { runUsd?: unknown; sessionUsd?: unknown; totalUsd?: unknown } };
+    const caps = data.caps;
+    if (!isNumber(data.totalUsd) || !caps || !isNumber(caps.runUsd) || !isNumber(caps.sessionUsd) || !isNumber(caps.totalUsd)) return null;
+    return { totalUsd: data.totalUsd, caps: { runUsd: caps.runUsd, sessionUsd: caps.sessionUsd, totalUsd: caps.totalUsd } };
+  } catch {
+    return null;
+  }
+}
+
+/** The last final answer of a worker started here: its text, null when there is none yet, undefined when it could not be read. */
+export async function getAgentResult(id: string, fetchFn: FetchFn = fetch): Promise<string | null | undefined> {
+  try {
+    const res = await fetchFn(`/api/agents/${encodeURIComponent(id)}/result`);
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as { result?: unknown };
+    return typeof data.result === "string" ? data.result : data.result === null ? null : undefined;
+  } catch {
+    return undefined;
+  }
+}

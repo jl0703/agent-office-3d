@@ -1,7 +1,7 @@
 import type { ActivityEntry, Agent, AgentStatus, ServerEvent } from "../../shared/events.ts";
 import type { Fact } from "./transcript.ts";
 
-type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team">>;
+type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team" | "usd">>;
 type Entry = {
   agent: Agent;
   pending: Set<string>;
@@ -77,6 +77,7 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
         updatedAt: new Date(now()).toISOString(),
         note: null,
         ...(init.team ? { team: init.team } : {}),
+        ...(init.usd === undefined ? {} : { usd: init.usd }),
       };
       entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null, waiting: false, log: [] });
       emit({ type: "agent.spawned", agent: { ...agent } });
@@ -155,6 +156,14 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
       const text = note === null ? null : note.slice(0, 200);
       if (!e || e.agent.note === text) return;
       e.agent.note = text;
+      emit({ type: "agent.updated", agent: { ...e.agent } });
+    },
+
+    /** Only a changed value is announced, so a turn that costs nothing new sends nothing. */
+    setUsd(id: string, usd: number) {
+      const e = entries.get(id);
+      if (!e || e.agent.usd === usd) return;
+      e.agent.usd = usd;
       emit({ type: "agent.updated", agent: { ...e.agent } });
     },
 

@@ -1,7 +1,7 @@
 import { ArrowLeft, Network, X } from "lucide-react";
 import { useEffect, useRef, useState, type Ref } from "react";
 import type { ActivityEntry, Agent } from "../../shared/events.ts";
-import { getAgentEvents } from "./api.ts";
+import { getAgentEvents, getAgentResult, type Usage } from "./api.ts";
 import { canStop } from "./AgentList.tsx";
 import { StatusChip } from "./StatusChip.tsx";
 import { WorkerControls } from "./WorkerControls.tsx";
@@ -48,12 +48,64 @@ export function useActivityLog(agent: Agent | undefined, demoLog: (id: string) =
   return log;
 }
 
+const FINISHED = ["idle", "done", "stopped", "error"];
+
+/** The last final answer of a worker started here, once its turn has ended. */
+export function useAgentResult(agent: Agent | undefined, enabled: boolean) {
+  const [result, setResult] = useState<string | null | undefined>(null);
+  const id = agent?.id;
+  const stamp = agent?.updatedAt;
+  const finished = Boolean(agent && agent.origin === "managed" && FINISHED.includes(agent.status));
+  useEffect(() => {
+    setResult(null); // never keep another agent's text on screen while this one's loads
+    if (!id || !finished || !enabled) return;
+    let cancelled = false;
+    void getAgentResult(id).then((text) => {
+      if (!cancelled) setResult(text);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, stamp, finished, enabled]);
+  return result;
+}
+
+/** The result text with a Copy button. Plain text only. */
+function ResultBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard
+      ?.writeText(text)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => undefined);
+  };
+  return (
+    <>
+      <div className="result-head">
+        <h3>Result</h3>
+        <button type="button" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className="result" tabIndex={0} role="region" aria-label="Last result of this worker">
+        {text}
+      </pre>
+    </>
+  );
+}
+
 type PanelProps = {
   id: string;
   agent: Agent;
   parent: Agent | undefined;
   subagents: number;
   log: ActivityEntry[] | "loading" | "error";
+  /** The worker's last final answer: text, null for none yet, undefined when it could not be read. */
+  result: string | null | undefined;
+  usage: Usage | null;
   /** The agent has no desk in the office view. */
   notShown: boolean;
   stopOff: string | null;
@@ -66,7 +118,7 @@ type PanelProps = {
   onStop: (id: string) => void;
 };
 
-export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOff, stopping, headingRef, narrow, onClose, onSelect, onStop }: PanelProps) {
+export function AgentPanel({ id, agent, parent, subagents, log, result, usage, notShown, stopOff, stopping, headingRef, narrow, onClose, onSelect, onStop }: PanelProps) {
   const [fullTask, setFullTask] = useState(false);
   useEffect(() => setFullTask(false), [agent.id]);
   const task = agent.currentTask;
@@ -119,6 +171,15 @@ export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOf
             </button>
           )}
         </dd>
+        {agent.usd !== undefined && (
+          <>
+            <dt>Usage</dt>
+            <dd>
+              {`$${agent.usd.toFixed(2)}`}
+              {usage ? ` of $${usage.caps.sessionUsd.toFixed(2)} for this session` : ""}
+            </dd>
+          </>
+        )}
         <dt>Latest</dt>
         <dd className="mono">{agent.activity ? `${agent.tool ?? "tool"}: ${agent.activity}` : "No tool used yet"}</dd>
       </dl>
@@ -130,6 +191,8 @@ export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOf
       )}
       <WorkerControls key={`${agent.id}-${canStop(agent)}`} agent={agent} off={stopOff} />
       {canStop(agent) && stopOff && <p className="panel-note">{stopOff}</p>}
+      {typeof result === "string" && result !== "" && <ResultBox text={result} />}
+      {result === undefined && <p className="panel-note">The result could not be read.</p>}
       <h3>Activity</h3>
       {log === "loading" && <p className="panel-note">Loading…</p>}
       {log === "error" && <p className="panel-note">The activity log could not be loaded.</p>}

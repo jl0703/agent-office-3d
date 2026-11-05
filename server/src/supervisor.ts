@@ -158,6 +158,7 @@ export function createSupervisor(opts: SupervisorOptions) {
 
   const live = () => [...all].filter((m) => m.state !== "ended");
   const sessionCost = (m: { baseCost: number; runCost: number }) => m.baseCost + m.runCost;
+  const cents = (usd: number) => Math.round(usd * 100) / 100;
 
   function spawnTracked(m: Managed, o: Parameters<NonNullable<Options["spawnClaudeCodeProcess"]>>[0]) {
     const child = spawn(o.command, o.args, {
@@ -283,6 +284,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     }
     detached.delete(id);
     registry.reopen(id);
+    registry.setUsd(id, cents(sessionCost(m)));
     registry.setNote(id, null);
     registry.apply(id, [{ kind: "prompt", text: m.task }, { kind: "event" }], null);
   }
@@ -318,6 +320,7 @@ export function createSupervisor(opts: SupervisorOptions) {
             project: m.project,
             name: m.name,
             currentTask: m.task,
+            usd: cents(sessionCost(m)),
           });
         }
         byId.set(id, m);
@@ -345,6 +348,7 @@ export function createSupervisor(opts: SupervisorOptions) {
         budget.add(run - m.runCost);
         m.runCost = run;
       }
+      registry.setUsd(m.id, cents(sessionCost(m)));
       log({ event: "managed-turn-end", id: m.id, subtype: message.subtype });
       const cap = message.subtype === "error_max_budget_usd" ? "run" : budget.reached(m.runCost, sessionCost(m));
       if (cap) return capReached(m, cap);
@@ -664,7 +668,7 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       const killed = await killLeftovers(everything, { inspect, kill: killTree });
       const stored = freshOnly(everything, now());
       for (const w of stored) {
-        registry.upsert(w.id, { kind: "session", origin: "managed", role: "worker", parentId: null, project: w.project, name: w.name, currentTask: w.task });
+        registry.upsert(w.id, { kind: "session", origin: "managed", role: "worker", parentId: null, project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal) });
         registry.setTerminal(w.id, "detached");
         registry.setNote(w.id, "Detached after a restart. Press Resume to continue the conversation.");
         detached.set(w.id, { ...w, pid: null, processName: null, pidStartedAt: null });
@@ -696,6 +700,13 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
     /** True while a worker is waiting for its session id, which is when a new log file could be its own. */
     starting: () => [...all].some((m) => m.state === "starting"),
     liveCount: () => live().length,
+    /** Running total since the server started, and the configured caps, in dollars rounded to cents. */
+    usage: () => ({ totalUsd: cents(budget.total()), caps: { runUsd: cents(budget.limits.runUsd), sessionUsd: cents(budget.limits.sessionUsd), totalUsd: cents(budget.limits.totalUsd) } }),
+    /** The last final answer of a worker this app started, only once its turn is settled. Null when there is none. */
+    resultOf(id: string): string | null {
+      const m = byId.get(id);
+      return m && isSettled(m) ? m.result : null;
+    },
     /** Resolves when the file writes queued so far are done. */
     settled: () => saving,
 

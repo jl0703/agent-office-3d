@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -141,6 +141,35 @@ try {
     await big.page.screenshot(join(out, "rooms-60.png"));
     console.log("rooms: 60 agents chip =", chip);
     await big.close();
+  }
+
+  if (run("needs")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+    await page.viewport(1440, 900);
+    const server = await login(page);
+    await demo(page, server.base);
+    await page.wait(2500); // the demo changes statuses every few seconds: let something need attention
+    const title = await page.evaluate<string>("document.title");
+    expect(/^\(\d+\) \[Demo\] Agent Office$/.test(title) || title === "[Demo] Agent Office", `needs: page title ${title}`);
+    await page.evaluate(`[...document.querySelectorAll(".app-actions button")].find((b) => b.textContent.includes("Needs you"))?.click()`);
+    await page.wait(300);
+    const rows = await page.evaluate<number>(`document.querySelectorAll(".needs-list li button").length`);
+    const empty = await page.evaluate<boolean>(`Boolean(document.querySelector(".needs-list p"))`);
+    expect(rows > 0 || empty, "needs: the list opens");
+    await page.screenshot(join(out, "needs-open.png"));
+    await page.evaluate(source);
+    const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+    expect(violations.length === 0, `needs: axe with the list open: ${violations.join(", ")}`);
+    if (rows > 0) {
+      await page.evaluate(`document.querySelector(".needs-list li button").click()`);
+      await page.wait(500);
+      const opened = await page.evaluate<string>(`document.querySelector(".panel h2")?.textContent ?? ""`);
+      expect(opened !== "", "needs: choosing an item opens its details");
+    }
+    await page.key("Escape", { keyCode: 27 });
+    console.log(`needs: title=${JSON.stringify(title)} rows=${rows} axe=${violations.length}`);
+    await close();
   }
 
   if (run("axe")) {

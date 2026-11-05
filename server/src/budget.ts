@@ -12,6 +12,7 @@ export function createBudget(limits: { runUsd: number; sessionUsd: number; total
       if (Number.isFinite(usd) && usd > 0) total += usd;
     },
     total: () => total,
+    limits: { ...limits },
     /** The first cap reached, or null. `sessionUsd` already includes the current run. */
     reached(runUsd: number, sessionUsd: number): Cap | null {
       if (runUsd >= limits.runUsd) return "run";

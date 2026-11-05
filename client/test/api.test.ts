@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignTask, describeFailure, getAgentEvents, getVault, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, describeFailure, getAgentEvents, getVault, getAgentResult, getUsage, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -124,5 +124,22 @@ describe("api helpers", () => {
     const none = fakeFetch(400, { error: "no_research_folder" });
     assert.deepEqual(await startResearch("x", none.fn), { ok: false, message: describeFailure(400, "no_research_folder") });
     assert.ok(describeFailure(400, "no_research_folder").includes("OFFICE_VAULT_DIR"));
+  });
+
+  it("reads usage with its caps, and the last result of a worker, and gives null or undefined for anything odd", async () => {
+    const usage = { totalUsd: 1.25, caps: { runUsd: 2, sessionUsd: 5, totalUsd: 20 } };
+    const ok = fakeFetch(200, usage);
+    assert.deepEqual(await getUsage(ok.fn), usage);
+    assert.equal(ok.calls[0]?.path, "/api/usage");
+    assert.equal(await getUsage(fakeFetch(200, { totalUsd: "1" }).fn), null);
+    assert.equal(await getUsage(fakeFetch(200, { totalUsd: 1, caps: { runUsd: 2 } }).fn), null);
+    assert.equal(await getUsage(fakeFetch(403, {}).fn), null);
+    assert.equal(await getUsage(async () => Promise.reject(new Error("offline"))), null);
+    const res = fakeFetch(200, { result: "All done." });
+    assert.equal(await getAgentResult("a/b", res.fn), "All done.");
+    assert.equal(res.calls[0]?.path, "/api/agents/a%2Fb/result");
+    assert.equal(await getAgentResult("a", fakeFetch(200, { result: null }).fn), null);
+    assert.equal(await getAgentResult("a", fakeFetch(404, {}).fn), undefined);
+    assert.equal(await getAgentResult("a", fakeFetch(200, { result: 5 }).fn), undefined);
   });
 });
