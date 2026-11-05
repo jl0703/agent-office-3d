@@ -27,7 +27,8 @@ after(async () => {
 });
 
 function rig(opts: { research?: boolean } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "research-"));
+  // The long form of the path: on Windows the temp folder may be given by its short name, which real paths never use.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "research-")));
   made.push(root);
   const research = join(root, "vault", "research");
   const other = join(root, "other"); // allowed by the roots, but not the research folder
