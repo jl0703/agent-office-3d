@@ -110,4 +110,58 @@ describe("live check with the real SDK", { skip: !live }, () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
+
+  it("gives a running worker a second task, then resumes it after a restart", { timeout: 420_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "live-resume-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "live-data-"));
+    const turnEnds = (logs: Record<string, unknown>[], id: string) => logs.filter((l) => l["event"] === "managed-turn-end" && l["id"] === id).length;
+    const waitFor = async (check: () => boolean, ms: number, what: string) => {
+      const end = Date.now() + ms;
+      while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 500));
+      assert.ok(check(), `timed out waiting for ${what}`);
+    };
+    try {
+      const logsA: Record<string, unknown>[] = [];
+      const first = createSupervisor({ registry: createRegistry(), query, roots: [root], env: process.env, dataDir, log: (line) => logsA.push(line) });
+      let id = "";
+      try {
+        const started = await first.start({ cwd: root, prompt: "Create the file one.txt containing the word one. Then answer with the word DONE." });
+        assert.ok(started.ok, `start failed: ${JSON.stringify(started)}`);
+        id = started.id;
+        await waitFor(() => turnEnds(logsA, id) >= 1, 120_000, "the first task");
+        assert.ok(existsSync(join(root, "one.txt")), "one.txt was written");
+
+        // A second task for the same, still running worker.
+        const assigned = await first.assign(id, "Create the file two.txt containing the word two. Then answer with the word DONE.");
+        assert.deepEqual(assigned, { ok: true });
+        await waitFor(() => turnEnds(logsA, id) >= 2, 120_000, "the second task");
+        assert.ok(existsSync(join(root, "two.txt")), "two.txt was written");
+        await first.settled();
+      } finally {
+        await first.close(); // the "restart": every worker process of this server ends
+      }
+
+      // A new server run with the same data folder: the worker is listed and can be resumed on the same conversation.
+      const logsB: Record<string, unknown>[] = [];
+      const registryB = createRegistry();
+      const second = createSupervisor({ registry: registryB, query, roots: [root], env: process.env, dataDir, log: (line) => logsB.push(line) });
+      try {
+        await second.recover();
+        assert.ok(second.claims(id), "the worker is known after the restart");
+        assert.ok(["detached", "stopped"].includes(registryB.get(id)?.status ?? ""), `status after restart: ${registryB.get(id)?.status}`);
+        const resumed = await second.resume(id, "Create the file three.txt containing the word three. Then answer with the word DONE.");
+        assert.deepEqual(resumed, { ok: true }, `resume failed: ${JSON.stringify(resumed)}`);
+        await waitFor(() => turnEnds(logsB, id) >= 1, 120_000, "the resumed task");
+        assert.ok(existsSync(join(root, "three.txt")), "three.txt was written after the resume");
+        assert.equal(registryB.get(id)?.id, id, "the same conversation");
+        await second.stop(id);
+        assert.equal(second.liveCount(), 0);
+      } finally {
+        await second.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
 });
