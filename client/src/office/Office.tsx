@@ -512,6 +512,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
     }
 
     // Speech bubbles: plain text in a few elements, over the speaker (who may be walking).
+    const placed: { x: number; y: number; w: number }[] = [];
     told.bubbles.forEach((b, i) => {
       const el = bubbleRefs.current[i];
       const d = w.byId.get(b.agentId);
@@ -527,7 +528,17 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
         el.dataset.text = b.text;
         el.textContent = b.text;
       }
-      el.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
+      // Two bubbles close together would cover each other: lift the later one clear of the earlier ones.
+      const sx = (pos.x * 0.5 + 0.5) * size.width;
+      let sy = (-pos.y * 0.5 + 0.5) * size.height;
+      const width = Math.min(288, 7 * b.text.length + 18);
+      for (let tries = 0; tries < 4; tries++) {
+        const clash = placed.some((p) => Math.abs(p.x - sx) < (p.w + width) / 2 && Math.abs(p.y - sy) < 28);
+        if (!clash) break;
+        sy -= 28;
+      }
+      if (pos.z < 1) placed.push({ x: sx, y: sy, w: width }); // one behind the camera takes no room
+      el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -100%)`;
       el.style.display = pos.z < 1 ? "" : "none";
     });
     for (let i = told.bubbles.length; i < bubbleRefs.current.length; i++) {

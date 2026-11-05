@@ -15,6 +15,7 @@ describe("office layout", () => {
     assert.equal(t[0], 5);
     assert.equal(t[2], 6);
     for (const bad of [0, -3, NaN]) assert.ok(Number.isFinite(fitCamera(small, bad).distance), `aspect ${bad}`);
+    assert.ok(fitCamera(small, 0.5).target[1] > fitCamera(small, 1.6).target[1], "a tall, narrow window aims higher");
   });
 
   it("shortens a tag to 18 characters plus an ellipsis without splitting a character", () => {
