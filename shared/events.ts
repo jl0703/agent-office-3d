@@ -9,6 +9,8 @@ export type Agent = {
   /** Seen through its log file (view-only), or started by this app (controllable). */
   origin: "observed" | "managed";
   role: "solo" | "worker" | "master";
+  /** Set for the research team's master and its workers. */
+  team?: "research";
   parentId: string | null;
   name: string;
   /** Base name of the working folder, never the full path. */

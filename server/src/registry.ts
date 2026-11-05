@@ -1,7 +1,7 @@
 import type { ActivityEntry, Agent, AgentStatus, ServerEvent } from "../../shared/events.ts";
 import type { Fact } from "./transcript.ts";
 
-type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role">>;
+type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team">>;
 type Entry = {
   agent: Agent;
   pending: Set<string>;
@@ -76,6 +76,7 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
         desk,
         updatedAt: new Date(now()).toISOString(),
         note: null,
+        ...(init.team ? { team: init.team } : {}),
       };
       entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null, waiting: false, log: [] });
       emit({ type: "agent.spawned", agent: { ...agent } });

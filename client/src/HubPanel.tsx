@@ -18,6 +18,8 @@ export function HubPanel({ id, vault, demo, headingRef, onClose, onRescan }: Pro
   const [query, setQuery] = useState("");
   const connected = vault !== null && vault !== "loading" && vault.connected ? vault : null;
   const found = connected ? searchTitles(connected.nodes, query) : [];
+  // Reports written by the research team: dated file names sort by date, newest first.
+  const reports = connected ? connected.nodes.filter((n) => /(^|\/)research\//.test(n.id)).sort((a, b) => b.id.localeCompare(a.id)).slice(0, 10) : [];
 
   return (
     <aside id={id} className="panel" aria-labelledby={`${id}-title`}>
@@ -60,6 +62,18 @@ export function HubPanel({ id, vault, demo, headingRef, onClose, onRescan }: Pro
                 </li>
               ))}
             </ul>
+          )}
+          {reports.length > 0 && (
+            <>
+              <h3>Research reports</h3>
+              <ul className="note-list" aria-label="Research reports, newest first">
+                {reports.map((n) => (
+                  <li key={n.id}>
+                    <a href={obsidianLink(connected.name, n.id)}>{n.title}</a>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
           <h3>Recent</h3>
           <ul className="note-list" aria-label="Recently changed notes">

@@ -86,6 +86,7 @@ export function AgentPanel({ id, agent, parent, subagents, log, notShown, stopOf
       </header>
       <div className="panel-chips">
         <StatusChip status={agent.status} />
+        {agent.team === "research" && <span className="role-chip">Research</span>}
         {agent.role === "master" && (
           <span className="role-chip">
             <Network size={16} strokeWidth={1.75} aria-hidden="true" />

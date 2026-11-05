@@ -1,8 +1,11 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer } from "./app.ts";
 import { DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD } from "./budget.ts";
+import { createGithub } from "./github.ts";
 import { parseRoots } from "./paths.ts";
 import { createRegistry } from "./registry.ts";
 import { createSupervisor } from "./supervisor.ts";
@@ -24,6 +27,19 @@ const publicPort = publicPortRaw === undefined ? undefined : numberFromEnv("OFFI
 const staleMinutes = numberFromEnv("OFFICE_STALE_MINUTES", 15, 1, 24 * 60);
 // Workers may only use these folders. Unset, that is just the folder the server was started in.
 const roots = parseRoots(process.env["OFFICE_ALLOWED_ROOTS"], process.cwd());
+// The research team's folder: set explicitly, else inside the vault. It is the only part of the vault workers may use.
+const vaultDir = process.env["OFFICE_VAULT_DIR"];
+const researchSetting = process.env["OFFICE_RESEARCH_DIR"] || (vaultDir ? join(vaultDir, "agent-workspace", "research") : undefined);
+let researchDir: string | undefined;
+if (researchSetting && isAbsolute(researchSetting)) {
+  try {
+    await mkdir(researchSetting, { recursive: true });
+    researchDir = researchSetting;
+    roots.push(researchDir);
+  } catch {
+    console.error("The research folder could not be created; the research team is off.");
+  }
+}
 
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
@@ -31,6 +47,8 @@ const supervisor = createSupervisor({
   registry,
   query,
   roots,
+  ...(researchDir ? { researchDir } : {}),
+  github: createGithub({ token: process.env["GITHUB_TOKEN"] }),
   env: process.env,
   maxManaged: numberFromEnv("MAX_MANAGED", 8, 1, 20),
   maxMasters: numberFromEnv("MAX_MASTERS", 1, 1, 5),

@@ -1,8 +1,8 @@
 import { Plus } from "lucide-react";
 import { forwardRef, useId, useState, type FormEvent } from "react";
-import { startMaster, startWorker } from "./api.ts";
+import { startMaster, startResearch, startWorker } from "./api.ts";
 
-type Kind = "worker" | "master";
+type Kind = "worker" | "master" | "research";
 
 const COPY: Record<Kind, { summary: string; note: string; label: string; button: string; done: string }> = {
   worker: {
@@ -11,6 +11,13 @@ const COPY: Record<Kind, { summary: string; note: string; label: string; button:
     label: "What should it do?",
     button: "Start worker",
     done: "Worker started.",
+  },
+  research: {
+    summary: "Start a research team",
+    note: "A lead and up to three scouts search GitHub (real star counts, licences, activity), skills and MCP servers, and write one report with recommendations for this workspace into the research folder. Nothing is installed.",
+    label: "What should the team find out?",
+    button: "Start research",
+    done: "Research team started.",
   },
   master: {
     summary: "Start a master",
@@ -36,7 +43,7 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null }>(
     event.preventDefault();
     setBusy(true);
     setMessage("");
-    const result = await (kind === "master" ? startMaster(cwd.trim(), prompt) : startWorker(cwd.trim(), prompt));
+    const result = await (kind === "research" ? startResearch(prompt) : kind === "master" ? startMaster(cwd.trim(), prompt) : startWorker(cwd.trim(), prompt));
     setBusy(false);
     if (result.ok) {
       setPrompt("");
@@ -54,7 +61,7 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null }>(
       <form id="start-form" onSubmit={(event) => void submit(event)} className="start-form">
         <fieldset className="kind">
           <legend>What to start</legend>
-          {(["worker", "master"] as const).map((k) => (
+          {(["worker", "master", "research"] as const).map((k) => (
             <label key={k} className="kind-option">
               <input type="radio" name="kind" value={k} checked={kind === k} onChange={() => setKind(k)} />
               {COPY[k].summary.replace("Start a ", "").replace(/^./, (c) => c.toUpperCase())}
@@ -62,8 +69,12 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null }>(
           ))}
         </fieldset>
         <p className="note">{copy.note}</p>
-        <label htmlFor={folderId}>Folder (full path)</label>
-        <input id={folderId} value={cwd} onChange={(e) => setCwd(e.target.value)} required maxLength={1000} placeholder="C:\path\to\project" />
+        {kind !== "research" && (
+          <>
+            <label htmlFor={folderId}>Folder (full path)</label>
+            <input id={folderId} value={cwd} onChange={(e) => setCwd(e.target.value)} required maxLength={1000} placeholder="C:\path\to\project" />
+          </>
+        )}
         <label htmlFor={promptId}>{copy.label}</label>
         <textarea id={promptId} value={prompt} onChange={(e) => setPrompt(e.target.value)} required maxLength={10000} rows={4} />
         <button type="submit" disabled={busy || Boolean(off)}>
