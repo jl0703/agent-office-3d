@@ -36,6 +36,7 @@ type Options = {
 
 const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
+const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume)$/;
 
 const StartBody = z
@@ -137,6 +138,13 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (history?.[1] && method === "GET") {
         const events = opts.registry?.events(history[1]);
         return events ? json(res, 200, { events }) : json(res, 404, { error: "not_found" });
+      }
+      if (url.pathname === "/api/usage" && method === "GET" && opts.supervisor) return json(res, 200, opts.supervisor.usage());
+      const answer = AGENT_RESULT.exec(url.pathname);
+      if (answer?.[1] && method === "GET") {
+        const agent = opts.registry?.get(answer[1]);
+        if (!agent || agent.origin === "observed" || !opts.supervisor) return json(res, 404, { error: "not_found" });
+        return json(res, 200, { result: opts.supervisor.resultOf(agent.id) });
       }
       if (method === "POST" && opts.supervisor) {
         if (url.pathname === "/api/agents") return run(req, res, () => startWorker(req, res));

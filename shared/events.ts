@@ -26,6 +26,8 @@ export type Agent = {
   updatedAt: string;
   /** Why the agent is waiting, stopped, or detached. At most 200 characters. */
   note: string | null;
+  /** Estimated usage of this session across resumes, in US dollars rounded to cents. Managed agents only. */
+  usd?: number;
 };
 
 /** One tool call in an agent's recent history. */

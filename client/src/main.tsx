@@ -1,11 +1,14 @@
 import { BookOpen, FlaskConical, LayoutGrid, LocateFixed, OctagonX, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { EVENT_TYPES, type Agent, type ServerEvent } from "../../shared/events.ts";
+import { EVENT_TYPES, type Agent, type AgentStatus, type ServerEvent } from "../../shared/events.ts";
 import { AgentList, canStop, type RoomGroup } from "./AgentList.tsx";
-import { AgentPanel, useActivityLog } from "./AgentPanel.tsx";
-import { getVault, stopAgent, stopAll } from "./api.ts";
+import { attentionOf, pageTitle, trackFinished } from "./attention.ts";
+import { AgentPanel, useActivityLog, useAgentResult } from "./AgentPanel.tsx";
+import { getUsage, getVault, stopAgent, stopAll, type Usage } from "./api.ts";
+import { UsageMeter } from "./UsageMeter.tsx";
 import { HubPanel } from "./HubPanel.tsx";
+import { NeedsYou } from "./NeedsYou.tsx";
 import { demoVault } from "./vault.ts";
 import type { VaultInfo } from "../../shared/vault.ts";
 import { applyEvent, buildTree, initialState } from "./agents.ts";
@@ -47,6 +50,9 @@ function App() {
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [hubOpen, setHubOpen] = useState(false);
+  const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
+  const lastStatus = useRef(new Map<string, AgentStatus>());
+  const [usage, setUsage] = useState<Usage | null>(null);
   const [vaultInfo, setVaultInfo] = useState<VaultInfo | "loading" | null>("loading");
   const demo = useDemo();
   const { selected, hovered, room } = useSelection();
@@ -74,6 +80,19 @@ function App() {
     return () => source.close();
   }, []);
 
+  // The usage figure is asked for every ten seconds while connected.
+  useEffect(() => {
+    if (connection !== "connected") return;
+    let cancelled = false;
+    const load = () => void getUsage().then((u) => !cancelled && setUsage(u));
+    load();
+    const timer = setInterval(load, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [connection]);
+
   const loadVault = useCallback((refresh: boolean) => {
     void getVault(refresh).then(setVaultInfo);
   }, []);
@@ -92,6 +111,17 @@ function App() {
   const tree = useMemo(() => buildTree(state), [state]);
   const agents = useMemo(() => Object.values(state.agents), [state]);
   const current = selected ? state.agents[selected] : undefined;
+
+  // What needs the person: failures, caps, waiting, and finished work they have not opened yet.
+  useEffect(() => {
+    const before = lastStatus.current;
+    lastStatus.current = new Map(agents.map((a) => [a.id, a.status]));
+    setUnseen((u) => trackFinished(before, agents, u, selected));
+  }, [agents, selected]);
+  const needs = useMemo(() => attentionOf(agents, unseen), [agents, unseen]);
+  useEffect(() => {
+    document.title = pageTitle(needs.length, demo.active);
+  }, [needs.length, demo.active]);
 
   // Rooms keep their places while agents come and go, so the previous answer is part of the input.
   const placed = useRef(emptyAssignment);
@@ -202,6 +232,7 @@ function App() {
   }, [current]);
 
   const log = useActivityLog(current, demo.log, demo.active);
+  const result = useAgentResult(current, !demo.active);
 
   const onStop = useCallback(async (id: string) => {
     setNotice("");
@@ -255,7 +286,9 @@ function App() {
       <header className="app-head">
         <h1>Agent Office</h1>
         <ConnectionBadge connection={connection} />
+        <UsageMeter usage={demo.active ? { totalUsd: 3.4, caps: { runUsd: 2, sessionUsd: 5, totalUsd: 20 } } : usage} demo={demo.active} />
         <div className="app-actions">
+          <NeedsYou items={needs} onOpen={(id) => selection.select(id)} />
           {demo.active ? (
             <button type="button" onClick={demo.stop}>
               <FlaskConical size={20} strokeWidth={1.75} aria-hidden="true" /> Exit demo
@@ -359,6 +392,8 @@ function App() {
                 parent={parent}
                 subagents={subagents}
                 log={log}
+              result={result}
+              usage={usage}
                 notShown={!assignment.seat.has(current.id)}
                 stopOff={off}
                 stopping={stopping.has(current.id)}

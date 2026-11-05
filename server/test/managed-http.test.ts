@@ -433,3 +433,65 @@ describe("the guard in front of the new routes", () => {
     assert.equal(res.status, 404);
   });
 });
+
+describe("usage meters and the result route", () => {
+  const get = (r: Awaited<ReturnType<typeof rig>>, path: string, cookie = true) =>
+    send(r.srv.port, path, { headers: { host: r.auth.host, ...(cookie ? { cookie: r.auth.cookie } : {}) } });
+  const answer = (cost: number, result: string) => ({ ...resultMessage(cost), result }) as ReturnType<typeof resultMessage>;
+  const resultOf = async (r: Awaited<ReturnType<typeof rig>>, id: string) => JSON.parse((await get(r, `/api/agents/${id}/result`)).body) as { result: string | null };
+  const wait = async (check: () => Promise<boolean>) => {
+    const end = Date.now() + 3000;
+    while (!(await check()) && Date.now() < end) await new Promise((x) => setTimeout(x, 10));
+  };
+
+  it("adds scripted costs up across a resume and reports the configured caps", async () => {
+    const r = await rig({ sessionId: () => "s1" }, { sessionBudgetUsd: 1.234, totalBudgetUsd: 7.5 });
+    assert.deepEqual(JSON.parse((await get(r, "/api/usage")).body), { totalUsd: 0, caps: { runUsd: 2, sessionUsd: 1.23, totalUsd: 7.5 } });
+    await r.start();
+    await r.endTurn(0, 0.3);
+    await r.post("/api/agents/s1/stop");
+    assert.deepEqual((await r.post("/api/agents/s1/resume", {})).status, 202);
+    await r.endTurn(1, 0.456);
+    const usage = JSON.parse((await get(r, "/api/usage")).body) as { totalUsd: number };
+    assert.equal(usage.totalUsd, 0.76);
+    assert.equal(r.registry.get("s1")?.usd, 0.76, "the session total spans both runs");
+  });
+
+  it("announces usd only when the rounded value changes", async () => {
+    const r = await rig();
+    const stream = await r.stream();
+    await r.start();
+    await r.endTurn(0, 0.1);
+    await r.endTurn(0, 0.1);
+    await r.endTurn(0, 0.1004);
+    await r.endTurn(0, 0.3);
+    await new Promise((x) => setTimeout(x, 50));
+    const seen = stream.events.filter((e) => e.name === "agent.updated").map((e) => (parse(e) as { agent: { usd?: number } }).agent.usd);
+    assert.deepEqual(seen, [0.1, 0.3]);
+    assert.equal((parse(await stream.next((e) => e.name === "agent.spawned")) as { agent: { usd?: number } }).agent.usd, 0);
+  });
+
+  it("returns the answer after the turn ends, null while a task runs, cut to 2000 characters", async () => {
+    const r = await rig();
+    const { id } = JSON.parse((await r.start()).body) as { id: string };
+    assert.deepEqual(await resultOf(r, id), { result: null });
+    r.sessions[0]?.out.push(answer(0.1, "x".repeat(3000)));
+    await wait(async () => (await resultOf(r, id)).result !== null);
+    assert.equal((await resultOf(r, id)).result, "x".repeat(2000));
+    assert.equal((await r.post(`/api/agents/${id}/tasks`, { prompt: "again" })).status, 202);
+    assert.deepEqual(await resultOf(r, id), { result: null });
+    r.sessions[0]?.out.push(answer(0.2, "second answer"));
+    await wait(async () => (await resultOf(r, id)).result !== null);
+    assert.deepEqual(await resultOf(r, id), { result: "second answer" });
+  });
+
+  it("answers 404 for unknown, observed and oddly named agents, and 403 without the cookie", async () => {
+    const r = await rig();
+    r.registry.upsert("seen", { kind: "session", parentId: null, project: "p", name: "p", currentTask: null });
+    r.registry.upsert("odd.id", { kind: "session", origin: "managed", parentId: null, project: "p", name: "p", currentTask: null });
+    r.registry.upsert("long".padEnd(101, "x"), { kind: "session", origin: "managed", parentId: null, project: "p", name: "p", currentTask: null });
+    for (const id of ["nope", "seen", "odd.id", "long".padEnd(101, "x")]) assert.equal((await get(r, `/api/agents/${id}/result`)).status, 404, id);
+    assert.equal((await get(r, "/api/agents/seen/result", false)).status, 403);
+    assert.equal((await get(r, "/api/usage", false)).status, 403);
+  });
+});

@@ -64,15 +64,6 @@ export function useDemo(): Demo {
     };
   }, [count]);
 
-  useEffect(() => {
-    if (count === null) return;
-    const before = document.title;
-    document.title = `[Demo] ${before.replace(/^\[Demo\] /, "")}`;
-    return () => {
-      document.title = before;
-    };
-  }, [count]);
-
   const start = useCallback((n = 20) => {
     const url = new URL(window.location.href);
     url.searchParams.set("demo", String(n));
