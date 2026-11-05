@@ -4,6 +4,9 @@ import { createRoot } from "react-dom/client";
 import { EVENT_TYPES, type Agent, type AgentStatus, type ServerEvent } from "../../shared/events.ts";
 import { AgentList, canStop, type RoomGroup } from "./AgentList.tsx";
 import { attentionOf, pageTitle, trackFinished } from "./attention.ts";
+import { countByStatus, filterTree, isFiltering, noFilter, step, type Filter } from "./filter.ts";
+import { ListFilter } from "./ListFilter.tsx";
+import { STATUSES } from "./office/palette.ts";
 import { familyOf } from "./timeline.ts";
 import { AgentPanel, useActivityLog, useAgentResult } from "./AgentPanel.tsx";
 import { getUsage, getVault, stopAgent, stopAll, type Usage } from "./api.ts";
@@ -54,6 +57,8 @@ function App() {
   const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
   const lastStatus = useRef(new Map<string, AgentStatus>());
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [filter, setFilter] = useState<Filter>(noFilter);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [vaultInfo, setVaultInfo] = useState<VaultInfo | "loading" | null>("loading");
   const demo = useDemo();
   const { selected, hovered, room } = useSelection();
@@ -142,7 +147,19 @@ function App() {
         return { key: key === "" ? "hidden" : key, title: key === "" ? "Not shown in the office view" : roomName(key), count: members.length, errors: members.filter((m) => m.status === "error").length, nodes };
       });
   }, [tree, assignment]);
-  const shownGroups = room === null ? groups : groups.filter((g) => g.key === room);
+  const inRoom = useMemo(() => (room === null ? groups : groups.filter((g) => g.key === room)), [groups, room]);
+  // The search and status chips narrow the list; the office itself always shows everyone.
+  const shownGroups = useMemo(() => (isFiltering(filter) ? inRoom.map((g) => ({ ...g, nodes: filterTree(g.nodes, filter) })).filter((g) => g.nodes.length > 0) : inRoom), [inRoom, filter]);
+  const matchCount = useMemo(() => {
+    const count = (nodes: typeof tree): number => nodes.reduce((n, node) => n + 1 + count(node.children), 0);
+    return shownGroups.reduce((n, g) => n + count(g.nodes), 0);
+  }, [shownGroups]);
+  const statusCounts = useMemo(() => countByStatus(agents, STATUSES, filter.statuses), [agents, filter.statuses]);
+  // "N of M" counts what the list could show: the focused room's sessions, or all of them.
+  const listTotal = useMemo(() => {
+    const count = (nodes: typeof tree): number => nodes.reduce((n, node) => n + 1 + count(node.children), 0);
+    return inRoom.reduce((n, g) => n + count(g.nodes), 0);
+  }, [inRoom]);
   const runningHere = demo.active ? 0 : agents.filter(canStop).length;
 
   // Why Start and Stop are switched off, shown next to them.
@@ -269,6 +286,30 @@ function App() {
     startForm.current.querySelector("input")?.focus();
   }, [startRequested]);
 
+  // Keyboard shortcuts: / searches, j and k move between sessions. They never fire while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        setTab("list");
+        requestAnimationFrame(() => searchRef.current?.focus());
+      } else if (e.key === "j" || e.key === "k") {
+        const rows = [...document.querySelectorAll<HTMLButtonElement>("button.row-name")].filter((b) => b.offsetParent !== null);
+        const active = rows.find((b) => b === document.activeElement);
+        const next = step(rows, active, e.key === "j" ? 1 : -1);
+        if (next) {
+          e.preventDefault();
+          next.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   const onTabKey = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
     const order: Tab[] = ["office", "list"];
     const at = order.indexOf(tab);
@@ -360,7 +401,9 @@ function App() {
               Claude Code sessions <span className="count">({agents.length})</span>
             </h2>
             <p className="note">Sessions marked "started here" can be stopped. Sessions started anywhere else are view-only.</p>
-            <AgentList
+            <ListFilter filter={filter} onChange={setFilter} counts={statusCounts} shown={matchCount} total={listTotal} searchRef={searchRef} />
+          <AgentList
+            emptyText={isFiltering(filter) ? "No sessions match. Clear the search or the status chips." : undefined}
               groups={shownGroups}
             focusedRoom={room}
             onFocusRoom={(key) => selection.focusRoom(room === key ? null : key)}

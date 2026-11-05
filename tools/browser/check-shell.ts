@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -195,6 +195,51 @@ try {
     const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
     expect(violations.length === 0, `panel: axe: ${violations.join(", ")}`);
     console.log(`panel: team=${teamBefore.length} timeline=${rows.length} sample=${JSON.stringify(rows[0])} axe=${violations.length}`);
+    await close();
+  }
+
+  if (run("filter")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+    await page.viewport(1440, 900);
+    const server = await login(page);
+    await demo(page, server.base);
+    const rows = () => page.evaluate<number>(`document.querySelectorAll("button.row-name").length`);
+    const all = await rows();
+    await page.evaluate(`document.activeElement && document.activeElement.blur()`);
+    await page.key("/", { keyCode: 191 });
+    await page.wait(300);
+    const focused = await page.evaluate<string>(`document.activeElement?.id ?? ""`);
+    expect(focused === "session-search", `filter: "/" focuses the search (${focused})`);
+    await page.evaluate(`(() => { const i = document.getElementById("session-search"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, "docs"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await page.wait(300);
+    const some = await rows();
+    const status = await page.evaluate<string>(`document.querySelector(".list-filter [role=status]")?.textContent ?? ""`);
+    expect(some > 0 && some < all, `filter: search narrows the list (${all} -> ${some})`);
+    expect(/\d+ of \d+ sessions/.test(status), `filter: result count announced ("${status}")`);
+    await page.key("Escape", { keyCode: 27 });
+    await page.wait(300);
+    const cleared = await rows();
+    expect(cleared === all, `filter: Escape clears the search (${cleared} of ${all})`);
+    await page.evaluate(`document.querySelector(".chip-filter")?.click()`);
+    await page.wait(300);
+    const byStatus = await rows();
+    const pressed = await page.evaluate<number>(`document.querySelectorAll(".chip-filter[aria-pressed=true]").length`);
+    expect(pressed === 1 && byStatus > 0 && byStatus <= all, `filter: a status chip narrows the list (${byStatus})`);
+    await page.evaluate(`document.querySelector("[aria-label='Clear search and filters']")?.click()`);
+    await page.wait(300);
+    expect((await rows()) === all, "filter: Clear restores the list");
+    await page.evaluate(`document.activeElement && document.activeElement.blur()`);
+    await page.key("j", { keyCode: 74 });
+    const onRow = await page.evaluate<boolean>(`document.activeElement?.classList.contains("row-name") ?? false`);
+    expect(onRow, "filter: j moves to a session");
+    await page.evaluate(`document.querySelector(".legend summary")?.click()`);
+    await page.wait(200);
+    await page.screenshot(join(out, "filter-legend.png"));
+    await page.evaluate(source);
+    const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+    expect(violations.length === 0, `filter: axe: ${violations.join(", ")}`);
+    console.log(`filter: rows ${all} -> search ${some} -> chip ${byStatus}, status="${status}", axe=${violations.length}`);
     await close();
   }
 
