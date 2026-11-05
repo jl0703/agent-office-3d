@@ -14,6 +14,8 @@ type Controls = {
   hoveredId?: string | null;
   onSelect?: (id: string) => void;
   onHover?: (id: string | null) => void;
+  /** Shown instead of the usual empty text, for example when a search matches nothing. */
+  emptyText?: string | undefined;
   /** The room the office is focused on, and a way to focus one from here (the office offers the same by clicking). */
   focusedRoom?: string | null;
   onFocusRoom?: (key: string) => void;
@@ -94,7 +96,7 @@ export function AgentList({ groups, ...rest }: { groups: RoomGroup[] } & Omit<Co
   const rovingId = ids.includes(roving ?? "") ? roving : ids.includes(rest.selectedId ?? "") ? (rest.selectedId ?? null) : (ids[0] ?? null);
 
   if (ids.length === 0) {
-    return <p className="empty-list">No active Claude Code sessions. A session appears here when it writes to its log.</p>;
+    return <p className="empty-list">{rest.emptyText ?? "No active Claude Code sessions. A session appears here when it writes to its log."}</p>;
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
