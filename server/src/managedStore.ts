@@ -30,6 +30,9 @@ const Worker = z
     // Masters only. Files from before the plan gate lack both and still load.
     phase: Phase.optional(),
     plan: StoredPlan.nullable().optional(),
+    // Older files lack both. They keep a worker's team and master visible after a restart.
+    team: z.literal("research").optional(),
+    ownerId: Id.nullable().optional(),
   })
   .strict();
 const Store = z.object({ version: z.literal(1), workers: z.array(Worker).max(MAX_STORED) }).strict();

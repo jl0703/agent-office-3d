@@ -232,6 +232,8 @@ export function createSupervisor(opts: SupervisorOptions) {
       pidStartedAt: running ? m.pidStartedAt : null,
       costUsdTotal: sessionCost(m),
       ...(master ? { phase: m.phase, plan: m.plan } : {}),
+      ...(m.team ? { team: m.team } : {}),
+      ...(m.owner?.id ? { ownerId: m.owner.id } : {}),
     };
   }
 
@@ -821,7 +823,7 @@ export function createSupervisor(opts: SupervisorOptions) {
         if (!folder.ok) return folder.reason === "outside_roots" ? refuse(403, "folder_not_allowed") : refuse(400, "invalid_folder");
         if (opts.projectsDir && (await transcriptActive(opts.projectsDir, id, now()))) return refuse(409, "transcript_active");
         if (live().length >= maxManaged) return refuse(429, "too_many");
-        const m = newManaged({ cwd: folder.path, project: from.project, name: from.name, task: clean(prompt), expectedId: id, baseCost, createdAt: from.createdAt });
+        const m = newManaged({ cwd: folder.path, project: from.project, name: from.name, task: clean(prompt), expectedId: id, baseCost, createdAt: from.createdAt, ...(from.team ? { team: from.team } : {}) });
         return (await launch(m, prompt)) ? { ok: true } : refuse(502, "start_failed");
       } finally {
         resuming.delete(id);
@@ -841,7 +843,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       const killed = await killLeftovers(everything, { inspect, kill: killTree });
       const stored = freshOnly(everything, now());
       for (const w of stored) {
-        registry.upsert(w.id, { kind: "session", origin: "managed", role: w.phase ? "master" : "worker", parentId: null, project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal), ...(w.phase ? { phase: w.phase, plan: w.plan ?? null } : {}) });
+        registry.upsert(w.id, { kind: "session", origin: "managed", role: w.phase ? "master" : "worker", parentId: w.ownerId ?? null, ...(w.team ? { team: w.team } : {}), project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal), ...(w.phase ? { phase: w.phase, plan: w.plan ?? null } : {}) });
         registry.setTerminal(w.id, "detached");
         registry.setNote(w.id, "Detached after a restart. Press Resume to continue the conversation.");
         detached.set(w.id, { ...w, pid: null, processName: null, pidStartedAt: null });
@@ -854,6 +856,11 @@ export function createSupervisor(opts: SupervisorOptions) {
     async stop(id: string): Promise<"ok" | "not_found"> {
       if (detached.delete(id)) {
         registry.remove(id);
+        // Dismissing a detached master also clears the workers it left behind.
+        for (const [wid, w] of detached) if (w.ownerId === id) {
+          detached.delete(wid);
+          registry.remove(wid);
+        }
         persist();
         return "ok";
       }
