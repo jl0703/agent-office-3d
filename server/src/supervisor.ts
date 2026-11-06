@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { buildBrief } from "./brief.ts";
+import type { DecisionStore } from "./findings.ts";
+import { writeOutcome } from "./planLog.ts";
 import { createBudget, DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD, type Cap } from "./budget.ts";
 import { createChannel } from "./channel.ts";
 import { buildChildEnv } from "./childEnv.ts";
@@ -73,6 +76,10 @@ export type SupervisorOptions = {
   projectsDir?: string;
   /** The research team's folder. Must also be one of `roots`. Without it a research team cannot start. */
   researchDir?: string;
+  /** The vault's plans-log folder: where ended masters leave an outcome note and where the context brief reads them. Without it neither happens. */
+  plansLogDir?: string;
+  /** The owner's decisions on findings, for the context brief. */
+  decisions?: DecisionStore;
   /** GitHub client for the research workers' tools. */
   github?: Github;
   sessionBudgetUsd?: number;
@@ -107,6 +114,12 @@ type Managed = {
   project: string;
   cwd: string;
   task: string;
+  /** The owner's first prompt, kept for the outcome note (`task` changes with later messages). */
+  goal: string;
+  /** Workers this master has started. */
+  workersStarted: number;
+  /** The session was stopped by a usage cap. */
+  capped: boolean;
   role: "worker" | "master";
   /** A master in "planning" is read-only and may not start workers. Workers and the sweep's Lead are always "executing". */
   phase: "planning" | "executing";
@@ -139,7 +152,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -254,6 +267,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     m.state = "ended";
     m.updatedAt = now();
     if (m.role === "master") stopWorkersOf(m);
+    if (m.role === "master" && !m.sweep && m.id) void logOutcome(m, status);
     notify();
     if (m.id) {
       registry.setTerminal(m.id, status);
@@ -266,6 +280,29 @@ export function createSupervisor(opts: SupervisorOptions) {
     } else {
       all.delete(m);
       m.rejectId(new Error("ended before the session started"));
+    }
+  }
+
+  /** Leaves the vault an outcome note about an ended master. Never throws into the session loop. */
+  async function logOutcome(m: Managed, status: "stopped" | "error") {
+    if (!opts.plansLogDir || m.id === null) return;
+    try {
+      const ended = m.capped ? "cap" : m.plan?.status === "rejected" ? "rejected" : status === "error" ? "error" : m.result !== null ? "done" : "stopped";
+      const written = await writeOutcome(opts.plansLogDir, {
+        id: m.id,
+        date: new Date(now()).toISOString().slice(0, 10),
+        project: m.project,
+        goal: m.goal,
+        planStatus: m.plan?.status ?? "none",
+        workers: m.workersStarted,
+        costUsd: sessionCost(m),
+        ended,
+        steps: m.plan?.steps ?? [],
+        result: m.result ?? m.lastText,
+      });
+      if (written === "full") log({ event: "plans-log-full", id: m.id });
+    } catch (error) {
+      log({ event: "plans-log-error", id: m.id, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -283,6 +320,7 @@ export function createSupervisor(opts: SupervisorOptions) {
   function capReached(m: Managed, cap: Cap) {
     log({ event: "managed-cap", id: m.id, cap });
     m.endNote = CAP_NOTE[cap];
+    m.capped = true;
     void terminate(m);
   }
 
@@ -291,6 +329,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     log({ event: "managed-cap", id: sweep.lead?.id ?? null, cap: "sweep" });
     if (!sweep.lead) return;
     sweep.lead.endNote = SWEEP_CAP_NOTE;
+    sweep.lead.capped = true;
     void terminate(sweep.lead);
   }
 
@@ -435,6 +474,9 @@ export function createSupervisor(opts: SupervisorOptions) {
       endNote: null,
       forgetTimer: null,
       role: "worker",
+      goal: "",
+      workersStarted: 0,
+      capped: false,
       phase: "executing",
       plan: null,
       team: null,
@@ -447,6 +489,15 @@ export function createSupervisor(opts: SupervisorOptions) {
     };
     all.add(m);
     return m;
+  }
+
+  async function contextBrief(project: string): Promise<string> {
+    try {
+      return await buildBrief({ ...(opts.researchDir ? { researchDir: opts.researchDir } : {}), ...(opts.plansLogDir ? { plansLogDir: opts.plansLogDir } : {}), ...(opts.decisions ? { decisions: opts.decisions } : {}) }, project);
+    } catch (error) {
+      log({ event: "brief-error", message: error instanceof Error ? error.message : String(error) });
+      return "";
+    }
   }
 
   /** Starts the session and waits for its id. Returns null, leaving nothing behind, when it does not start. */
@@ -555,6 +606,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       project: clean(folder.path.split(/[\\/]/).filter(Boolean).pop() ?? "") || "unknown",
       name: req.name ? clean(req.name) : role === "master" ? "Master" : "Worker",
       task: clean(req.prompt),
+      goal: clean(req.prompt),
       expectedId: null,
       baseCost: 0,
       role,
@@ -565,7 +617,11 @@ export function createSupervisor(opts: SupervisorOptions) {
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
     if (m.sweep && !owner) m.sweep.lead = m;
-    const id = await launch(m, req.prompt);
+    // The brief goes into the first message only; `task` (what the page shows) stays the owner's goal.
+    const brief = m.role === "master" && m.phase === "planning" ? await contextBrief(m.project) : "";
+    if (m.state === "ended") return { ok: false, status: 502, code: "start_failed" }; // the server closed while the brief was read
+    const id = await launch(m, brief ? `${req.prompt}\n\n${brief}` : req.prompt);
+    if (id && owner) owner.workersStarted++;
     return id ? { ok: true, id } : { ok: false, status: 502, code: "start_failed" };
   }
 

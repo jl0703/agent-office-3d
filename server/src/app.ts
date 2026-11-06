@@ -7,7 +7,7 @@ import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
-import { ConfigBody, createDecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
+import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
 import type { Registry } from "./registry.ts";
 import { buildSweepPrompt } from "./sweep.ts";
@@ -38,6 +38,8 @@ type Options = {
   researchDir?: string;
   /** The app's data folder, for the decisions file. */
   dataDir?: string;
+  /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
+  decisions?: DecisionStore;
   /**
    * Dev only. At least 32 characters: the token becomes HMAC(secret, "token") and sessions become signed
    * cookies, so the same link and login survive a restart. Omit it for the strict one-time token.
@@ -108,7 +110,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   const streams = new Set<http.ServerResponse>();
   const allowedHosts = new Set<string>();
   const vault = createVault(opts.vaultDir);
-  const decisions = opts.researchDir && opts.dataDir ? createDecisionStore(opts.dataDir) : undefined;
+  const decisions = opts.researchDir && opts.dataDir ? (opts.decisions ?? createDecisionStore(opts.dataDir)) : undefined;
 
   const deny = (res: http.ServerResponse, status: number, reason: string, req: http.IncomingMessage) => {
     // Log the path only. The query string can hold the token.
