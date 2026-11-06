@@ -213,6 +213,7 @@ function App() {
   const handToMaster = (brief: string) => {
     setPreset((p) => ({ prompt: brief, nonce: (p?.nonce ?? 0) + 1 }));
     setResearchOpen(false);
+    setHubOpen(false);
     setExpanded(false);
     setTab("list");
   };
@@ -476,7 +477,7 @@ function App() {
             {panelOpen && researchOpen ? (
               <ResearchBoard id={PANEL_ID} demo={demo.active} off={off} headingRef={heading} onClose={close} onHand={handToMaster} />
             ) : panelOpen && hubOpen ? (
-            <HubPanel id={PANEL_ID} vault={shownVault} demo={demo.active} headingRef={heading} onClose={close} onRescan={() => loadVault(true)} />
+            <HubPanel id={PANEL_ID} vault={shownVault} demo={demo.active} headingRef={heading} onClose={close} onRescan={() => loadVault(true)} off={off} onPlanAgain={handToMaster} />
           ) : panelOpen && current ? (
               <AgentPanel
                 id={PANEL_ID}

@@ -1,6 +1,7 @@
 import { RefreshCw, X } from "lucide-react";
 import { useState, type Ref } from "react";
 import type { VaultInfo } from "../../shared/vault.ts";
+import { PastRuns } from "./PastRuns.tsx";
 import { obsidianLink, searchTitles } from "./vault.ts";
 
 type Props = {
@@ -11,10 +12,13 @@ type Props = {
   headingRef: Ref<HTMLHeadingElement>;
   onClose: () => void;
   onRescan: () => void;
+  /** Why starting work is switched off, or null. */
+  off: string | null;
+  onPlanAgain: (brief: string) => void;
 };
 
 /** The knowledge hub: what the connected Obsidian vault holds. Titles only; notes open in Obsidian. */
-export function HubPanel({ id, vault, demo, headingRef, onClose, onRescan }: Props) {
+export function HubPanel({ id, vault, demo, headingRef, onClose, onRescan, off, onPlanAgain }: Props) {
   const [query, setQuery] = useState("");
   const connected = vault !== null && vault !== "loading" && vault.connected ? vault : null;
   const found = connected ? searchTitles(connected.nodes, query) : [];
@@ -75,6 +79,7 @@ export function HubPanel({ id, vault, demo, headingRef, onClose, onRescan }: Pro
               </ul>
             </>
           )}
+          <PastRuns demo={demo} off={off} onPlanAgain={onPlanAgain} />
           <h3>Recent</h3>
           <ul className="note-list" aria-label="Recently changed notes">
             {connected.recent.map((n) => (
