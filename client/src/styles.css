@@ -1552,3 +1552,34 @@ textarea {
 .fit dd {
   margin: 0 0 var(--space-1);
 }
+
+.patch {
+  margin: var(--space-2) 0;
+  padding: var(--space-2);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.patch span {
+  display: block;
+}
+
+.patch-add {
+  color: var(--status-working);
+}
+
+.patch-del {
+  color: var(--status-error);
+}
+
+.patch-head {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}

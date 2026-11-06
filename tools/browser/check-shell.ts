@@ -330,6 +330,33 @@ try {
     }
   }
 
+  if (run("workshop")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [scheme, w, h] of [["light", 1440, 900], ["dark", 375, 740]] as const) {
+      const { page, close } = await launchBrowser({ width: w, height: h });
+      await page.emulate({ scheme });
+      await page.viewport(w, h);
+      const server = await login(page);
+      await demo(page, server.base);
+      await page.evaluate(`document.querySelector("[data-workshop-button]")?.click()`);
+      await page.wait(600);
+      await page.evaluate(`document.querySelector(".peek")?.click()`);
+      await page.wait(400);
+      const builds = await page.evaluate<number>(`document.querySelectorAll(".panel .note-list > li").length`);
+      expect(builds === 2, `workshop(${scheme}): two demo builds are listed (${builds})`);
+      await page.evaluate(`document.querySelector(".panel details summary")?.click()`);
+      await page.wait(400);
+      const patch = await page.evaluate<string>(`document.querySelector(".patch")?.textContent ?? ""`);
+      expect(patch.includes("+new line") && patch.includes("-old line"), `workshop(${scheme}): the patch is shown`);
+      await page.screenshot(join(out, `workshop-${scheme}.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
+      expect(violations.length === 0, `workshop(${scheme}): axe: ${violations.join(", ")}`);
+      console.log(`workshop(${scheme}): builds=${builds} axe=${violations.length}`);
+      await close();
+    }
+  }
+
   if (run("axe")) {
     const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
     for (const scheme of ["light", "dark"] as const) {
