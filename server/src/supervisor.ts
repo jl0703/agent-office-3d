@@ -86,7 +86,7 @@ export type SupervisorOptions = {
   /** The owner's auto-approve rule for plans. Without it every plan waits for the owner. */
   autoApprove?: AutoApproveStore;
   /** Called once a Workshop master and its workers have ended, with the build id, so the office can write the patch. */
-  onWorkshopEnd?: (build: string) => Promise<void>;
+  onWorkshopEnd?: (build: string, final: boolean) => Promise<void>;
   /** GitHub client for the research workers' tools. */
   github?: Github;
   sessionBudgetUsd?: number;
@@ -304,7 +304,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     if (!build || !opts.onWorkshopEnd) return;
     try {
       for (let i = 0; waitForWorkers && i < 150 && ownedBy(m).some((w) => w.state !== "ended"); i++) await new Promise((r) => setTimeout(r, 100));
-      await opts.onWorkshopEnd(build);
+      await opts.onWorkshopEnd(build, waitForWorkers);
     } catch (error) {
       log({ event: "workshop-end-error", build, message: error instanceof Error ? error.message : String(error) });
     }

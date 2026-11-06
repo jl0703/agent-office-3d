@@ -61,6 +61,7 @@ describe("workshop: the patch", () => {
     const { shop } = target();
     const made = await shop.prepare("tool-a", "Tool A");
     assert.ok(made.ok);
+    assert.equal((await shop.finish(made.build.id, false))?.status, "building", "nothing yet at the end of a turn is not the end");
     const none = await shop.finish(made.build.id);
     assert.equal(none?.status, "no-changes");
     assert.equal(await shop.patch(made.build.id), null);

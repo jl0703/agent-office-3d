@@ -74,7 +74,7 @@ const autoApprove = createAutoApproveStore(dataDir);
 const supervisor = createSupervisor({
   registry,
   autoApprove,
-  ...(workshop ? { onWorkshopEnd: async (build: string) => void (await workshop?.finish(build)) } : {}),
+  ...(workshop ? { onWorkshopEnd: async (build: string, final: boolean) => void (await workshop?.finish(build, final)) } : {}),
   query,
   roots,
   ...(researchDir ? { researchDir } : {}),
