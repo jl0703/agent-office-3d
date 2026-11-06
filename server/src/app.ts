@@ -7,6 +7,7 @@ import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
+import { listMcpServers, listSkills } from "./claudeSetup.ts";
 import { buildWorkshopGoal, type Workshop } from "./workshop.ts";
 import { buildEvaluationPrompt, readEvaluations } from "./evaluations.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
@@ -53,6 +54,8 @@ type Options = {
   autoApprove?: AutoApproveStore;
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
+  /** Where the sidebar reads the owner's skills and user-level MCP servers from. Without it the lists are empty. */
+  setup?: { skillsDir: string; mcpFile: string };
   /** The Workshop (builds in a copy of the target). Without it the Workshop routes answer 404. */
   workshop?: Workshop;
   /** The target folder's display name, for the master's goal. */
@@ -210,6 +213,9 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (url.pathname.startsWith("/api/research/")) {
         const handled = researchRoute(req, res, url.pathname, method);
         if (handled) return;
+      }
+      if (url.pathname === "/api/setup" && method === "GET") {
+        return run(req, res, async () => json(res, 200, { skills: await listSkills(opts.setup?.skillsDir), mcp: await listMcpServers(opts.setup?.mcpFile) }));
       }
       if (url.pathname === "/api/workshop" || url.pathname.startsWith("/api/workshop/")) {
         if (workshopRoute(req, res, url.pathname, method)) return;

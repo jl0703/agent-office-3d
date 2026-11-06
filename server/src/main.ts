@@ -54,7 +54,9 @@ const dataDir = process.env["OFFICE_DATA_DIR"] || fileURLToPath(new URL("../../d
 const plansLogDir = vaultDir && isAbsolute(vaultDir) ? join(vaultDir, "agent-workspace", PLANS_LOG_DIR) : undefined;
 const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
 // What a sweep is told about our own setup: skill folder names, MCP server names (never their settings) and recent runs.
-const digest = () => buildDigest({ ...(plansLogDir ? { plansLogDir } : {}), skillsDir: join(homedir(), ".claude", "skills"), mcpFile: join(homedir(), ".claude.json") });
+const skillsDir = join(homedir(), ".claude", "skills");
+const mcpFile = join(homedir(), ".claude.json");
+const digest = () => buildDigest({ ...(plansLogDir ? { plansLogDir } : {}), skillsDir, mcpFile });
 // The Workshop builds in a copy of OFFICE_WORKSHOP_TARGET (a folder, set by the owner); without it the Workshop is off.
 const workshopTarget = process.env["OFFICE_WORKSHOP_TARGET"];
 let workshop: ReturnType<typeof createWorkshop> | undefined;
@@ -111,6 +113,7 @@ const app = await startServer({
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
   digest,
+  setup: { skillsDir, mcpFile },
   ...(workshop && workshopTarget ? { workshop, workshopTargetName: basename(workshopTarget) } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),

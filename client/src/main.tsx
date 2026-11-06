@@ -14,6 +14,7 @@ import { UsageMeter } from "./UsageMeter.tsx";
 import { HubPanel } from "./HubPanel.tsx";
 import { NeedsYou } from "./NeedsYou.tsx";
 import { demoFindings, getFindings } from "./research.ts";
+import { Sidebar } from "./Sidebar.tsx";
 import { ResearchBoard } from "./ResearchBoard.tsx";
 import { WorkshopPanel } from "./WorkshopPanel.tsx";
 import { demoVault } from "./vault.ts";
@@ -382,6 +383,7 @@ function App() {
   return (
     <div className="app" data-tab={tab}>
       <header className="app-head">
+        <Sidebar demo={demo.active} />
         <h1>Agent Office</h1>
         <ConnectionBadge connection={connection} />
         <UsageMeter usage={demo.active ? { totalUsd: 3.4, caps: { runUsd: 2, sessionUsd: 5, totalUsd: 20 } } : usage} demo={demo.active} />

@@ -1583,3 +1583,33 @@ textarea {
   color: var(--color-text-muted);
   font-weight: 600;
 }
+
+.drawer {
+  position: fixed;
+  z-index: calc(var(--z-sheet) + 5);
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  width: min(400px, 100vw);
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  box-shadow: 4px 0 16px rgb(0 0 0 / 0.18);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  z-index: calc(var(--z-sheet) + 4);
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+
+.setup-list li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-1) 0;
+}
