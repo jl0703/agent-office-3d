@@ -187,6 +187,8 @@ export type OfficeCanvasProps = {
   assignment: Assignment;
   vault: Vault | null;
   hubOpen: boolean;
+  /** Findings waiting for a decision, shown on the hub's sign. */
+  newFindings?: number;
   onOpenHub: () => void;
   selection: Selection;
   /** Raised by one each time the header's Reset view is pressed. */
@@ -195,7 +197,7 @@ export type OfficeCanvasProps = {
   onStartWorker: () => void;
 };
 
-export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubOpen, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
+export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubOpen, newFindings = 0, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
   const scheme = useScheme();
   const reduced = useReducedMotion();
   const [supported] = useState(webglAvailable);
@@ -322,6 +324,7 @@ export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubO
           >
             <span className="room-name">Knowledge hub</span>
             <span className="room-meta">{vault ? `${vault.noteCount} notes` : "no vault connected"}</span>
+            {newFindings > 0 && <span className="room-meta hub-new">{newFindings} new {newFindings === 1 ? "finding" : "findings"}</span>}
           </button>
         </div>
 

@@ -465,7 +465,7 @@ function App() {
           </section>
 
           <section className="pane pane-office" id="pane-office" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-office" : undefined}>
-            <OfficeCanvas agents={agents} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
+            <OfficeCanvas agents={agents} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} newFindings={newFindings} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
             {current && !hubOpen && !researchOpen && narrow && !expanded && (
               <button type="button" className="peek" onClick={() => setExpanded(true)}>
                 <strong>{current.name}</strong> · {STATUS_WORD[current.status]} · Details

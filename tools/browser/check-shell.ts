@@ -117,6 +117,7 @@ try {
       await page.key("Escape", { keyCode: 27 });
       await page.wait(900);
       expect((await count(".room-head")) === groupsBefore, `rooms(${scheme}): Escape returns to the overview`);
+      expect((await page.evaluate<string>(`document.querySelector(".hub-new")?.textContent ?? ""`)).includes("new finding"), `rooms(${scheme}): hub sign shows new findings`);
       await page.evaluate(`document.querySelector(".hub-sign").click()`);
       await page.wait(500);
       const hub = await page.evaluate<string>(`document.querySelector(".panel")?.textContent ?? ""`);
