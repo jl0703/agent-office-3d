@@ -42,6 +42,7 @@ function Card({ f, off, onChange, onHand }: { f: Finding; off: string | null; on
         </p>
       </header>
       <p>{f.why}</p>
+      {f.improves && <p className="panel-note">Improves: {f.improves}</p>}
       <p className="note">
         Found by {f.found_by} on {f.date}
       </p>

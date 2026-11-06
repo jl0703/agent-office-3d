@@ -38,6 +38,8 @@ export type Finding = {
   found_by: string;
   date: string;
   why: string;
+  /** Which skill, MCP server or workflow of ours the find would improve. */
+  improves?: string;
 };
 export type FindingView = Finding & { status: Status; note?: string };
 
@@ -62,6 +64,7 @@ const Fields = z.object({
   found_by: oneLine(40),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate),
   why: oneLine(400),
+  improves: oneLine(80).optional(),
 });
 
 function isPlainHttps(value: string): boolean {
@@ -114,10 +117,11 @@ export function parseFrontmatter(head: string, fileId: string): Finding | null {
     found_by: raw.get("found_by"),
     date: raw.get("date"),
     why: raw.get("why"),
+    improves: optional(raw.get("improves")),
   });
   if (!parsed.success || parsed.data.id !== fileId) return null;
-  const { stars, license, relevance, ...rest } = parsed.data;
-  return { ...rest, ...(stars === undefined ? {} : { stars: Number(stars) }), ...(license === undefined ? {} : { license }), relevance: Number(relevance) };
+  const { stars, license, relevance, improves, ...rest } = parsed.data;
+  return { ...rest, ...(improves === undefined ? {} : { improves }), ...(stars === undefined ? {} : { stars: Number(stars) }), ...(license === undefined ? {} : { license }), relevance: Number(relevance) };
 }
 
 /** The research folder's real path, or null when it is missing or not a folder. */

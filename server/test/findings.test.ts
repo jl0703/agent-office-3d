@@ -349,3 +349,13 @@ describe("focus and needs notes (D1)", () => {
     assert.equal(readFileSync(join(dir, "focus.md"), "utf8"), "x\n");
   });
 });
+
+describe("the improves field", () => {
+  it("is optional, kept when present, and refused when too long or unsafe", () => {
+    assert.equal(parse(note())?.improves, undefined);
+    assert.equal(parse(note({ improves: "code-reviewer skill" }))?.improves, "code-reviewer skill");
+    assert.equal(parse(note({ improves: "" }))?.improves, undefined);
+    assert.equal(parse(note({ improves: "x".repeat(81) })), null);
+    assert.equal(parse(note({ improves: "a\u202eb" })), null);
+  });
+});
