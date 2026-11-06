@@ -113,7 +113,7 @@ const app = await startServer({
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
   digest,
-  setup: { skillsDir, mcpFile },
+  setup: { skillsDir, mcpFile, dataDir },
   ...(workshop && workshopTarget ? { workshop, workshopTargetName: basename(workshopTarget) } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),

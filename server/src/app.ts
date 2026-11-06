@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { listMcpServers, listSkills } from "./claudeSetup.ts";
+import { addedSkills, addSkill, dirsFor, removeSkill, SKILL_NAME, type Failure } from "./skillsManage.ts";
 import { buildWorkshopGoal, type Workshop } from "./workshop.ts";
 import { buildEvaluationPrompt, readEvaluations } from "./evaluations.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
@@ -55,7 +56,7 @@ type Options = {
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /** Where the sidebar reads the owner's skills and user-level MCP servers from. Without it the lists are empty. */
-  setup?: { skillsDir: string; mcpFile: string };
+  setup?: { skillsDir: string; mcpFile: string; /** Where the trash and the list of skills added here live. Without it skills cannot be added or removed. */ dataDir?: string };
   /** The Workshop (builds in a copy of the target). Without it the Workshop routes answer 404. */
   workshop?: Workshop;
   /** The target folder's display name, for the master's goal. */
@@ -72,6 +73,12 @@ const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
 const FINDING_DECISION = /^\/api\/research\/findings\/([^/]{1,200})\/decision$/;
+const SKILL_STATUS: Record<Failure, number> = { invalid_name: 400, invalid_skill: 400, too_big: 413, exists: 409, not_found: 404, not_added: 409, source_missing: 400, failed: 500 };
+const RemoveSkillBody = z.object({ name: z.string().regex(SKILL_NAME), confirm: z.literal(true) }).strict();
+const AddSkillBody = z
+  .object({ name: z.string().regex(SKILL_NAME), content: z.string().max(200_000).optional(), source: z.string().min(1).max(1000).optional(), confirm: z.literal(true) })
+  .strict()
+  .refine((b) => (b.content === undefined) !== (b.source === undefined));
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_EVALUATE = /^\/api\/research\/findings\/([^/]{1,200})\/evaluate$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume|plan)$/;
@@ -215,7 +222,24 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         if (handled) return;
       }
       if (url.pathname === "/api/setup" && method === "GET") {
-        return run(req, res, async () => json(res, 200, { skills: await listSkills(opts.setup?.skillsDir), mcp: await listMcpServers(opts.setup?.mcpFile) }));
+        return run(req, res, async () => {
+          const dirs = opts.setup?.dataDir && opts.setup.skillsDir ? dirsFor(opts.setup.skillsDir, opts.setup.dataDir) : undefined;
+          const added = dirs ? await addedSkills(dirs) : new Set<string>();
+          const skills = (await listSkills(opts.setup?.skillsDir)).map((s) => ({ ...s, added: added.has(s.name) }));
+          return json(res, 200, { skills, mcp: await listMcpServers(opts.setup?.mcpFile), canManage: Boolean(dirs) });
+        });
+      }
+      if ((url.pathname === "/api/setup/skills" || url.pathname === "/api/setup/skills/remove") && method === "POST") {
+        const dirs = opts.setup?.dataDir && opts.setup.skillsDir ? dirsFor(opts.setup.skillsDir, opts.setup.dataDir) : undefined;
+        if (!dirs) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => {
+          const remove = url.pathname.endsWith("/remove");
+          const parsed = (remove ? RemoveSkillBody : AddSkillBody).safeParse(await readJson(req));
+          if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+          const result = remove ? await removeSkill(dirs, parsed.data.name) : await addSkill(dirs, parsed.data);
+          if (result.ok) return json(res, remove ? 200 : 201, {});
+          return json(res, SKILL_STATUS[result.code], result.code === "exists" || result.code === "not_added" ? { reason: result.code } : { error: result.code });
+        });
       }
       if (url.pathname === "/api/workshop" || url.pathname.startsWith("/api/workshop/")) {
         if (workshopRoute(req, res, url.pathname, method)) return;

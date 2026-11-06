@@ -1,5 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { RemoveButton, SkillManager } from "./SkillManager.tsx";
 import { demoSetup, describeServer, getSetup, matches, type Setup } from "./setup.ts";
 
 type Section = "skills" | "mcp";
@@ -11,6 +12,8 @@ export function Sidebar({ demo }: { demo: boolean }) {
   const [section, setSection] = useState<Section>("skills");
   const [setup, setSetup] = useState<Setup | "loading" | null>("loading");
   const [query, setQuery] = useState("");
+  const [reloads, setReloads] = useState(0);
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const button = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement | null>(null);
 
@@ -23,7 +26,7 @@ export function Sidebar({ demo }: { demo: boolean }) {
     return () => {
       live = false;
     };
-  }, [open, demo]);
+  }, [open, demo, reloads]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,12 +89,21 @@ export function Sidebar({ demo }: { demo: boolean }) {
 
           {setup === "loading" && <p className="panel-note">Loading…</p>}
           {setup === null && <p className="panel-note">Your setup could not be read.</p>}
+          {ready && ready.canManage && (
+            <div hidden={section !== "skills"}>
+              <SkillManager demo={demo} off={false} onChanged={() => setReloads((n) => n + 1)} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
+            </div>
+          )}
           {ready && section === "skills" && (
             <ul className="note-list setup-list" aria-label="Skills">
               {skills.map((s) => (
-                <li key={s.name}>
-                  <strong>{s.name}</strong>
-                  {s.description && <span className="panel-note">{s.description}</span>}
+                <li key={s.name} className={s.added ? "setup-row" : undefined}>
+                  <div>
+                    <strong>{s.name}</strong>
+                    {s.added && <span className="origin"> added here</span>}
+                    {s.description && <span className="panel-note"> {s.description}</span>}
+                  </div>
+                  {s.added && ready.canManage && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />}
                 </li>
               ))}
               {skills.length === 0 && <li className="panel-note">{ready.skills.length === 0 ? "No skills found in your skills folder." : "No skill matches."}</li>}
@@ -108,7 +120,7 @@ export function Sidebar({ demo }: { demo: boolean }) {
               {servers.length === 0 && <li className="panel-note">{ready.mcp.length === 0 ? "No user-level MCP servers found." : "No server matches."}</li>}
             </ul>
           )}
-          <p className="panel-note">Secret values are never shown. Adding and removing comes next.</p>
+          <p className="panel-note">Secret values are never shown. {section === "skills" ? "Only skills added here can be removed here." : "Adding and removing MCP servers comes next."}</p>
         </aside>
       )}
     </>
