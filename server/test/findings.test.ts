@@ -359,3 +359,17 @@ describe("the improves field", () => {
     assert.equal(parse(note({ improves: "a\u202eb" })), null);
   });
 });
+
+describe("the language and forks fields", () => {
+  it("are optional numbers and text from the GitHub tools, and a bad value makes the note invalid", () => {
+    const f = parse(note({ language: "TypeScript", forks: "1200" }));
+    assert.deepEqual([f?.language, f?.forks], ["TypeScript", 1200]);
+    const none = parse(note());
+    assert.deepEqual([none?.language, none?.forks], [undefined, undefined]);
+    assert.deepEqual([parse(note({ language: "", forks: "" }))?.language, parse(note({ forks: "" }))?.forks], [undefined, undefined]);
+    assert.equal(parse(note({ forks: "many" })), null);
+    assert.equal(parse(note({ forks: "-1" })), null);
+    assert.equal(parse(note({ language: "x".repeat(41) })), null);
+    assert.equal(parse(note({ language: "a\u202eb" })), null);
+  });
+});

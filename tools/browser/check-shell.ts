@@ -382,12 +382,16 @@ try {
       expect(head === "Skills", `sidebar(${scheme}): the page title is Skills (${head})`);
       expect(await page.evaluate<string>(`document.activeElement?.id ?? ""`) === "catalog-title", `sidebar(${scheme}): focus moves to the page title`);
       expect((await page.evaluate<string>(`document.title`)).includes("Skills"), `sidebar(${scheme}): the tab title names the page`);
-      const cards = await page.evaluate<number>(`document.querySelectorAll(".catalog-grid .card").length`);
+      const cards = await page.evaluate<number>(`document.querySelectorAll(".catalog-grid")[0].querySelectorAll(".card").length`);
       expect(cards === 3, `sidebar(${scheme}): three demo skill cards (${cards})`);
       const crumbs = await page.evaluate<string>(`document.querySelector(".breadcrumb")?.textContent ?? ""`);
       expect(crumbs.includes("Office") && crumbs.includes("Skills"), `sidebar(${scheme}): breadcrumb shows where you are (${crumbs})`);
+      // The research finds for this page are listed under their own heading, with stars, language and the source link.
+      const foundText = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-section")].map((h) => h.textContent).join(" | ") + " || " + (document.querySelectorAll(".catalog-grid")[1]?.textContent ?? "")`);
+      expect(foundText.includes("Found by research (1)") && foundText.includes("880") && foundText.includes("Shell") && foundText.includes("Looking"), `sidebar(${scheme}): the finds section shows stars, language and the decision (${foundText})`);
+      expect(await page.evaluate<boolean>(`Boolean(document.querySelector(".catalog-grid:last-of-type a[target=_blank][rel*=noopener]"))`), `sidebar(${scheme}): a find links to its source in a new tab`);
       // Sorting and searching.
-      const first = () => page.evaluate<string>(`document.querySelector(".catalog-grid .card h2")?.textContent ?? ""`);
+      const first = () => page.evaluate<string>(`document.querySelector(".catalog-grid .card h3")?.textContent ?? ""`);
       const byName = await first();
       await page.evaluate(`[...document.querySelectorAll(".catalog-tools .chip-filter")].find((b) => b.textContent === "Recent")?.click()`);
       await page.wait(200);
@@ -395,7 +399,7 @@ try {
       expect(byName === "demo-clean-code" && byRecent === "demo-docs-writer", `sidebar(${scheme}): Recent puts the newest first (${byName} -> ${byRecent})`);
       await page.evaluate(`(() => { const i = document.querySelector(".catalog-search input"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, "reviews"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
       await page.wait(200);
-      expect((await page.evaluate<number>(`document.querySelectorAll(".catalog-grid .card").length`)) === 1, `sidebar(${scheme}): search narrows the cards`);
+      expect((await page.evaluate<number>(`document.querySelectorAll(".catalog-grid")[0].querySelectorAll(".card").length`)) === 1, `sidebar(${scheme}): search narrows the cards`);
       await page.evaluate(`(() => { const i = document.querySelector(".catalog-search input"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, ""); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
       await page.wait(200);
       // Remove asks first, and Cancel puts focus back.
@@ -458,7 +462,7 @@ try {
       await page.evaluate(`[...document.querySelectorAll(".app-actions button")].length`);
       await page.evaluate(`location.hash = "#/agents"`);
       await page.wait(500);
-      const agentCards = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.querySelector("h2")?.textContent + ":" + c.textContent).join(" | ")`);
+      const agentCards = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.querySelector("h3")?.textContent + ":" + c.textContent).join(" | ")`);
       expect(agentCards.includes("demo-reviewer") && agentCards.includes("Model sonnet") && agentCards.includes("demo-planner"), `sidebar(${scheme}): the agents page lists agents with model and tools (${agentCards})`);
       expect((await page.evaluate<string>(`document.querySelector(".skill-manager summary")?.textContent ?? ""`)).includes("Add an agent"), `sidebar(${scheme}): the agents page can add an agent`);
       await page.evaluate(`document.querySelector(".skill-manager summary")?.click()`);

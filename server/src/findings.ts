@@ -40,6 +40,9 @@ export type Finding = {
   why: string;
   /** Which skill, MCP server or workflow of ours the find would improve. */
   improves?: string;
+  /** From the GitHub tools; the main language and the fork count of a repository. */
+  language?: string;
+  forks?: number;
 };
 export type FindingView = Finding & { status: Status; note?: string };
 
@@ -65,6 +68,8 @@ const Fields = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate),
   why: oneLine(400),
   improves: oneLine(80).optional(),
+  language: oneLine(40).optional(),
+  forks: z.string().regex(/^\d{1,9}$/).optional(),
 });
 
 function isPlainHttps(value: string): boolean {
@@ -118,10 +123,12 @@ export function parseFrontmatter(head: string, fileId: string): Finding | null {
     date: raw.get("date"),
     why: raw.get("why"),
     improves: optional(raw.get("improves")),
+    language: optional(raw.get("language")),
+    forks: optional(raw.get("forks")),
   });
   if (!parsed.success || parsed.data.id !== fileId) return null;
-  const { stars, license, relevance, improves, ...rest } = parsed.data;
-  return { ...rest, ...(improves === undefined ? {} : { improves }), ...(stars === undefined ? {} : { stars: Number(stars) }), ...(license === undefined ? {} : { license }), relevance: Number(relevance) };
+  const { stars, license, relevance, improves, language, forks, ...rest } = parsed.data;
+  return { ...rest, ...(improves === undefined ? {} : { improves }), ...(language === undefined ? {} : { language }), ...(forks === undefined ? {} : { forks: Number(forks) }), ...(stars === undefined ? {} : { stars: Number(stars) }), ...(license === undefined ? {} : { license }), relevance: Number(relevance) };
 }
 
 /** The research folder's real path, or null when it is missing or not a folder. */
