@@ -359,48 +359,82 @@ try {
 
   if (run("sidebar")) {
     const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    const axe = async (page: { evaluate<T>(code: string): Promise<T> }) =>
+      page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
     for (const [scheme, w, h] of [["light", 1440, 900], ["dark", 375, 740]] as const) {
       const { page, close } = await launchBrowser({ width: w, height: h });
       await page.emulate({ scheme });
       await page.viewport(w, h);
       const server = await login(page);
       await demo(page, server.base);
+      // The menu: links to the office and the three pages.
       await page.evaluate(`document.querySelector("[data-sidebar-button]")?.click()`);
+      await page.wait(400);
+      const links = await page.evaluate<string>(`[...document.querySelectorAll(".drawer nav a")].map((a) => a.textContent.trim() + "=" + a.getAttribute("href")).join(" | ")`);
+      expect(links.includes("Skills=#/skills") && links.includes("MCP servers=#/mcp") && links.includes("AI Agents=#/agents") && links.includes("Office=#/"), `sidebar(${scheme}): the menu has links to every page (${links})`);
+      await page.evaluate(`[...document.querySelectorAll(".drawer nav a")].find((a) => a.textContent.includes("Skills"))?.click()`);
       await page.wait(500);
-      const skills = await page.evaluate<number>(`document.querySelectorAll(".drawer .setup-list li").length`);
-      expect(skills === 3, `sidebar(${scheme}): three demo skills are listed (${skills})`);
-      const expanded = await page.evaluate<string>(`document.querySelector("[data-sidebar-button]")?.getAttribute("aria-expanded") ?? ""`);
-      expect(expanded === "true", `sidebar(${scheme}): the button says it is expanded`);
-      await page.evaluate(`document.querySelector(".skill-manager details summary")?.click()`);
+      const hash = await page.evaluate<string>(`location.hash`);
+      expect(hash === "#/skills", `sidebar(${scheme}): choosing Skills goes to its own page (${hash})`);
+      expect(await page.evaluate<boolean>(`!document.querySelector(".drawer")`), `sidebar(${scheme}): the menu closes after choosing`);
+      const head = await page.evaluate<string>(`document.querySelector("h1")?.textContent ?? ""`);
+      expect(head === "Skills", `sidebar(${scheme}): the page title is Skills (${head})`);
+      expect(await page.evaluate<string>(`document.activeElement?.id ?? ""`) === "catalog-title", `sidebar(${scheme}): focus moves to the page title`);
+      expect((await page.evaluate<string>(`document.title`)).includes("Skills"), `sidebar(${scheme}): the tab title names the page`);
+      const cards = await page.evaluate<number>(`document.querySelectorAll(".catalog-grid .card").length`);
+      expect(cards === 3, `sidebar(${scheme}): three demo skill cards (${cards})`);
+      const crumbs = await page.evaluate<string>(`document.querySelector(".breadcrumb")?.textContent ?? ""`);
+      expect(crumbs.includes("Office") && crumbs.includes("Skills"), `sidebar(${scheme}): breadcrumb shows where you are (${crumbs})`);
+      // Sorting and searching.
+      const first = () => page.evaluate<string>(`document.querySelector(".catalog-grid .card h2")?.textContent ?? ""`);
+      const byName = await first();
+      await page.evaluate(`[...document.querySelectorAll(".catalog-tools .chip-filter")].find((b) => b.textContent === "Recent")?.click()`);
       await page.wait(200);
-      const form = await page.evaluate<boolean>(`Boolean(document.querySelector(".skill-manager textarea")) && Boolean(document.querySelector(".skill-manager input"))`);
-      expect(form, `sidebar(${scheme}): the add form is there`);
+      const byRecent = await first();
+      expect(byName === "demo-clean-code" && byRecent === "demo-docs-writer", `sidebar(${scheme}): Recent puts the newest first (${byName} -> ${byRecent})`);
+      await page.evaluate(`(() => { const i = document.querySelector(".catalog-search input"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, "reviews"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+      await page.wait(200);
+      expect((await page.evaluate<number>(`document.querySelectorAll(".catalog-grid .card").length`)) === 1, `sidebar(${scheme}): search narrows the cards`);
+      await page.evaluate(`(() => { const i = document.querySelector(".catalog-search input"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, ""); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+      await page.wait(200);
+      // Remove asks first, and Cancel puts focus back.
       await page.evaluate(`document.querySelector("[aria-label='Remove demo-docs-writer']")?.click()`);
       await page.wait(200);
       const confirmText = await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`);
-      expect(confirmText.includes("Change your Claude setup?") && confirmText.includes("demo-docs-writer") && confirmText.includes("Confirm"), `sidebar(${scheme}): removing asks first (${confirmText})`);
+      expect(confirmText.includes("Change your Claude setup?") && confirmText.includes("demo-docs-writer"), `sidebar(${scheme}): removing asks first (${confirmText})`);
       expect(await page.evaluate<boolean>(`document.activeElement?.closest(".confirm-box") !== null`), `sidebar(${scheme}): focus moves into the confirm box`);
-      const removeSource = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
-      await page.evaluate(removeSource);
-      const confirmViolations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
-      expect(confirmViolations.length === 0, `sidebar(${scheme}): axe with the form and confirm box open: ${confirmViolations.join(", ")}`);
-      await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
-      await page.wait(200);
-      expect(await page.evaluate<boolean>(`!document.querySelector(".confirm-box")`), `sidebar(${scheme}): Cancel closes the confirm box`);
-      expect(await page.evaluate<string>(`document.activeElement?.getAttribute("aria-label") ?? ""`) === "Remove demo-docs-writer", `sidebar(${scheme}): Cancel returns focus to the button that asked`);
-      await page.evaluate(`[...document.querySelectorAll(".drawer .chip-filter")].find((b) => b.textContent.includes("MCP"))?.click()`);
-      await page.wait(200);
-      const servers = await page.evaluate<string>(`[...document.querySelectorAll(".drawer .setup-list li")].map((li) => li.textContent).join(" | ")`);
-      expect(servers.includes("demo-files") && servers.includes("headers set") && !servers.includes("SECRET"), `sidebar(${scheme}): servers listed without secrets (${servers})`);
-      await page.screenshot(join(out, `sidebar-${scheme}.png`));
       await page.evaluate(source);
-      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
-      expect(violations.length === 0, `sidebar(${scheme}): axe: ${violations.join(", ")}`);
-      await page.key("Escape", { keyCode: 27 });
+      const listViolations = await axe(page);
+      expect(listViolations.length === 0, `sidebar(${scheme}): axe on the skills page with the confirm box open: ${listViolations.join(", ")}`);
+      await page.screenshot(join(out, `catalog-${scheme}.png`));
+      await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
       await page.wait(300);
-      const closed = await page.evaluate<string>(`JSON.stringify({ drawer: Boolean(document.querySelector(".drawer")), focus: document.activeElement?.getAttribute("data-sidebar-button") !== null })`);
-      expect(closed === '{"drawer":false,"focus":true}', `sidebar(${scheme}): Escape closes it and returns focus to the button ${closed}`);
-      console.log(`sidebar(${scheme}): skills=${skills} axe=${violations.length}`);
+      expect(await page.evaluate<string>(`document.activeElement?.getAttribute("aria-label") ?? ""`) === "Remove demo-docs-writer", `sidebar(${scheme}): Cancel returns focus to the button that asked`);
+      // A details page, and Back.
+      await page.evaluate(`document.querySelector("[aria-label='View details for demo-clean-code']")?.click()`);
+      await page.wait(400);
+      expect((await page.evaluate<string>(`location.hash`)) === "#/skills/demo-clean-code", `sidebar(${scheme}): View details opens that item's page`);
+      expect((await page.evaluate<string>(`document.querySelector("h1")?.textContent ?? ""`)) === "demo-clean-code", `sidebar(${scheme}): the details page is titled with the item`);
+      const detailViolations = await axe(page);
+      expect(detailViolations.length === 0, `sidebar(${scheme}): axe on the details page: ${detailViolations.join(", ")}`);
+      await page.evaluate(`history.back()`);
+      await page.wait(400);
+      expect((await page.evaluate<string>(`location.hash`)) === "#/skills", `sidebar(${scheme}): the browser Back button returns to the list`);
+      // The office controls take you to the office first.
+      await page.evaluate(`[...document.querySelectorAll(".app-actions button")].find((x) => x.textContent.includes("Research"))?.click()`);
+      await page.wait(600);
+      expect((await page.evaluate<string>(`location.hash`)) === "#/" && (await page.evaluate<boolean>(`Boolean(document.querySelector(".board"))`)), `sidebar(${scheme}): Research from another page opens it in the office`);
+      await page.evaluate(`location.hash = "#/skills"`);
+      await page.wait(400);
+      // The MCP page, and the way back to the office.
+      await page.evaluate(`location.hash = "#/mcp"`);
+      await page.wait(400);
+      const servers = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.textContent).join(" | ")`);
+      expect(servers.includes("demo-files") && servers.includes("Headers set") && !servers.includes("SECRET"), `sidebar(${scheme}): the MCP page shows servers without secrets (${servers})`);
+      await page.evaluate(`location.hash = "#/"`);
+      await page.wait(800);
+      expect(await page.evaluate<boolean>(`Boolean(document.querySelector(".app-main"))`), `sidebar(${scheme}): the office is back at #/`);
+      console.log(`sidebar(${scheme}): cards=${cards} axe=${listViolations.length}`);
       await close();
     }
   }

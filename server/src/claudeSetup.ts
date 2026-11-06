@@ -10,7 +10,7 @@ const NAME = /^[\w][\w .:@-]{0,59}$/;
 const MAX_CONFIG_BYTES = 5_000_000;
 const HEAD_BYTES = 4096;
 
-export type Skill = { name: string; description: string };
+export type Skill = { name: string; description: string; /** When SKILL.md last changed (ms since 1970); 0 when unknown. */ modified: number };
 export type McpServer = { name: string; type: "stdio" | "http" | "sse"; command?: string; argCount?: number; host?: string; envCount: number; hasHeaders: boolean };
 
 const oneLine = (text: string, max: number) => text.replace(UNSAFE_G, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -39,9 +39,12 @@ export async function listSkills(dir: string | undefined): Promise<Skill[]> {
   const skills: Skill[] = [];
   for (const name of names) {
     let description = "";
+    let modified = 0;
     try {
       const file = join(dir, name, "SKILL.md");
-      if ((await lstat(file)).isFile()) {
+      const info = await lstat(file);
+      if (info.isFile()) {
+        modified = Math.round(info.mtimeMs);
         const handle = await open(file, "r");
         try {
           const buffer = Buffer.alloc(HEAD_BYTES);
@@ -54,7 +57,7 @@ export async function listSkills(dir: string | undefined): Promise<Skill[]> {
     } catch {
       // a folder without a readable SKILL.md is still listed, without a description
     }
-    skills.push({ name, description });
+    skills.push({ name, description, modified });
   }
   return skills;
 }

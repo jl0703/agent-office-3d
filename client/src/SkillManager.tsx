@@ -8,9 +8,11 @@ type Pending = { kind: "add"; name: string; content?: string; source?: string } 
 const TEMPLATE = (name: string) => `---\nname: ${name || "my-skill"}\ndescription: One line saying when to use it\n---\n\nWhat the skill tells Claude to do.\n`;
 
 /** Add and remove skills. Every change shows what will happen and waits for a click on Confirm. */
-export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove }: {
+export function SkillManager({ demo, off, showAdd = true, onChanged, pendingRemove, onAskRemove }: {
   demo: boolean;
   off: boolean;
+  /** False on a skill's own page, where only the remove confirmation is needed. */
+  showAdd?: boolean;
   onChanged: () => void;
   pendingRemove: string | null;
   onAskRemove: (name: string | null) => void;
@@ -74,6 +76,7 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
 
   return (
     <div className="skill-manager">
+      {showAdd && (
       <details>
         <summary>
           <Plus size={16} strokeWidth={1.75} aria-hidden="true" /> Add a skill
@@ -106,6 +109,7 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
           Review
         </button>
       </details>
+      )}
 
       {(pending ?? (pendingRemove ? ({ kind: "remove", name: pendingRemove } as const) : null)) && (
         <div className="confirm-box" role="alertdialog" aria-labelledby={`${id}-confirm`} aria-describedby={`${id}-confirm-text`}>

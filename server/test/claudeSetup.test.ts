@@ -57,6 +57,7 @@ describe("claude setup: skills and MCP servers for the sidebar", () => {
     assert.deepEqual(list.map((s) => s.name), ["clean-code", "no-file"]);
     assert.equal(list[0]?.description, "Pragmatic standards hidden");
     assert.equal(list[1]?.description, "");
+    assert.deepEqual([(list[0]?.modified ?? 0) > 0, list[1]?.modified], [true, 0], "SKILL.md time, or 0 without one");
     assert.deepEqual(await listSkills(join(skills, "missing")), []);
     assert.deepEqual(await listSkills(undefined), []);
   });
