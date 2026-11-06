@@ -8,8 +8,14 @@ type Pending = { kind: "add"; name: string; content?: string; source?: string } 
 const TEMPLATE = (name: string) => `---\nname: ${name || "my-skill"}\ndescription: One line saying when to use it\n---\n\nWhat the skill tells Claude to do.\n`;
 const AGENT_TEMPLATE = (name: string) => `---\nname: ${name || "my-agent"}\ndescription: One line saying when to use it\ntools: Read, Grep\nmodel: sonnet\n---\n\nWhat the agent does and how.\n`;
 
-/** One header value of pasted text, such as tools or model, on one line. Empty when the field is missing. */
-const headerValue = (text: string, key: string) => text.split("\n").find((l) => l.toLowerCase().startsWith(`${key}:`))?.slice(key.length + 1).trim().slice(0, 120) ?? "";
+/** One header value of pasted text, such as tools or model, on one line: only the header counts, and the last one wins. Empty when missing. */
+function headerValue(text: string, key: string): string {
+  const lines = text.split("\n").map((l) => l.replace(/\r$/, ""));
+  const end = lines.indexOf("---", 1);
+  if (lines[0]?.trim() !== "---" || end === -1) return "";
+  const found = lines.slice(1, end).filter((l) => l.toLowerCase().startsWith(`${key}:`));
+  return found.at(-1)?.slice(key.length + 1).trim().slice(0, 120) ?? "";
+}
 
 /** Add and remove skills or agents. Every change shows what will happen and waits for a click on Confirm. */
 export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChanged, pendingRemove, onAskRemove }: {
