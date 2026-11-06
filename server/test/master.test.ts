@@ -471,6 +471,23 @@ describe("stopping (M6, M10)", () => {
     assert.equal(again.liveCount(), 0);
     assert.equal(r.calls.length, 2, "nothing was started");
   });
+
+  it("keeps a worker under its master after a restart, and dismissing the master clears them both", async () => {
+    const r = rig();
+    const m = await startMaster(r);
+    const call = await officeFor(r);
+    const w = (await call("spawn_worker", { name: "A", folder: r.sub, task: "t" })).data["id"] as string;
+    await r.supervisor.settled();
+    const registry = createRegistry();
+    const again = createSupervisor({ registry, query: r.query, roots: [r.root], env: {}, dataDir: r.dataDir, log: () => {} });
+    supervisors.push(again);
+    await again.recover();
+    assert.equal(registry.get(w)?.parentId, m);
+    await again.stop(m);
+    assert.deepEqual([registry.get(m), registry.get(w)], [undefined, undefined]);
+    await again.settled();
+    assert.equal((await loadStore(r.dataDir)).length, 0);
+  });
 });
 
 describe("list_workers", () => {
