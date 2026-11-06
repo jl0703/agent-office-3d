@@ -1863,3 +1863,24 @@ textarea {
   text-decoration: none;
   text-transform: uppercase;
 }
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.card-open {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-left: auto;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+}
+
+.card-open:hover {
+  background: var(--color-surface-2);
+}

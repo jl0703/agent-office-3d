@@ -379,6 +379,8 @@ try {
       expect(await page.evaluate<boolean>(`!document.querySelector(".drawer")`), `sidebar(${scheme}): the menu closes after choosing`);
       const head = await page.evaluate<string>(`document.querySelector("h1")?.textContent ?? ""`);
       expect(head === "Skills", `sidebar(${scheme}): the page title is Skills (${head})`);
+      expect(await page.evaluate<string>(`document.activeElement?.id ?? ""`) === "catalog-title", `sidebar(${scheme}): focus moves to the page title`);
+      expect((await page.evaluate<string>(`document.title`)).includes("Skills"), `sidebar(${scheme}): the tab title names the page`);
       const cards = await page.evaluate<number>(`document.querySelectorAll(".catalog-grid .card").length`);
       expect(cards === 3, `sidebar(${scheme}): three demo skill cards (${cards})`);
       const crumbs = await page.evaluate<string>(`document.querySelector(".breadcrumb")?.textContent ?? ""`);
@@ -418,6 +420,12 @@ try {
       await page.evaluate(`history.back()`);
       await page.wait(400);
       expect((await page.evaluate<string>(`location.hash`)) === "#/skills", `sidebar(${scheme}): the browser Back button returns to the list`);
+      // The office controls take you to the office first.
+      await page.evaluate(`[...document.querySelectorAll(".app-actions button")].find((x) => x.textContent.includes("Research"))?.click()`);
+      await page.wait(600);
+      expect((await page.evaluate<string>(`location.hash`)) === "#/" && (await page.evaluate<boolean>(`Boolean(document.querySelector(".board"))`)), `sidebar(${scheme}): Research from another page opens it in the office`);
+      await page.evaluate(`location.hash = "#/skills"`);
+      await page.wait(400);
       // The MCP page, and the way back to the office.
       await page.evaluate(`location.hash = "#/mcp"`);
       await page.wait(400);

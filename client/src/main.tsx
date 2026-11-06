@@ -16,7 +16,7 @@ import { NeedsYou } from "./NeedsYou.tsx";
 import { demoFindings, getFindings } from "./research.ts";
 import { CatalogPage, ItemPage } from "./CatalogPage.tsx";
 import { Sidebar } from "./Sidebar.tsx";
-import { hrefFor } from "./route.ts";
+import { hrefFor, KIND_WORD } from "./route.ts";
 import { useRoute } from "./useRoute.ts";
 import { ResearchBoard } from "./ResearchBoard.tsx";
 import { WorkshopPanel } from "./WorkshopPanel.tsx";
@@ -62,6 +62,10 @@ function App() {
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const route = useRoute();
+  // The office's controls act on the office: from another page they take you there first.
+  const toOffice = () => {
+    if (route.page !== "office") window.location.hash = hrefFor({ page: "office" });
+  };
   const [hubOpen, setHubOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
   const [workshopOpen, setWorkshopOpen] = useState(false);
@@ -156,8 +160,17 @@ function App() {
   }, [agents, selected]);
   const needs = useMemo(() => attentionOf(agents, unseen, newFindings), [agents, unseen, newFindings]);
   useEffect(() => {
-    document.title = pageTitle(needs.length, demo.active);
-  }, [needs.length, demo.active]);
+    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
+  }, [needs.length, demo.active, route]);
+
+  // A new page announces itself: focus goes to its title (not on the first load).
+  const lastRoute = useRef(hrefFor(route));
+  useEffect(() => {
+    const now = hrefFor(route);
+    if (now === lastRoute.current) return;
+    lastRoute.current = now;
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("#catalog-title, .app-head h1")?.focus());
+  }, [route]);
 
   // Rooms keep their places while agents come and go, so the previous answer is part of the input.
   const placed = useRef(emptyAssignment);
@@ -206,6 +219,7 @@ function App() {
   }, [selected]);
   const panelOpen = (Boolean(current) || hubOpen || researchOpen || workshopOpen) && (!narrow || expanded);
   const openHub = () => {
+    toOffice();
     selection.select(null);
     setResearchOpen(false);
     setWorkshopOpen(false);
@@ -213,6 +227,7 @@ function App() {
     setExpanded(true);
   };
   const openResearch = () => {
+    toOffice();
     selection.select(null);
     setHubOpen(false);
     setWorkshopOpen(false);
@@ -220,6 +235,7 @@ function App() {
     setExpanded(true);
   };
   const openWorkshop = () => {
+    toOffice();
     selection.select(null);
     setHubOpen(false);
     setResearchOpen(false);
@@ -228,6 +244,7 @@ function App() {
   };
   // A finding handed to a master: the start form opens with the brief in it.
   const handToMaster = (brief: string) => {
+    toOffice();
     setPreset((p) => ({ prompt: brief, nonce: (p?.nonce ?? 0) + 1 }));
     setResearchOpen(false);
     setWorkshopOpen(false);
@@ -389,7 +406,7 @@ function App() {
       <header className="app-head">
         <Sidebar route={route} />
         {route.page === "office" ? (
-          <h1>Agent Office</h1>
+          <h1 tabIndex={-1}>Agent Office</h1>
         ) : (
           <a className="app-title" href={hrefFor({ page: "office" })}>
             Agent Office
@@ -398,7 +415,7 @@ function App() {
         <ConnectionBadge connection={connection} />
         <UsageMeter usage={demo.active ? { totalUsd: 3.4, caps: { runUsd: 2, sessionUsd: 5, totalUsd: 20 } } : usage} demo={demo.active} />
         <div className="app-actions">
-          <NeedsYou items={needs} onOpen={(id) => (id === RESEARCH_ID ? openResearch() : selection.select(id))} />
+          <NeedsYou items={needs} onOpen={(id) => (id === RESEARCH_ID ? openResearch() : (toOffice(), selection.select(id)))} />
           {demo.active ? (
             <button type="button" onClick={demo.stop}>
               <FlaskConical size={20} strokeWidth={1.75} aria-hidden="true" /> Exit demo
@@ -421,11 +438,11 @@ function App() {
             <span>Knowledge hub</span>
           </button>
           {room !== null && (
-            <button type="button" onClick={() => selection.focusRoom(null)}>
+            <button type="button" onClick={() => (toOffice(), selection.focusRoom(null))}>
               <LayoutGrid size={20} strokeWidth={1.75} aria-hidden="true" /> Overview
             </button>
           )}
-          <button type="button" className="label-from-768 tip" aria-label="Reset view" data-tip="Reset view" onClick={() => setResetSignal((n) => n + 1)}>
+          <button type="button" className="label-from-768 tip" aria-label="Reset view" data-tip="Reset view" onClick={() => (toOffice(), setResetSignal((n) => n + 1))}>
             <LocateFixed size={20} strokeWidth={1.75} aria-hidden="true" />
             <span>Reset view</span>
           </button>
@@ -537,9 +554,9 @@ function App() {
         </div>
       </main>
       ) : route.page === "list" ? (
-        <CatalogPage kind={route.kind} demo={demo.active} />
+        <CatalogPage key={hrefFor(route)} kind={route.kind} demo={demo.active} />
       ) : (
-        <ItemPage kind={route.kind} name={route.name} demo={demo.active} onGone={() => (window.location.hash = hrefFor({ page: "list", kind: route.kind }))} />
+        <ItemPage key={hrefFor(route)} kind={route.kind} name={route.name} demo={demo.active} onGone={() => (window.location.hash = hrefFor({ page: "list", kind: route.kind }))} />
       )}
     </div>
   );

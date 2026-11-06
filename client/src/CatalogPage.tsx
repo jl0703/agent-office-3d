@@ -1,4 +1,4 @@
-import { Bot, Boxes, ChevronRight, Home, Puzzle } from "lucide-react";
+import { ArrowRight, Bot, Boxes, ChevronRight, Home, Puzzle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { hrefFor, KIND_WORD, type CatalogKind } from "./route.ts";
 import { RemoveButton, SkillManager } from "./SkillManager.tsx";
@@ -74,10 +74,10 @@ function Card({ title, by, badge, description, chips, href, children }: { title:
         ))}
       </ul>
       <footer>
-        <a href={href} aria-label={`View details for ${title}`}>
-          View details
+        <span className="card-actions">{children}</span>
+        <a href={href} className="card-open tip" aria-label={`View details for ${title}`} data-tip="View details">
+          <ArrowRight size={20} strokeWidth={1.75} aria-hidden="true" />
         </a>
-        {children}
       </footer>
     </article>
   );
@@ -111,7 +111,9 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
           <Icon size={28} strokeWidth={1.75} />
         </span>
         <div>
-          <h1 id="catalog-title">{KIND_WORD[kind]}</h1>
+          <h1 id="catalog-title" tabIndex={-1}>
+            {KIND_WORD[kind]}
+          </h1>
           <p className="catalog-blurb">{BLURB[kind]}</p>
           <p className="panel-note" role="status" aria-live="polite">
             {demo ? "Demo mode: made-up items. " : ""}
@@ -185,10 +187,16 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
       <Breadcrumb kind={kind} name={name} />
       <header className="catalog-head">
         <div>
-          <h1 id="catalog-title">{name}</h1>
-          {!ready && <p className="panel-note">{setup === null ? "Your setup could not be read." : "Loading…"}</p>}
+          <h1 id="catalog-title" tabIndex={-1}>
+            {name}
+          </h1>
+          {!ready && (
+            <p className="panel-note" role="status" aria-live="polite">
+              {setup === null ? "Your setup could not be read." : "Loading…"}
+            </p>
+          )}
           {ready && !found && (
-            <p className="panel-note">
+            <p className="panel-note" role="status" aria-live="polite">
               That item is no longer in your setup. <a href={hrefFor({ page: "list", kind })}>Back to {KIND_WORD[kind]}</a>
             </p>
           )}
