@@ -336,3 +336,38 @@ describe("masters with the context brief and outcome log", () => {
     assert.equal(bad.registry.get(b.id)?.status, "stopped");
   });
 });
+
+describe("outcome log: a master cut off by a restart", () => {
+  const worker = (over: Record<string, unknown>) => ({ id: "m-1", name: "Master", project: "demo", task: "Fix the login bug", cwd: "x", createdAt: 1, updatedAt: Date.now(), pid: null, processName: null, pidStartedAt: null, costUsdTotal: 0.4, ...over });
+
+  it("leaves one note for each master that was running (research masters too), none for finished masters, plain workers or the sweep Lead, and none on a second restart", async () => {
+    const root = tmp();
+    const data = join(root, "data");
+    const plans = join(root, "vault", "plans-log");
+    const work = join(root, "demo");
+    mkdirSync(work);
+    const { saveStore } = await import("../src/managedStore.ts");
+    await saveStore(data, [
+      worker({ id: "m-1", phase: "planning", plan: null, pid: 2147483000, processName: "node", pidStartedAt: 5 }),
+      worker({ id: "w-1", ownerId: "m-1", pid: 2147483002, processName: "node", pidStartedAt: 5 }),
+      worker({ id: "m-2", phase: "planning", plan: null }), // had already ended: its own note was written then
+      worker({ id: "m-3", phase: "executing", team: "research", sweep: true, pid: 2147483001, processName: "node", pidStartedAt: 5 }),
+    worker({ id: "m-4", name: "Research", project: "research", task: "Look into logging", phase: "executing", team: "research", pid: 2147483003, processName: "node", pidStartedAt: 5 }), // an approved research master, not a sweep
+    ] as never);
+    const restart = async () => {
+      const s = createSupervisor({ registry: createRegistry(), query: createFake().query, roots: [work], env: {}, dataDir: data, plansLogDir: plans, log: () => {} });
+      closers.push(() => s.close());
+      await s.recover();
+      await s.settled();
+    };
+    await restart();
+    const names = readdirSync(plans).filter((n) => n.endsWith(".md"));
+    assert.equal(names.length, 2);
+    const text = readFileSync(join(plans, names.find((n) => n.includes("fix-the-login")) ?? ""), "utf8");
+    assert.ok(names.some((n) => n.includes("look-into-logging")));
+    assert.match(text, /goal: Fix the login bug\n[^]*workers: 1\ncost_usd: 0.40\nended: stopped/);
+    assert.match(text, /Cut off by a restart/);
+    await restart();
+    assert.equal(readdirSync(plans).filter((n) => n.endsWith(".md")).length, 2);
+  });
+});
