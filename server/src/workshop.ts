@@ -117,7 +117,7 @@ export function createWorkshop(opts: WorkshopOptions) {
     dir: opts.dir,
 
     /** Copies the target twice (snapshot `a`, working copy `b`) into a new build folder. Returns the build and the real path of `b`. */
-    async prepare(finding: string, title: string): Promise<{ ok: true; build: Build; work: string } | { ok: false; code: "target_missing" | "too_big" | "too_many" | "copy_failed" }> {
+    async prepare(finding: string, title: string): Promise<{ ok: true; build: Build; work: string } | { ok: false; code: "target_missing" | "too_big" | "too_many_builds" | "copy_failed" }> {
       let target: string;
       try {
         target = await realpath(opts.target);
@@ -126,7 +126,7 @@ export function createWorkshop(opts: WorkshopOptions) {
         return { ok: false, code: "target_missing" };
       }
       const existing = (await readdir(opts.dir, { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory() && BUILD_ID.test(e.name)).length;
-      if (existing >= MAX_BUILDS) return { ok: false, code: "too_many" };
+      if (existing >= MAX_BUILDS) return { ok: false, code: "too_many_builds" };
       const id = randomBytes(6).toString("hex");
       await mkdir(folder(id), { recursive: true });
       const limits = { maxFiles: opts.maxFiles ?? MAX_COPY_FILES, maxBytes: opts.maxBytes ?? MAX_COPY_BYTES };

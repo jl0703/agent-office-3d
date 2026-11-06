@@ -44,6 +44,7 @@ function PatchView({ build, demo }: { build: Build; demo: boolean }) {
 /** The Workshop: build adopted findings in a copy, then read the patch. Applying it is always the owner's own step. */
 export function WorkshopPanel({ id, demo, off, headingRef, onClose }: Props) {
   const [builds, setBuilds] = useState<Build[] | "off" | "loading" | null>("loading");
+  const [dir, setDir] = useState("");
   const [adopted, setAdopted] = useState<Finding[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -51,10 +52,14 @@ export function WorkshopPanel({ id, demo, off, headingRef, onClose }: Props) {
   const load = useCallback(async () => {
     if (demo) {
       setBuilds(demoBuilds());
+      setDir("<workshop folder>");
       setAdopted([]);
       return;
     }
-    setBuilds(await getBuilds());
+    const got = await getBuilds();
+    // One failed poll must not close the patch being read: keep the list that is already shown.
+    setBuilds((now) => (got === null ? (Array.isArray(now) ? now : null) : got === "off" ? "off" : got.builds));
+    if (got && got !== "off" && got.dir) setDir(got.dir);
     const found = await getFindings();
     setAdopted(found ? found.findings.filter((f) => f.status === "adopt") : []);
   }, [demo]);
@@ -135,7 +140,7 @@ export function WorkshopPanel({ id, demo, off, headingRef, onClose }: Props) {
                     <>
                       <PatchView build={b} demo={demo} />
                       <p className="panel-note">
-                        To apply: run <code>git apply -p1 &quot;&lt;workshop folder&gt;/{b.id}/changes.patch&quot;</code> inside your target folder, after reading the patch above.
+                        To apply: run <code>{`git apply -p1 "${dir}/${b.id}/changes.patch"`}</code> inside your target folder, after reading the patch above.
                       </p>
                     </>
                   )}

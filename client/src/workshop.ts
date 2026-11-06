@@ -24,14 +24,14 @@ function toBuild(raw: unknown): Build | null {
   return { id, finding, title, createdAt, status: status as BuildStatus, files, changed };
 }
 
-/** The builds, newest first; "off" when the Workshop is not set up (404); null when the server cannot be reached or answers oddly. */
-export async function getBuilds(fetchFn: FetchFn = fetch): Promise<Build[] | "off" | null> {
+/** The builds, newest first, and the folder they live in; "off" when the Workshop is not set up (404); null when the server cannot be reached or answers oddly. */
+export async function getBuilds(fetchFn: FetchFn = fetch): Promise<{ builds: Build[]; dir: string } | "off" | null> {
   try {
     const res = await fetchFn("/api/workshop");
     if (res.status === 404) return "off";
     if (!res.ok) return null;
-    const data = (await res.json()) as { builds?: unknown };
-    return Array.isArray(data.builds) ? data.builds.map(toBuild).filter((b): b is Build => b !== null) : null;
+    const data = (await res.json()) as { builds?: unknown; dir?: unknown };
+    return Array.isArray(data.builds) ? { builds: data.builds.map(toBuild).filter((b): b is Build => b !== null), dir: typeof data.dir === "string" ? data.dir : "" } : null;
   } catch {
     return null;
   }
@@ -59,11 +59,12 @@ export async function startBuild(findingId: string, fetchFn: FetchFn = fetch): P
     const words: Record<string, string> = {
       not_adopted: "Mark the finding Adopt first.",
       too_big: "The target folder is too large to copy (over 2000 files or 50 MB).",
-      too_many: "There are already 100 builds. Delete old ones from the workshop folder first.",
+      too_many_builds: "There are already 100 builds. Delete old ones from the workshop folder first.",
+      too_many: "Too many agents are running. Stop one first.",
+      worker_limit: "Too many workers are running. Stop one first.",
       target_missing: "The target folder could not be found.",
       master_running: "A master is already running. Wait for it or stop it.",
       budget: "The usage cap was reached.",
-      too_many_workers: "Too many workers are running. Stop one first.",
     };
     if (code && words[code]) return { ok: false, message: words[code] };
     if (res.status === 403) return { ok: false, message: "The session has expired. Open the link printed in the terminal again." };

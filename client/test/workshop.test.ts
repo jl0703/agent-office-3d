@@ -14,8 +14,8 @@ const build = (over: Record<string, unknown> = {}) => ({ id: "0123456789ab", fin
 
 describe("workshop on the page", () => {
   it("reads builds, drops odd ones, and tells off, odd and unreachable apart", async () => {
-    const got = await getBuilds(fake(200, { builds: [build(), build({ status: "weird" }), build({ files: "3" }), "x"] }).fn);
-    assert.equal(Array.isArray(got) && got.length, 1);
+    const got = await getBuilds(fake(200, { builds: [build(), build({ status: "weird" }), build({ files: "3" }), "x"], dir: "C:/data/workshop" }).fn);
+    assert.deepEqual([got !== null && got !== "off" && got.builds.length, got !== null && got !== "off" && got.dir], [1, "C:/data/workshop"]);
     assert.equal(await getBuilds(fake(404, {}).fn), "off");
     assert.equal(await getBuilds(fake(200, { nope: 1 }).fn), null);
     assert.equal(await getBuilds(async () => Promise.reject(new Error("offline"))), null);
@@ -28,7 +28,7 @@ describe("workshop on the page", () => {
     assert.deepEqual(await startBuild("tool-a", ok.fn), { ok: true });
     assert.equal(ok.calls[0]?.path, "/api/workshop/build");
     assert.equal(ok.calls[0]?.init?.body, JSON.stringify({ findingId: "tool-a" }));
-    for (const [status, body, word] of [[409, { reason: "not_adopted" }, /Adopt/], [413, { error: "too_big" }, /too large/], [429, { error: "too_many" }, /100 builds/], [409, { reason: "master_running" }, /master is already running/]] as const) {
+    for (const [status, body, word] of [[409, { reason: "not_adopted" }, /Adopt/], [413, { error: "too_big" }, /too large/], [429, { error: "too_many_builds" }, /100 builds/], [429, { error: "too_many" }, /Too many agents/], [429, { error: "worker_limit" }, /Too many workers/], [409, { reason: "master_running" }, /master is already running/]] as const) {
       const r = await startBuild("tool-a", fake(status, body).fn);
       assert.equal(r.ok === false && word.test(r.message), true, JSON.stringify(body));
     }
