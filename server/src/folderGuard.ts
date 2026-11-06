@@ -93,12 +93,16 @@ export function folderGuardHooks(
   root: string,
   onDeny: (tool: string, reason: string) => void = () => {},
   extraTools: readonly string[] = [],
+  /** While true the session is read-only: Write and Edit are denied. */
+  readOnly: () => boolean = () => false,
 ): NonNullable<Options["hooks"]> {
   const guard: HookCallback = async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
     let verdict: Verdict;
     try {
-      verdict = await checkToolCall(root, input.tool_name, input.tool_input, extraTools);
+      verdict = readOnly() && (input.tool_name === "Write" || input.tool_name === "Edit")
+        ? DENY("planning is read-only: submit a plan and wait for approval")
+        : await checkToolCall(root, input.tool_name, input.tool_input, extraTools);
     } catch {
       verdict = DENY("the path could not be checked");
     }

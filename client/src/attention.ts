@@ -1,11 +1,11 @@
 // What needs the person's attention, worked out from the agents the page already has.
 import type { Agent } from "../../shared/events.ts";
 
-export type AttentionKind = "error" | "cap" | "waiting" | "result" | "research";
+export type AttentionKind = "error" | "cap" | "waiting" | "result" | "research" | "plan";
 
 export type Attention = { id: string; kind: AttentionKind; name: string; text: string };
 
-const ORDER: Record<AttentionKind, number> = { error: 0, cap: 1, waiting: 2, result: 3, research: 4 };
+const ORDER: Record<AttentionKind, number> = { error: 0, plan: 1, cap: 2, waiting: 3, result: 4, research: 5 };
 
 /** The id of the research entry: choosing it opens the research board, not an agent. */
 export const RESEARCH_ID = "research-board";
@@ -40,7 +40,8 @@ export function trackFinished(previous: ReadonlyMap<string, Agent["status"]>, ag
 export function attentionOf(agents: readonly Agent[], unseen: ReadonlySet<string>, newFindings = 0): Attention[] {
   const items: Attention[] = [];
   for (const a of agents) {
-    if (a.status === "error") items.push({ id: a.id, kind: "error", name: a.name, text: short(a.note ?? a.activity ?? "Open it to see what went wrong") });
+    if (a.phase === "planning" && a.plan?.status === "pending") items.push({ id: a.id, kind: "plan", name: a.name, text: short(`Plan to approve: ${a.plan.goal}`) });
+    else if (a.status === "error") items.push({ id: a.id, kind: "error", name: a.name, text: short(a.note ?? a.activity ?? "Open it to see what went wrong") });
     else if (a.status === "stopped" && a.note && /usage cap/i.test(a.note)) items.push({ id: a.id, kind: "cap", name: a.name, text: short(a.note) });
     else if (a.status === "waiting") items.push({ id: a.id, kind: "waiting", name: a.name, text: short(a.note ?? "Open it to see why") });
     else if (unseen.has(a.id)) items.push({ id: a.id, kind: "result", name: a.name, text: "Finished: the result is ready" });

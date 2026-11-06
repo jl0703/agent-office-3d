@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignTask, describeFailure, getAgentEvents, getVault, getAgentResult, getUsage, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, decidePlan, describeFailure, getAgentEvents, getVault, getAgentResult, getUsage, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -106,6 +106,18 @@ describe("api helpers", () => {
     assert.equal(await getVault(false, fakeFetch(403, {}).fn), null);
     assert.equal(await getVault(false, fakeFetch(200, { hello: 1 }).fn), null);
     assert.equal(await getVault(false, async () => Promise.reject(new Error("offline"))), null);
+  });
+
+  it("sends the answer to a plan, with the note only when there is one", async () => {
+    const f = fakeFetch(202, {});
+    assert.deepEqual(await decidePlan("m 1", "approve", undefined, f.fn), { ok: true });
+    assert.equal(f.calls[0]?.path, "/api/agents/m%201/plan");
+    assert.deepEqual(JSON.parse(String(f.calls[0]?.init?.body)), { decision: "approve" });
+    await decidePlan("m", "changes", "smaller", f.fn);
+    assert.deepEqual(JSON.parse(String(f.calls[1]?.init?.body)), { decision: "changes", note: "smaller" });
+    assert.match(describeFailure(409, "master_not_resumable"), /Start a new master/);
+    const gone = await decidePlan("m", "approve", undefined, fakeFetch(409, { reason: "no_pending_plan" }).fn);
+    assert.equal(gone.ok, false);
   });
 
   it("starts a master with its goal as the prompt, and explains a second master", async () => {

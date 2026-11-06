@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type Ref } from "react";
 import type { ActivityEntry, Agent } from "../../shared/events.ts";
 import { getAgentEvents, getAgentResult, type Usage } from "./api.ts";
 import { canStop } from "./AgentList.tsx";
+import { PlanCard } from "./PlanCard.tsx";
 import { StatusChip } from "./StatusChip.tsx";
 import { relativeTime, shortDuration, timelineOf, type Family } from "./timeline.ts";
 import { WorkerControls } from "./WorkerControls.tsx";
@@ -162,6 +163,7 @@ export function AgentPanel({ id, agent, parent, subagents, log, result, usage, f
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </div>
       {agent.note && <p className="panel-note">{agent.note}</p>}
+      {agent.role === "master" && agent.plan && <PlanCard agent={agent} plan={agent.plan} off={stopOff} />}
       {notShown && <p className="panel-note">Not shown in the office view: all desks are taken.</p>}
       <dl className="panel-facts">
         <dt>Project</dt>

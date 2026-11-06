@@ -16,7 +16,7 @@ import { createRegistry } from "../src/registry.ts";
 import { RESEARCH_LEAD_PROMPT, RESEARCHER_PROMPT } from "../src/research.ts";
 import { createSupervisor } from "../src/supervisor.ts";
 import { createFake } from "./fakeQuery.ts";
-import { loginTo, send } from "./helpers.ts";
+import { loginTo, send, validPlan } from "./helpers.ts";
 
 const TOKEN = "ghp_SECRETTOKEN123";
 const made: string[] = [];
@@ -82,11 +82,18 @@ async function waitFor(check: () => boolean) {
   assert.ok(check(), "condition met");
 }
 
+/** The master submits a plan and the owner approves it. */
+async function approve(r: Rig, id: string, office: Awaited<ReturnType<typeof connect>>) {
+  assert.equal((await office("submit_plan", validPlan)).error, false);
+  assert.deepEqual(r.supervisor.decidePlan(id, "approve"), { ok: true });
+}
+
 /** A research master with one worker started through its own office tool. */
 async function team(r: Rig) {
   const res = await r.supervisor.startMaster({ prompt: "topic", team: "research" });
   assert.ok(res.ok);
   const office = await connect(r, 0, OFFICE_SERVER);
+  await approve(r, res.id, office);
   const spawned = await office("spawn_worker", { name: "repo-scout", folder: r.research, task: "find repos" });
   assert.equal(spawned.error, false, spawned.text);
   await waitFor(() => r.calls.length === 2);
@@ -134,8 +141,10 @@ describe("the research team (R3, R4)", () => {
   it("gives no GitHub tools to an ordinary worker, an ordinary master, or the workers of an ordinary master", async () => {
     const r = rig();
     assert.ok((await r.supervisor.start({ cwd: r.other, prompt: "x" })).ok);
-    assert.ok((await r.supervisor.startMaster({ cwd: r.other, prompt: "x" })).ok);
+    const master = await r.supervisor.startMaster({ cwd: r.other, prompt: "x" });
+    assert.ok(master.ok);
     const office = await connect(r, 1, OFFICE_SERVER);
+    await approve(r, master.id, office);
     assert.equal((await office("spawn_worker", { name: "w", folder: r.other, task: "t" })).error, false);
     await waitFor(() => r.calls.length === 3);
     for (const [i, o] of r.calls.entries()) {

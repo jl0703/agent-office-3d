@@ -1467,3 +1467,36 @@ textarea {
   gap: var(--space-1);
   font-size: 13px;
 }
+
+/* ---- A master's plan ---- */
+.plan-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-1);
+}
+
+.plan-card h3 {
+  font-size: 15px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+}
+
+.plan-card p,
+.plan-card ol {
+  margin: 0;
+}
+
+.plan-card ol {
+  padding-left: var(--space-4);
+}
+
+.plan-status {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  font-size: 13px;
+}

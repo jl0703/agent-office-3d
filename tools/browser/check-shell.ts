@@ -273,6 +273,33 @@ try {
     }
   }
 
+  if (run("plan")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [scheme, w, h] of [["light", 1440, 900], ["dark", 375, 740]] as const) {
+      const { page, close } = await launchBrowser({ width: w, height: h });
+      await page.emulate({ scheme });
+      await page.viewport(w, h);
+      const server = await login(page);
+      await demo(page, server.base);
+      await page.evaluate(`[...document.querySelectorAll(".app-actions button")].find((b) => (b.getAttribute("aria-label") || b.textContent).includes("Needs you"))?.click()`);
+      await page.wait(300);
+      const listed = await page.evaluate<boolean>(`document.querySelector(".needs-list")?.textContent.includes("Plan to approve") ?? false`);
+      expect(listed, `plan(${scheme}): the plan is listed under Needs you`);
+      await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Plan to approve"))?.click()`);
+      await page.wait(500);
+      await page.evaluate(`document.querySelector(".peek")?.click()`);
+      await page.wait(500);
+      const card = await page.evaluate<string>(`JSON.stringify({ card: Boolean(document.querySelector(".plan-card")), steps: document.querySelectorAll(".plan-card li").length, buttons: [...document.querySelectorAll(".plan-card .decisions button")].map((b) => b.textContent + (b.disabled ? " (off)" : "")) })`);
+      expect(card.includes('"card":true') && card.includes('"steps":4'), `plan(${scheme}): card with its steps ${card}`);
+      await page.screenshot(join(out, `plan-${scheme}.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
+      expect(violations.length === 0, `plan(${scheme}): axe: ${violations.join(", ")}`);
+      console.log(`plan(${scheme}): ${card} axe=${violations.length}`);
+      await close();
+    }
+  }
+
   if (run("axe")) {
     const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
     for (const scheme of ["light", "dark"] as const) {
