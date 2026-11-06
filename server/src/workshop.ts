@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { realOps, renameWithRetry } from "./managedStore.ts";
 import { SLUG } from "./findings.ts";
 
 // The Workshop: an adopted finding is built inside a copy of the target folder, never in the target itself.
@@ -66,7 +67,8 @@ export type WorkshopOptions = { dir: string; target: string; now?: () => number;
 async function writeAtomic(file: string, text: string) {
   const tmp = `${file}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(tmp, text);
-  await rename(tmp, file);
+  // On Windows a rename can fail for a moment while a reader has the file open.
+  await renameWithRetry(realOps, tmp, file);
 }
 
 export function createWorkshop(opts: WorkshopOptions) {

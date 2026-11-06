@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ClaudeRunner } from "./claudeCli.ts";
 import { UNSAFE } from "./findings.ts";
+import { realOps, renameWithRetry } from "./managedStore.ts";
 
 // Adding and removing user-level MCP servers with the official `claude mcp add|remove --scope user` commands, after the
 // owner confirms in the page. The office never starts a server, never edits the Claude settings file itself, never
@@ -78,10 +79,23 @@ async function writeAdded(file: string, names: Set<string>) {
   await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(tmp, JSON.stringify({ version: 1, names: [...names].sort() }));
-  await rename(tmp, file);
+  // On Windows a rename can fail for a moment while a reader has the file open.
+  await renameWithRetry(realOps, tmp, file);
 }
 
 export const addedServers = readAdded;
+
+// Changes to the list of added servers run one after another, so two requests at once cannot lose a name.
+let registryQueue: Promise<unknown> = Promise.resolve();
+const remember = (file: string, change: (names: Set<string>) => void) => {
+  const next = registryQueue.then(async () => {
+    const names = await readAdded(file);
+    change(names);
+    await writeAdded(file, names);
+  });
+  registryQueue = next.catch(() => undefined);
+  return next.catch(() => undefined);
+};
 
 export type McpDeps = { run: ClaudeRunner; addedFile: string; existing: () => Promise<string[]> };
 
@@ -91,19 +105,15 @@ export async function addServer(deps: McpDeps, input: McpInput): Promise<Result>
   if ((await deps.existing()).includes(input.name)) return { ok: false, code: "exists" };
   const ran = await deps.run(args);
   if (!ran.ok) return { ok: false, code: "failed" };
-  const added = await readAdded(deps.addedFile);
-  added.add(input.name);
-  await writeAdded(deps.addedFile, added).catch(() => undefined);
+  await remember(deps.addedFile, (names) => names.add(input.name));
   return { ok: true };
 }
 
 export async function removeServer(deps: McpDeps, name: string): Promise<Result> {
   if (!MCP_NAME.test(name)) return { ok: false, code: "invalid_input" };
-  const added = await readAdded(deps.addedFile);
-  if (!added.has(name)) return { ok: false, code: "not_added" };
+  if (!(await readAdded(deps.addedFile)).has(name)) return { ok: false, code: "not_added" };
   const ran = await deps.run(["mcp", "remove", "--scope", "user", name]);
   if (!ran.ok) return { ok: false, code: "failed" };
-  added.delete(name);
-  await writeAdded(deps.addedFile, added).catch(() => undefined);
+  await remember(deps.addedFile, (names) => names.delete(name));
   return { ok: true };
 }

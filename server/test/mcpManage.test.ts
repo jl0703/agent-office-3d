@@ -41,6 +41,12 @@ describe("mcp: building the command", () => {
       { ...remote, url: "http://example.com/mcp" },
       { ...remote, url: "https://user:pass@example.com/mcp" },
       { ...remote, url: "--flag" },
+      { ...remote, url: "http://localhost.evil.com/mcp" },
+      { ...remote, url: "http://127.0.0.1.evil.com/mcp" },
+      { ...remote, url: "http://[::1]/mcp" },
+      { ...remote, url: "file:///etc/passwd" },
+      { ...remote, url: "javascript:alert(1)" },
+      { ...remote, url: "https://" },
       { ...remote, headers: ["no colon"] },
       { ...remote, headers: Array.from({ length: 6 }, () => "A: b") },
     ];
@@ -94,6 +100,12 @@ describe("mcp: adding and removing", () => {
     assert.deepEqual(await addServer(d, { ...local, name: "other" }), { ok: false, code: "failed" });
     assert.deepEqual([...(await addedServers(d.addedFile))], ["my-server"]);
     assert.deepEqual(await addServer(d, { ...local, command: "--x" }), { ok: false, code: "invalid_input" });
+  });
+
+  it("keeps every name when two adds happen at once", async () => {
+    const d = deps();
+    await Promise.all(["one", "two", "three"].map((name) => addServer(d, { ...local, name })));
+    assert.deepEqual([...(await addedServers(d.addedFile))].sort(), ["one", "three", "two"]);
   });
 
   it("removes only servers added here", async () => {

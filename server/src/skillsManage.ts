@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { UNSAFE } from "./findings.ts";
+import { realOps, renameWithRetry } from "./managedStore.ts";
 
 // Adding and removing skills in the owner's skills folder, from the sidebar. The owner confirms in the page first.
 // Rules: a new skill never replaces an existing folder; only skills added here can be removed; removing moves the
@@ -34,7 +35,8 @@ async function writeAdded(file: string, names: Set<string>) {
   await mkdir(join(file, ".."), { recursive: true });
   const tmp = `${file}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(tmp, JSON.stringify({ version: 1, names: [...names].sort() }));
-  await rename(tmp, file);
+  // On Windows a rename can fail for a moment while a reader has the file open.
+  await renameWithRetry(realOps, tmp, file);
 }
 
 /** The names of the skills that were added from the sidebar (only these can be removed there). */
