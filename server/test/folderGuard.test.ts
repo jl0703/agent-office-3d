@@ -178,3 +178,27 @@ describe("folder guard: the hook", () => {
     assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
   });
 });
+
+describe("folder guard: a session limited to one new file", () => {
+  it("lets it create that file once and nothing else, and still allows reading", async () => {
+    const { root } = layout();
+    mkdirSync(join(root, "findings"), { recursive: true });
+    writeFileSync(join(root, "findings", "other.md"), "x");
+    const allowed = join(root, "evaluations", "tool-a.md");
+    const hooks = folderGuardHooks(root, () => {}, [], () => false, allowed);
+    const verdict = async (tool: string, file: string) => {
+      const out = (await hooks.PreToolUse?.[0]?.hooks[0]?.({ hook_event_name: "PreToolUse", tool_name: tool, tool_input: { file_path: file }, tool_use_id: "t" } as never, "t", { signal: new AbortController().signal })) as { hookSpecificOutput?: unknown };
+      return out.hookSpecificOutput === undefined;
+    };
+    assert.equal(await verdict("Write", allowed), true, "the report file");
+    assert.equal(await verdict("Write", join("evaluations", "tool-a.md")), true, "the same file by a relative path");
+    assert.equal(await verdict("Write", join(root, "evaluations", "tool-b.md")), false, "another report");
+    assert.equal(await verdict("Write", join(root, "findings", "other.md")), false, "a finding");
+    assert.equal(await verdict("Write", join(root, "evaluations", "..", "findings", "x.md")), false, "a parent reference");
+    assert.equal(await verdict("Edit", allowed), false, "Edit is never allowed");
+    assert.equal(await verdict("Read", join(root, "findings", "other.md")), true, "reading stays allowed");
+    mkdirSync(join(root, "evaluations"), { recursive: true });
+    writeFileSync(allowed, "already there");
+    assert.equal(await verdict("Write", allowed), false, "an existing report is never overwritten");
+  });
+});

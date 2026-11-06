@@ -257,6 +257,7 @@ try {
       const cards = await page.evaluate<number>(`document.querySelectorAll(".finding").length`);
       expect(cards === 4, `research(${scheme}): board shows the demo findings (${cards})`);
       expect((await page.evaluate<string>(`document.querySelector(".finding")?.textContent ?? ""`)).includes("Improves: code-reviewer skill"), `research(${scheme}): a finding says what it improves`);
+      expect((await page.evaluate<string>(`document.querySelector(".fit")?.textContent ?? ""`)).includes("Fit check: Fits"), `research(${scheme}): a looked-at finding shows its fit check`);
       await page.screenshot(join(out, `research-${scheme}.png`));
       // Judge a finding: Looking, then hand it to a master.
       await page.evaluate(`document.querySelector(".finding .decisions button:nth-child(2)")?.click()`);

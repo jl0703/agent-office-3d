@@ -21,7 +21,7 @@ export const DECISIONS_FILE = "research-decisions.json";
 
 export const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const KINDS = ["skill", "mcp", "repo", "idea", "technique"] as const;
-const LEVELS = ["low", "medium", "high"] as const;
+export const LEVELS = ["low", "medium", "high"] as const;
 export const STATUSES = ["new", "looking", "adopt", "later", "reject"] as const;
 export type Status = (typeof STATUSES)[number];
 
@@ -48,7 +48,7 @@ export const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029\uFFFD]/u;
 export const UNSAFE_G = new RegExp(UNSAFE.source, "gu");
 const LINE = /^([A-Za-z_][A-Za-z0-9_-]{0,39}):[ ]*(.*)$/;
 
-const oneLine = (max: number) => z.string().min(1).max(max).refine((v) => !UNSAFE.test(v));
+export const oneLine = (max: number) => z.string().min(1).max(max).refine((v) => !UNSAFE.test(v));
 const optional = (v: string | undefined) => (v === "" ? undefined : v);
 
 const Fields = z.object({
@@ -76,7 +76,7 @@ function isPlainHttps(value: string): boolean {
   }
 }
 
-function isRealDate(value: string): boolean {
+export function isRealDate(value: string): boolean {
   const d = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(value);
 }
@@ -139,7 +139,7 @@ export async function resolveResearch(dir: string | undefined): Promise<string |
  * Opens a regular file that really lives inside `base` (links are followed and checked) and reads at most
  * `maxBytes` of it. Missing, odd or escaping files give null.
  */
-async function readHead(base: string, name: string, maxBytes: number): Promise<{ text: string; mtimeMs: number } | null> {
+export async function readHead(base: string, name: string, maxBytes: number): Promise<{ text: string; mtimeMs: number } | null> {
   try {
     const path = join(base, name);
     let real = path;

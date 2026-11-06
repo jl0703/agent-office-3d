@@ -7,6 +7,7 @@ import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
+import { buildEvaluationPrompt, readEvaluations } from "./evaluations.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
 import { listOutcomes } from "./planLog.ts";
@@ -63,6 +64,7 @@ const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
 const FINDING_DECISION = /^\/api\/research\/findings\/([^/]{1,200})\/decision$/;
+const FINDING_EVALUATE = /^\/api\/research\/findings\/([^/]{1,200})\/evaluate$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume|plan)$/;
 
 const StartBody = z
@@ -291,19 +293,36 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   /** The Research department's routes. Returns false for a path that is not one of them. */
   function researchRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, method: string): boolean {
     const decision = FINDING_DECISION.exec(pathname);
+    const evaluate = FINDING_EVALUATE.exec(pathname);
     const known =
       (pathname === "/api/research/findings" && method === "GET") ||
       (pathname === "/api/research/config" && (method === "GET" || method === "POST")) ||
       (pathname === "/api/research/sweep" && method === "POST" && opts.supervisor) ||
       (pathname === "/api/research/schedule" && (method === "GET" || method === "POST")) ||
-      (decision && method === "POST");
+      (decision && method === "POST") ||
+      (evaluate && method === "POST" && opts.supervisor);
     if (!known) return false;
     run(req, res, async () => {
       const base = decisions ? await resolveResearch(opts.researchDir) : null;
       if (!decisions || !base) return json(res, 400, { error: "no_research_folder" });
       if (pathname === "/api/research/findings") {
         const { findings, invalid } = await readFindings(base);
-        return json(res, 200, { findings: withDecisions(findings, await decisions.all()), invalid });
+        const fits = await readEvaluations(base);
+        return json(res, 200, { findings: withDecisions(findings, await decisions.all()).map((f) => ({ ...f, ...(fits.has(f.id) ? { fit: fits.get(f.id) } : {}) })), invalid });
+      }
+      if (evaluate) {
+        const id = evaluate[1] as string;
+        if (Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined) {
+          if (!z.object({}).strict().safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
+        } else req.resume();
+        if (!SLUG.test(id)) return json(res, 400, { error: "invalid_request" });
+        const finding = await readFinding(base, id);
+        if (!finding) return json(res, 404, { error: "not_found" });
+        const today = new Date().toISOString().slice(0, 10);
+        const result = await opts.supervisor?.startEvaluation(id, buildEvaluationPrompt(finding, today));
+        if (!result) return json(res, 404, { error: "not_found" });
+        if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
+        return json(res, 202, { id: result.id });
       }
       if (decision) {
         const id = decision[1] as string;

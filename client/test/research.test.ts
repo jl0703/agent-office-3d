@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { briefFor, byNewest, getConfig, getFindings, getSchedule, setSchedule, safeLink, saveConfig, setDecision, startSweep, type Finding } from "../src/research.ts";
+import { briefFor, byNewest, evaluateFinding, getConfig, getFindings, getSchedule, setSchedule, safeLink, saveConfig, setDecision, startSweep, type Finding } from "../src/research.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fake = (status: number, body: unknown) => {
@@ -93,5 +93,21 @@ describe("research helpers", () => {
     const post = fake(200, {});
     assert.deepEqual(await setSchedule("weekly", post.fn), { ok: true });
     assert.deepEqual(JSON.parse(String(post.calls[0]?.init?.body)), { mode: "weekly" });
+  });
+});
+
+describe("the fit check on the page", () => {
+  const fit = { verdict: "fits", how: "Copy it", conflicts: "none", security: "text only", effort: "low", rollback: "delete it", date: "2026-11-06" };
+
+  it("reads a report, drops an odd one, and the request goes to the evaluate route with the right messages", async () => {
+    const got = await getFindings(fake(200, { findings: [raw({ fit }), raw({ id: "b", fit: { ...fit, verdict: "great" } }), raw({ id: "c", fit: { ...fit, how: 5 } })], invalid: 0 }).fn);
+    assert.equal(got?.findings[0]?.fit?.verdict, "fits");
+    assert.equal(got?.findings[1]?.fit, undefined);
+    assert.equal(got?.findings[2]?.fit, undefined);
+    const ok = fake(202, { id: "x" });
+    assert.deepEqual(await evaluateFinding("a-b", ok.fn), { ok: true });
+    assert.equal(ok.calls[0]?.path, "/api/research/findings/a-b/evaluate");
+    const busy = await evaluateFinding("a-b", fake(409, { reason: "evaluating" }).fn);
+    assert.equal(busy.ok === false && /already running/.test(busy.message), true);
   });
 });

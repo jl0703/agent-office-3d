@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { filesInsideFolder, namesOutsidePath, type AutoApprove, type AutoApproveStore } from "./autoApprove.ts";
 import { buildBrief } from "./brief.ts";
@@ -30,13 +30,13 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 /** A research team's master: the folder is optional and defaults to the research folder. */
-export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true };
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A finding id: an Evaluator, which may only create evaluations/<id>.md. */ evaluator?: string };
 export type StartResult =
   | { ok: true; id: string }
   | {
       ok: false;
       status: 400 | 403 | 409 | 429 | 502;
-      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running" | "plan_not_approved";
+      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running" | "plan_not_approved" | "evaluating";
     };
 
 export type CommandResult =
@@ -48,6 +48,7 @@ export type CommandResult =
       code: "busy" | "stopped" | "detached" | "not_resumable" | "transcript_active" | "budget" | "too_many" | "invalid_folder" | "folder_not_allowed" | "not_found" | "start_failed" | "no_pending_plan" | "master_not_resumable";
     };
 
+export const EVALUATOR_NAME = "Evaluator";
 export const DEFAULT_RESUME_PROMPT = "Continue where you left off.";
 
 const CAP_NOTE: Record<Cap, string> = {
@@ -131,6 +132,8 @@ type Managed = {
   /** Set for a research team's master and the workers it starts. */
   team: "research" | null;
   sweep: Sweep | null;
+  /** An Evaluator's one allowed file (real path); other sessions have none. */
+  writeOnly: string | null;
   /** The master that started this worker. Set by the server, never by a model. */
   owner: Managed | null;
   /** Final text of the last finished task, at most MAX_RESULT_CHARS. In memory only. */
@@ -156,7 +159,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -488,6 +491,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       plan: null,
       team: null,
       sweep: null,
+      writeOnly: null,
       owner: null,
       result: null,
       lastText: "",
@@ -538,7 +542,7 @@ export function createSupervisor(opts: SupervisorOptions) {
             : {}),
           ...(m.expectedId ? { resume: m.expectedId } : {}),
           // Keeps every file tool inside this folder; permission rules alone would allow any path.
-          hooks: folderGuardHooks(m.cwd, (tool, reason) => log({ event: "managed-tool-denied", tool, reason }), extra, () => m.phase === "planning"),
+          hooks: folderGuardHooks(m.cwd, (tool, reason) => log({ event: "managed-tool-denied", tool, reason }), extra, () => m.phase === "planning", m.writeOnly),
           cwd: m.cwd,
           env: buildChildEnv(env),
           abortController: m.abort,
@@ -604,6 +608,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
     if (owner && owner.state !== "running") return refuse(409, "master_stopped");
     if (owner?.phase === "planning") return refuse(409, "plan_not_approved");
+    if (req.evaluator && live().some((x) => x.writeOnly !== null)) return refuse(409, "evaluating");
     if (req.sweep && live().some((x) => x.role === "master" && x.team === "research")) return refuse(409, "sweep_running");
     if (role === "master" && live().filter((x) => x.role === "master").length >= maxMasters) return refuse(409, "master_running");
     if (owner && ownedBy(owner).filter((w) => w.state !== "ended").length >= maxWorkersPerMaster) return refuse(429, "worker_limit");
@@ -621,6 +626,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       team,
       // Every master plans first, except a research sweep's Lead, which starts executing.
       phase: role === "master" && !req.sweep ? "planning" : "executing",
+      writeOnly: req.evaluator ? join(folder.path, "evaluations", `${req.evaluator}.md`) : null,
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
     if (m.sweep && !owner) m.sweep.lead = m;
@@ -794,6 +800,9 @@ export function createSupervisor(opts: SupervisorOptions) {
 
     /** Starts a master: a session with the office tools. Only the page does this, never a model. */
     startMaster: (req: StartMasterRequest) => begin(req, "master", null),
+
+    /** Starts one read-only Evaluator for a finding (a research-team worker). One at a time. */
+    startEvaluation: (findingId: string, prompt: string): Promise<StartResult> => begin({ prompt, team: "research", name: `${EVALUATOR_NAME} ${findingId}`, evaluator: findingId }, "worker", null),
 
     /** Starts the research Lead on a sweep prompt. One at a time; its team's cost is capped together. */
     startSweep: (prompt: string) => begin({ prompt, team: "research", name: "Research Lead", sweep: true }, "master", null),
