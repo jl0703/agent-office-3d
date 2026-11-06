@@ -9,6 +9,7 @@ import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
+import { AutoApproveBody, type AutoApproveStore } from "./autoApprove.ts";
 import { ModeBody, type Scheduler } from "./schedule.ts";
 import type { Registry } from "./registry.ts";
 import { sweepPromptFor } from "./sweep.ts";
@@ -41,6 +42,8 @@ type Options = {
   dataDir?: string;
   /** The scheduled-sweep setting and its timer. Without it the schedule routes answer 404. */
   scheduler?: Scheduler;
+  /** The auto-approve rule for plans. Share it with the supervisor. Without it the auto-approve routes answer 404. */
+  autoApprove?: AutoApproveStore;
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /**
@@ -193,6 +196,16 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (url.pathname.startsWith("/api/research/")) {
         const handled = researchRoute(req, res, url.pathname, method);
         if (handled) return;
+      }
+      if (url.pathname === "/api/auto-approve" && (method === "GET" || method === "POST")) {
+        const store = opts.autoApprove;
+        if (!store) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => {
+          if (method === "GET") return json(res, 200, await store.get());
+          const parsed = AutoApproveBody.safeParse(await readJson(req));
+          if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+          json(res, 200, await store.update(parsed.data));
+        });
       }
       if (url.pathname === "/api/usage" && method === "GET" && opts.supervisor) return json(res, 200, opts.supervisor.usage());
       const answer = AGENT_RESULT.exec(url.pathname);

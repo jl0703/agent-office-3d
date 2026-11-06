@@ -15,6 +15,8 @@ export type Plan = {
   status: "pending" | "approved" | "changes" | "rejected";
   /** The owner's note from the last decision, at most 500 characters. */
   note?: string;
+  /** Approved by the owner's auto-approve rule, not by a click. */
+  auto?: boolean;
 };
 
 export type Agent = {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignTask, decidePlan, describeFailure, getAgentEvents, getVault, getAgentResult, getUsage, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
+import { assignTask, decidePlan, getAutoApprove, setAutoApprove, describeFailure, getAgentEvents, getVault, getAgentResult, getUsage, resumeAgent, startMaster, startResearch, startWorker, stopAgent, stopAll } from "../src/api.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fakeFetch = (status: number, body: unknown) => {
@@ -118,6 +118,15 @@ describe("api helpers", () => {
     assert.match(describeFailure(409, "master_not_resumable"), /Start a new master/);
     const gone = await decidePlan("m", "approve", undefined, fakeFetch(409, { reason: "no_pending_plan" }).fn);
     assert.equal(gone.ok, false);
+  });
+
+  it("reads the auto-approval settings, rejects odd answers, and sends only what changed", async () => {
+    const ok = fakeFetch(200, { enabled: true, maxCostUsd: 0.5, maxWorkers: 1 });
+    assert.deepEqual(await getAutoApprove(ok.fn), { enabled: true, maxCostUsd: 0.5, maxWorkers: 1 });
+    assert.equal(await getAutoApprove(fakeFetch(200, { enabled: "yes" }).fn), null);
+    const f = fakeFetch(200, {});
+    await setAutoApprove({ enabled: false }, f.fn);
+    assert.deepEqual(JSON.parse(String(f.calls[0]?.init?.body)), { enabled: false });
   });
 
   it("starts a master with its goal as the prompt, and explains a second master", async () => {
