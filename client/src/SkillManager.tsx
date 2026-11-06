@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { addSkill, removeSkill, SKILL_NAME } from "./setup.ts";
 
 type Mode = "paste" | "folder";
@@ -23,6 +23,25 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const heading = useRef<HTMLElement | null>(null);
+  const status = useRef<HTMLParagraphElement | null>(null);
+  const reviewButton = useRef<HTMLButtonElement | null>(null);
+  const asking = pending !== null || pendingRemove !== null;
+
+  // Asking to remove closes an add review, and a confirm box that opens takes focus so keyboard users land in it.
+  useEffect(() => {
+    if (pendingRemove) setPending(null);
+  }, [pendingRemove]);
+  useEffect(() => {
+    if (asking) heading.current?.focus();
+  }, [asking]);
+
+  const cancel = (p: Pending) => {
+    setPending(null);
+    onAskRemove(null);
+    // Back to the button that asked: Review, or the row's remove button.
+    requestAnimationFrame(() => (p.kind === "add" ? reviewButton.current : document.querySelector<HTMLElement>(`[aria-label="Remove ${p.name}"]`))?.focus());
+  };
 
   const nameOk = SKILL_NAME.test(name);
   const ready = nameOk && (mode === "paste" ? content.trim() !== "" : source.trim() !== "");
@@ -38,6 +57,8 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
     setBusy(false);
     setPending(null);
     onAskRemove(null);
+    // The confirm box and, after a removal, the row are gone: the status line says what happened.
+    requestAnimationFrame(() => status.current?.focus());
     if (result.ok) {
       setMessage(demo ? "Demo mode: nothing was changed." : p.kind === "add" ? `Added ${p.name}. New Claude Code sessions will see it.` : `Moved ${p.name} to the trash folder.`);
       if (p.kind === "add" && !demo) {
@@ -81,14 +102,16 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
             <input id={`${id}-source`} value={source} maxLength={1000} onChange={(e) => setSource(e.target.value)} placeholder="C:\path\to\skill" />
           </>
         )}
-        <button type="button" disabled={!ready || off || busy} title={off ? "Not available right now" : undefined} onClick={review}>
+        <button type="button" disabled={!ready || off || busy} title={off ? "Not available right now" : undefined} ref={reviewButton} onClick={review}>
           Review
         </button>
       </details>
 
       {(pending ?? (pendingRemove ? ({ kind: "remove", name: pendingRemove } as const) : null)) && (
         <div className="confirm-box" role="alertdialog" aria-labelledby={`${id}-confirm`} aria-describedby={`${id}-confirm-text`}>
-          <strong id={`${id}-confirm`}>Change your Claude setup?</strong>
+          <strong id={`${id}-confirm`} ref={heading} tabIndex={-1}>
+            Change your Claude setup?
+          </strong>
           {(() => {
             const p = pending ?? { kind: "remove" as const, name: pendingRemove ?? "" };
             return (
@@ -105,10 +128,7 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => {
-                      setPending(null);
-                      onAskRemove(null);
-                    }}
+                    onClick={() => cancel(p)}
                   >
                     Cancel
                   </button>
@@ -118,7 +138,7 @@ export function SkillManager({ demo, off, onChanged, pendingRemove, onAskRemove 
           })()}
         </div>
       )}
-      <p role="status" aria-live="polite" className="form-message">
+      <p role="status" aria-live="polite" className="form-message" ref={status} tabIndex={-1}>
         {message}
       </p>
     </div>

@@ -89,8 +89,10 @@ export function Sidebar({ demo }: { demo: boolean }) {
 
           {setup === "loading" && <p className="panel-note">Loading…</p>}
           {setup === null && <p className="panel-note">Your setup could not be read.</p>}
-          {ready && section === "skills" && ready.canManage && (
-            <SkillManager demo={demo} off={false} onChanged={() => setReloads((n) => n + 1)} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
+          {ready && ready.canManage && (
+            <div hidden={section !== "skills"}>
+              <SkillManager demo={demo} off={false} onChanged={() => setReloads((n) => n + 1)} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
+            </div>
           )}
           {ready && section === "skills" && (
             <ul className="note-list setup-list" aria-label="Skills">

@@ -7,7 +7,7 @@ import { UNSAFE } from "./findings.ts";
 // Rules: a new skill never replaces an existing folder; only skills added here can be removed; removing moves the
 // folder to a trash folder instead of deleting it. Nothing here runs anything.
 
-export const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,59}$/;
+export const SKILL_NAME = /^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$)[a-z0-9][a-z0-9-]{0,59}$/; // not a Windows device name
 export const MAX_SKILL_BYTES = 100 * 1024;
 export const MAX_COPY_FILES = 50;
 export const MAX_COPY_BYTES = 1024 * 1024;
@@ -63,6 +63,8 @@ async function copyTree(from: string, to: string, counter: Counter): Promise<"ok
     const source = join(from, entry.name);
     const target = join(to, entry.name);
     if (entry.isDirectory()) {
+      counter.files++; // folders count too, so a tree of empty folders is bounded as well
+      if (counter.files > MAX_COPY_FILES) return "too_big";
       if ((await copyTree(source, target, counter)) === "too_big") return "too_big";
     } else if (entry.isFile()) {
       counter.files++;
@@ -95,6 +97,7 @@ export async function addSkill(dirs: SkillsDirs, input: { name: string; content?
     } else if (input.source !== undefined) {
       let source: string;
       try {
+        if (input.source.startsWith("\\\\") || input.source.startsWith("//")) return await undo("source_missing"); // network paths are not followed
         source = await realpath(input.source);
         if (!(await stat(source)).isDirectory()) return await undo("source_missing");
       } catch {

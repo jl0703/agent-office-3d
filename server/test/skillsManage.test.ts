@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -151,5 +151,46 @@ describe("skills: the routes", () => {
     const auth = await loginTo(srv);
     const r = await send(srv.port, "/api/setup/skills", { method: "POST", headers: { host: auth.host, cookie: auth.cookie, origin: `http://${auth.host}`, "content-type": "application/json" }, body: JSON.stringify({ name: "x", content: skill("x"), confirm: true }) });
     assert.equal(r.status, 404);
+  });
+});
+
+describe("skills: the guards that keep links and a tampered list out", () => {
+  it("does not copy a link inside a source folder", async () => {
+    const { root, skillsDir, d } = rig();
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "secret.md"), "SECRET");
+    const source = join(root, "source");
+    mkdirSync(source);
+    writeFileSync(join(source, "SKILL.md"), skill("linked"));
+    symlinkSync(outside, join(source, "link"), "junction");
+    assert.deepEqual(await addSkill(d, { name: "linked", source }), { ok: true });
+    assert.equal(existsSync(join(skillsDir, "linked", "link")), false);
+    assert.equal(existsSync(join(skillsDir, "linked", "link", "secret.md")), false);
+  });
+
+  it("keeps only valid names from a tampered added-skills file", async () => {
+    const { root, d } = rig();
+    mkdirSync(join(root, "data"), { recursive: true });
+    writeFileSync(d.addedFile, JSON.stringify({ version: 1, names: ["../x", "good-one", "UPPER", 5, "con"] }));
+    assert.deepEqual([...(await addedSkills(d))], ["good-one"]);
+  });
+
+  it("refuses to remove an added skill whose folder was swapped for a link, and leaves the link target alone", async () => {
+    const { root, skillsDir, d } = rig();
+    await addSkill(d, { name: "mine", content: skill("mine") });
+    const elsewhere = join(root, "elsewhere");
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, "keep.md"), "keep");
+    rmSync(join(skillsDir, "mine"), { recursive: true });
+    symlinkSync(elsewhere, join(skillsDir, "mine"), "junction");
+    assert.deepEqual(await removeSkill(d, "mine"), { ok: false, code: "not_found" });
+    assert.equal(readFileSync(join(elsewhere, "keep.md"), "utf8"), "keep");
+  });
+
+  it("refuses Windows device names and network paths", async () => {
+    const { d } = rig();
+    for (const name of ["con", "nul", "com1", "lpt9"]) assert.deepEqual(await addSkill(d, { name, content: skill(name) }), { ok: false, code: "invalid_name" }, name);
+    assert.deepEqual(await addSkill(d, { name: "net", source: "//host/share/skill" }), { ok: false, code: "source_missing" });
   });
 });

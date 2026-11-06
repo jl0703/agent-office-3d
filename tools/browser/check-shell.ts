@@ -379,6 +379,7 @@ try {
       await page.wait(200);
       const confirmText = await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`);
       expect(confirmText.includes("Change your Claude setup?") && confirmText.includes("demo-docs-writer") && confirmText.includes("Confirm"), `sidebar(${scheme}): removing asks first (${confirmText})`);
+      expect(await page.evaluate<boolean>(`document.activeElement?.closest(".confirm-box") !== null`), `sidebar(${scheme}): focus moves into the confirm box`);
       const removeSource = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
       await page.evaluate(removeSource);
       const confirmViolations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
@@ -386,6 +387,7 @@ try {
       await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
       await page.wait(200);
       expect(await page.evaluate<boolean>(`!document.querySelector(".confirm-box")`), `sidebar(${scheme}): Cancel closes the confirm box`);
+      expect(await page.evaluate<string>(`document.activeElement?.getAttribute("aria-label") ?? ""`) === "Remove demo-docs-writer", `sidebar(${scheme}): Cancel returns focus to the button that asked`);
       await page.evaluate(`[...document.querySelectorAll(".drawer .chip-filter")].find((b) => b.textContent.includes("MCP"))?.click()`);
       await page.wait(200);
       const servers = await page.evaluate<string>(`[...document.querySelectorAll(".drawer .setup-list li")].map((li) => li.textContent).join(" | ")`);
