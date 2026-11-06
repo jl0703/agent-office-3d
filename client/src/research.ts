@@ -29,6 +29,8 @@ export type Finding = {
   date: string;
   why: string;
   improves?: string;
+  language?: string;
+  forks?: number;
   fit?: Fit;
   status: Decision;
   note?: string;
@@ -73,6 +75,8 @@ function toFinding(raw: unknown): Finding | null {
     ...(typeof raw["license"] === "string" ? { license: raw["license"] } : {}),
     ...(typeof raw["note"] === "string" ? { note: raw["note"] } : {}),
     ...(typeof raw["improves"] === "string" ? { improves: raw["improves"] } : {}),
+    ...(typeof raw["language"] === "string" ? { language: raw["language"] } : {}),
+    ...(typeof raw["forks"] === "number" ? { forks: raw["forks"] } : {}),
     ...(toFit(raw["fit"]) ? { fit: toFit(raw["fit"]) as Fit } : {}),
   };
 }
@@ -151,10 +155,10 @@ export const byNewest = (a: Finding, b: Finding) => b.date.localeCompare(a.date)
 export function demoFindings(): Finding[] {
   const base = { found_by: "demo-scout", date: "2026-11-05" };
   return [
-    { ...base, id: "demo-review-mcp", kind: "mcp", title: "Demo: a code review MCP server", url: "https://example.com/demo/review-mcp", relevance: 5, effort: "low", risk: "low", why: "Would give masters a safe read-only review tool.", improves: "code-reviewer skill", status: "new", stars: 4200, license: "MIT" },
-    { ...base, id: "demo-skills-pack", kind: "skill", title: "Demo: a pack of documentation skills", url: "https://example.com/demo/skills", relevance: 4, effort: "low", risk: "low", why: "Reusable skills for writing and checking docs.", status: "looking", stars: 880, license: "Apache-2.0", note: "Try on the docs folder first", fit: { verdict: "fits", how: "Copy the skills into the skills folder and list them in the docs rule", conflicts: "none", security: "Text files only; Apache-2.0", effort: "low", rollback: "Delete the copied folder", date: "2026-11-06" } },
+    { ...base, id: "demo-review-mcp", kind: "mcp", title: "Demo: a code review MCP server", url: "https://example.com/demo/review-mcp", relevance: 5, effort: "low", risk: "low", why: "Would give masters a safe read-only review tool.", improves: "code-reviewer skill", status: "new", stars: 4200, forks: 310, language: "TypeScript", license: "MIT" },
+    { ...base, id: "demo-skills-pack", kind: "skill", title: "Demo: a pack of documentation skills", url: "https://example.com/demo/skills", relevance: 4, effort: "low", risk: "low", why: "Reusable skills for writing and checking docs.", status: "looking", stars: 880, forks: 64, language: "Shell", license: "Apache-2.0", note: "Try on the docs folder first", fit: { verdict: "fits", how: "Copy the skills into the skills folder and list them in the docs rule", conflicts: "none", security: "Text files only; Apache-2.0", effort: "low", rollback: "Delete the copied folder", date: "2026-11-06" } },
     { ...base, id: "demo-memory-idea", kind: "idea", title: "Demo: share findings between agents through notes", url: "https://example.com/demo/memory", relevance: 3, effort: "medium", risk: "low", why: "Agents would reuse earlier answers instead of searching again.", status: "later" },
-    { ...base, id: "demo-risky-tool", kind: "repo", title: "Demo: an unmaintained shell wrapper", url: "https://example.com/demo/shell", relevance: 2, effort: "high", risk: "high", why: "Needs shell access, which workers must not have.", status: "reject", license: "GPL-3.0" },
+    { ...base, id: "demo-risky-tool", kind: "repo", title: "Demo: an unmaintained shell wrapper", url: "https://example.com/demo/shell", relevance: 2, effort: "high", risk: "high", why: "Needs shell access, which workers must not have.", status: "reject", stars: 120, forks: 9, language: "Shell", license: "GPL-3.0" },
   ];
 }
 

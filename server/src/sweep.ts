@@ -18,6 +18,8 @@ title: <at most 120 characters>
 url: <https link to the source, at most 300 characters, no spaces>
 stars: <whole number; leave the line out if unknown or not a repository>
 license: <SPDX name such as MIT, at most 40 characters; leave the line out if unknown>
+language: <main language of a repository, at most 40 characters, from the GitHub tools; leave the line out if unknown>
+forks: <whole number from the GitHub tools; leave the line out if unknown or not a repository>
 relevance: <whole number 1-5 against the needs profile>
 effort: <low | medium | high>
 risk: <low | medium | high>
