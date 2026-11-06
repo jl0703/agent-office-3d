@@ -323,6 +323,13 @@ describe("auto-approve: paths named in the plan's words", () => {
     for (const text of ["edit /etc/hosts", "copy to C:\\Users\\x", "read ~/notes", "see \\\\server\\share", "open ../other/file", "cd .. && ls", "(/var/log)", "x\\..\\y"]) {
       assert.equal(namesOutsidePath(withPlan({ steps: [text] })), true, text);
     }
+    for (const text of ["path=/etc/passwd", "cat</etc/passwd", "go ..;", "//server/share", "\\temp", "~root/x", "$HOME/x", "%USERPROFILE%/x"]) {
+      assert.equal(namesOutsidePath(withPlan({ steps: [text] })), true, text);
+    }
+    assert.equal(namesOutsidePath(withPlan({ risks: "touches C:\\data" })), true);
+    for (const text of ["a / b", "// note", "TCP/IP 24/7", "range 1..5", "cost is 50%"]) {
+      assert.equal(namesOutsidePath(withPlan({ steps: [text] })), false, text);
+    }
     assert.equal(namesOutsidePath(withPlan({ undo: "rm /tmp/x" })), true);
     assert.equal(namesOutsidePath(withPlan({ goal: "use https://example.com/a and/or src/a.ts, then wait... done" })), false);
     assert.equal(namesOutsidePath(withPlan({})), false);

@@ -128,7 +128,7 @@ export async function filesInsideFolder(files: string[], cwd: string): Promise<b
 
 // A path that starts at a root or home (C:\, \\, ~/, /name) or climbs out with `..`, written anywhere in the plan's text.
 // Over-cautious on purpose: a route like /api/users also sends the plan to the owner.
-const OUTSIDE_PATH = /(?:^|[\s"'`([])(?:[A-Za-z]:[\\/]|\\\\|~[\\/]|\/(?![/\s])[^\s])|(?:^|[\\/\s"'`([])\.\.(?:[\\/\s]|$)/m;
+const OUTSIDE_PATH = /(?:^|[\s"'`([{<>=,;|&])(?:[A-Za-z]:[\\/]|\\|~\w*[\\/]|\/(?!\/?\s)[^\s]|[$%]\w)|(?:^|[\\/\s"'`([{<>=,;:|&])\.\.(?=[\\/\s)\];,:]|$)/m;
 
 /** True when the plan's own words point outside the master's folder. */
 export const namesOutsidePath = (plan: { goal: string; steps: string[]; risks: string; undo: string }) =>
