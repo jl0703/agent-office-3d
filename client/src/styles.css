@@ -1613,3 +1613,25 @@ textarea {
   gap: 2px;
   padding: var(--space-1) 0;
 }
+
+.setup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.confirm-box {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-2);
+  border: 1px solid var(--status-waiting);
+  border-radius: var(--radius-1);
+}
+
+.skill-manager textarea {
+  width: 100%;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+}
