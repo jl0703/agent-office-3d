@@ -41,6 +41,8 @@ type Options = {
   researchDir?: string;
   /** The vault's plans-log folder (outcome notes). Without it the outcomes route answers an empty list. */
   plansLogDir?: string;
+  /** Tells a sweep what we use and have been doing (names and short run lines). Without it the sweep prompt has no such section. */
+  digest?: () => Promise<string>;
   /** The app's data folder, for the decisions file. */
   dataDir?: string;
   /** The scheduled-sweep setting and its timer. Without it the schedule routes answer 404. */
@@ -329,7 +331,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined) {
         if (!z.object({}).strict().safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
       } else req.resume();
-      const result = await opts.supervisor?.startSweep(await sweepPromptFor(base, decisions));
+      const result = await opts.supervisor?.startSweep(await sweepPromptFor(base, decisions, Date.now(), opts.digest));
       if (!result) return json(res, 404, { error: "not_found" });
       if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
       json(res, 202, { id: result.id });

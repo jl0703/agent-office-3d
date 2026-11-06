@@ -10,6 +10,7 @@ import { PLANS_LOG_DIR } from "./planLog.ts";
 import { createGithub } from "./github.ts";
 import { createAutoApproveStore } from "./autoApprove.ts";
 import { createScheduleStore, createScheduler } from "./schedule.ts";
+import { buildDigest } from "./digest.ts";
 import { DEFAULT_SWEEP_BUDGET_USD, sweepPromptFor } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
 import { createRegistry } from "./registry.ts";
@@ -51,6 +52,8 @@ const dataDir = process.env["OFFICE_DATA_DIR"] || fileURLToPath(new URL("../../d
 // Outcome notes of ended masters go next to the research folder, in the vault only.
 const plansLogDir = vaultDir && isAbsolute(vaultDir) ? join(vaultDir, "agent-workspace", PLANS_LOG_DIR) : undefined;
 const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
+// What a sweep is told about our own setup: skill folder names, MCP server names (never their settings) and recent runs.
+const digest = () => buildDigest({ ...(plansLogDir ? { plansLogDir } : {}), skillsDir: join(homedir(), ".claude", "skills"), mcpFile: join(homedir(), ".claude.json") });
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
 const autoApprove = createAutoApproveStore(dataDir);
@@ -77,7 +80,7 @@ const scheduler =
   researchDir && decisions
     ? createScheduler({
         store: createScheduleStore(dataDir),
-        startSweep: async () => supervisor.startSweep(await sweepPromptFor(researchDir, decisions)),
+        startSweep: async () => supervisor.startSweep(await sweepPromptFor(researchDir, decisions, Date.now(), digest)),
         usage: supervisor.usage,
       })
     : undefined;
@@ -92,6 +95,7 @@ const app = await startServer({
   autoApprove,
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
+  digest,
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),
   dataDir,
