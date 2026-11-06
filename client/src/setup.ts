@@ -93,7 +93,7 @@ const FAILURES: Record<string, string> = {
   invalid_skill: "The SKILL.md must start with a header (--- lines) that has name (the same as the skill name) and description.",
   too_big: "That is too big (SKILL.md up to 100 KB; a folder up to 50 files and 1 MB).",
   source_missing: "That file or folder could not be found (an agent must be a .md file).",
-  risky_header: "That agent file sets hooks, a permission mode or its own MCP servers. This page does not add those; put it in your agents folder by hand if you trust it.",
+  risky_header: "That agent file has header fields this page does not add (only name, description, tools, model and color; hooks, permission modes and MCP servers are not allowed). Put it in your agents folder by hand if you trust it.",
   not_added: "Only skills added from this menu can be removed here.",
   not_found: "That skill is no longer in the skills folder.",
 };

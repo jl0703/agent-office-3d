@@ -9,16 +9,22 @@ import { readAdded, SKILL_NAME, MAX_SKILL_BYTES, validSkillText, writeAdded, typ
 
 export const AGENT_NAME = SKILL_NAME;
 
-// Header fields that give an agent more power than its description says: its own hooks (shell commands), a permission
-// mode, or MCP servers. This page does not add such agents; the owner can put one in the folder by hand.
-const RISKY_KEYS = new Set(["hooks", "permissionmode", "mcpservers"]);
+// Only these header fields may be added from this page. Anything else - hooks (shell commands), a permission mode, MCP
+// servers, a quoted or flow-style key, a field written some other way - is refused, because the owner would not see it in
+// the confirm. The owner can put such an agent in the folder by hand.
+const ALLOWED_KEYS = new Set(["name", "description", "tools", "model", "color"]);
 
-/** True when the file's header has one of the fields above. */
+/** True when the file's header has a line this page does not allow. Indented lines and list items continue the key above them. */
 export function hasRiskyHeader(text: string): boolean {
   const lines = text.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") return false;
   const end = lines.indexOf("---", 1);
-  return lines.slice(1, end === -1 ? undefined : end).some((l) => RISKY_KEYS.has((/^([A-Za-z_][\w-]*)\s*:/.exec(l)?.[1] ?? "").toLowerCase()));
+  for (const line of lines.slice(1, end === -1 ? undefined : end)) {
+    if (line.trim() === "" || line.startsWith("#") || /^[\s-]/.test(line)) continue;
+    const key = /^([A-Za-z_][\w-]*):/.exec(line)?.[1];
+    if (key === undefined || !ALLOWED_KEYS.has(key.toLowerCase())) return true;
+  }
+  return false;
 }
 
 export type AgentDirs = { agentsDir: string; trashDir: string; addedFile: string };

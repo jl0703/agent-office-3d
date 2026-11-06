@@ -131,10 +131,11 @@ describe("agents: the routes", () => {
 describe("agents: header fields that add power", () => {
   it("refuses an agent file with hooks, a permission mode or its own MCP servers, however the key is written", async () => {
     const { d } = rig();
-    for (const extra of ["hooks:\n  PreToolUse: x\n", "permissionMode: bypassPermissions\n", "PermissionMode: acceptEdits\n", "mcpServers:\n  x: y\n", "HOOKS: x\n"]) {
+    for (const extra of ["hooks:\n  PreToolUse: x\n", "permissionMode: bypassPermissions\n", "PermissionMode: acceptEdits\n", "mcpServers:\n  x: y\n", "HOOKS: x\n", '"hooks": x\n', "'permissionMode': x\n", "? hooks\n", "{hooks: 1}\n", "unknown-field: x\n"]) {
       assert.deepEqual(await addAgent(d, { name: "risky", content: agent("risky", extra) }), { ok: false, code: "risky_header" }, extra);
     }
     assert.deepEqual(await addAgent(d, { name: "fine", content: agent("fine", "tools: Read, Grep\nmodel: haiku\ncolor: blue\n") }), { ok: true });
+    assert.deepEqual(await addAgent(d, { name: "folded", content: agent("folded", "tools:\n  - Read\n  - Grep\n# a comment\n") }), { ok: true }, "list items and comments continue an allowed key");
     assert.equal(existsSync(join(d.agentsDir, "risky.md")), false);
   });
 
