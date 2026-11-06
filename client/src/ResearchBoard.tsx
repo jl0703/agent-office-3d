@@ -1,6 +1,6 @@
 import { ExternalLink, RefreshCw, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type Ref } from "react";
-import { briefFor, byNewest, DECISION_WORD, DECISIONS, demoFindings, getConfig, getFindings, KIND_WORD, KINDS, safeLink, saveConfig, setDecision, startSweep, type Decision, type Finding, type Kind, type ResearchConfig } from "./research.ts";
+import { briefFor, byNewest, DECISION_WORD, DECISIONS, demoFindings, getConfig, getFindings, getSchedule, KIND_WORD, KINDS, safeLink, saveConfig, SCHEDULE_MODES, setDecision, setSchedule, SKIP_WORD, startSweep, type Decision, type Finding, type Kind, type ResearchConfig, type Schedule, type ScheduleMode } from "./research.ts";
 
 type Props = {
   id: string;
@@ -78,6 +78,8 @@ export function ResearchBoard({ id, demo, off, headingRef, onClose, onHand }: Pr
   const [focusText, setFocusText] = useState("");
   const [needsText, setNeedsText] = useState("");
   const [sweeping, setSweeping] = useState(false);
+  const [schedule, setScheduleState] = useState<Schedule | null>(null);
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   const load = useCallback(async () => {
     if (demo) {
@@ -103,6 +105,19 @@ export function ResearchBoard({ id, demo, off, headingRef, onClose, onHand }: Pr
       setNeedsText(c?.needs ?? "");
     });
   }, [demo]);
+
+  useEffect(() => {
+    if (!demo) void getSchedule().then(setScheduleState);
+  }, [demo]);
+
+  const changeSchedule = async (mode: ScheduleMode) => {
+    setSavingSchedule(true);
+    const result = await setSchedule(mode);
+    setMessage(result.ok ? (mode === "off" ? "Automatic sweeps are off." : `Automatic sweeps are ${mode}. The first one runs after the first ${mode === "daily" ? "day" : "week"}.`) : result.message);
+    const fresh = await getSchedule();
+    if (fresh) setScheduleState(fresh);
+    setSavingSchedule(false);
+  };
 
   const decide = async (fid: string, status: Decision, note?: string) => {
     if (demo) {
@@ -164,6 +179,23 @@ export function ResearchBoard({ id, demo, off, headingRef, onClose, onHand }: Pr
       <p role="status" aria-live="polite" className="form-message">
         {message}
       </p>
+
+      {!demo && schedule && (
+        <div className="board-schedule">
+          <label htmlFor={`${id}-schedule`}>Automatic sweeps</label>
+          <select id={`${id}-schedule`} value={schedule.mode} disabled={Boolean(off) || savingSchedule} onChange={(e) => void changeSchedule(e.target.value as ScheduleMode)}>
+            {SCHEDULE_MODES.map((m) => (
+              <option key={m} value={m}>
+                {m === "off" ? "Off" : m === "daily" ? "Daily" : "Weekly"}
+              </option>
+            ))}
+          </select>
+          <span className="panel-note">
+            {schedule.mode === "off" ? "Sweeps run only when you press the button." : `Runs only while this server is running. Next: ${schedule.nextRunAt ? new Date(schedule.nextRunAt).toLocaleString() : "after the first interval"}.`}
+            {schedule.lastSkipped ? ` Last skipped because ${SKIP_WORD[schedule.lastSkipped.reason] ?? "it could not start"}.` : ""}
+          </span>
+        </div>
+      )}
 
       <details className="board-config">
         <summary>Focus list and office needs</summary>

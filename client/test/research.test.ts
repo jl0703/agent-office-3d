@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { briefFor, byNewest, getConfig, getFindings, safeLink, saveConfig, setDecision, startSweep, type Finding } from "../src/research.ts";
+import { briefFor, byNewest, getConfig, getFindings, getSchedule, setSchedule, safeLink, saveConfig, setDecision, startSweep, type Finding } from "../src/research.ts";
 
 type Call = { path: string; init?: RequestInit };
 const fake = (status: number, body: unknown) => {
@@ -82,5 +82,16 @@ describe("research helpers", () => {
   it("orders newest first, then most relevant", () => {
     const list = [raw({ id: "a", date: "2026-11-01", relevance: 5 }), raw({ id: "b", date: "2026-11-05", relevance: 2 }), raw({ id: "c", date: "2026-11-05", relevance: 4 })] as unknown as Finding[];
     assert.deepEqual([...list].sort(byNewest).map((f) => f.id), ["c", "b", "a"]);
+  });
+
+  it("reads the schedule, rejects odd answers, and sends only the mode", async () => {
+    const ok = fake(200, { mode: "daily", nextRunAt: "2026-11-07T00:00:00.000Z", lastRunAt: null, lastSkipped: { reason: "budget", at: "2026-11-06T00:00:00.000Z" } });
+    assert.deepEqual(await getSchedule(ok.fn), { mode: "daily", nextRunAt: "2026-11-07T00:00:00.000Z", lastRunAt: null, lastSkipped: { reason: "budget", at: "2026-11-06T00:00:00.000Z" } });
+    assert.equal(await getSchedule(fake(200, { mode: "hourly" }).fn), null);
+    assert.equal(await getSchedule(fake(403, {}).fn), null);
+    assert.equal((await import("../src/research.ts")).SKIP_WORD["near_cap"], "the usage cap was near");
+    const post = fake(200, {});
+    assert.deepEqual(await setSchedule("weekly", post.fn), { ok: true });
+    assert.deepEqual(JSON.parse(String(post.calls[0]?.init?.body)), { mode: "weekly" });
   });
 });

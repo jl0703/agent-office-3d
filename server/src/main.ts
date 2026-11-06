@@ -8,7 +8,8 @@ import { DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD } from "./budget.t
 import { createDecisionStore, ensureResearchLayout } from "./findings.ts";
 import { PLANS_LOG_DIR } from "./planLog.ts";
 import { createGithub } from "./github.ts";
-import { DEFAULT_SWEEP_BUDGET_USD } from "./sweep.ts";
+import { createScheduleStore, createScheduler } from "./schedule.ts";
+import { DEFAULT_SWEEP_BUDGET_USD, sweepPromptFor } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
 import { createRegistry } from "./registry.ts";
 import { createSupervisor } from "./supervisor.ts";
@@ -69,6 +70,14 @@ const supervisor = createSupervisor({
   totalBudgetUsd: numberFromEnv("OFFICE_TOTAL_BUDGET_USD", DEFAULT_TOTAL_BUDGET_USD, 0.01, 10_000),
   sweepBudgetUsd: numberFromEnv("OFFICE_SWEEP_BUDGET_USD", DEFAULT_SWEEP_BUDGET_USD, 0.01, 1000),
 });
+const scheduler =
+  researchDir && decisions
+    ? createScheduler({
+        store: createScheduleStore(dataDir),
+        startSweep: async () => supervisor.startSweep(await sweepPromptFor(researchDir, decisions)),
+        usage: supervisor.usage,
+      })
+    : undefined;
 const app = await startServer({
   port: numberFromEnv("OFFICE_PORT", 4777, 1, 65535),
   publicPort,
@@ -79,6 +88,7 @@ const app = await startServer({
   supervisor,
   ...(researchDir ? { researchDir } : {}),
   ...(decisions ? { decisions } : {}),
+  ...(scheduler ? { scheduler } : {}),
   dataDir,
   ...(process.env["OFFICE_VAULT_DIR"] ? { vaultDir: process.env["OFFICE_VAULT_DIR"] } : {}),
 });
@@ -86,6 +96,7 @@ const app = await startServer({
 // Only now, with the port bound: a second instance that fails to bind must not touch the first one's workers.
 // Stop leftover processes and list earlier workers as detached. Nothing restarts.
 await supervisor.recover();
+scheduler?.start();
 const watcher = await startWatcher({
   root: projectsDir,
   registry,
@@ -104,8 +115,9 @@ console.log(
 
 // Stop every worker before leaving, so no agent process is left running.
 process.once("SIGINT", () => {
-  void supervisor
-    .close()
+  // The scheduler stops first and waits for a tick in flight, so no sweep starts after the supervisor closes.
+  void Promise.resolve(scheduler?.close())
+    .then(() => supervisor.close())
     .then(() => Promise.all([app.close(), watcher.close()]))
     .then(() => process.exit(0));
 });

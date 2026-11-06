@@ -9,8 +9,9 @@ import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
+import { ModeBody, type Scheduler } from "./schedule.ts";
 import type { Registry } from "./registry.ts";
-import { buildSweepPrompt } from "./sweep.ts";
+import { sweepPromptFor } from "./sweep.ts";
 import type { Supervisor } from "./supervisor.ts";
 import { createVault } from "./vault.ts";
 
@@ -38,6 +39,8 @@ type Options = {
   researchDir?: string;
   /** The app's data folder, for the decisions file. */
   dataDir?: string;
+  /** The scheduled-sweep setting and its timer. Without it the schedule routes answer 404. */
+  scheduler?: Scheduler;
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /**
@@ -273,6 +276,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       (pathname === "/api/research/findings" && method === "GET") ||
       (pathname === "/api/research/config" && (method === "GET" || method === "POST")) ||
       (pathname === "/api/research/sweep" && method === "POST" && opts.supervisor) ||
+      (pathname === "/api/research/schedule" && (method === "GET" || method === "POST")) ||
       (decision && method === "POST");
     if (!known) return false;
     run(req, res, async () => {
@@ -297,13 +301,18 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         await writeConfig(base, parsed.data);
         return json(res, 200, await readConfig(base));
       }
+      if (pathname === "/api/research/schedule") {
+        if (!opts.scheduler) return json(res, 404, { error: "not_found" });
+        if (method === "GET") return json(res, 200, await opts.scheduler.view());
+        const parsed = ModeBody.safeParse(await readJson(req));
+        if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+        return json(res, 200, await opts.scheduler.setMode(parsed.data.mode));
+      }
       // The sweep: no body, or an empty object.
       if (Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined) {
         if (!z.object({}).strict().safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
       } else req.resume();
-      const known = withDecisions((await readFindings(base)).findings, await decisions.all());
-      const prompt = buildSweepPrompt({ config: await readConfig(base), known, today: new Date().toISOString().slice(0, 10) });
-      const result = await opts.supervisor?.startSweep(prompt);
+      const result = await opts.supervisor?.startSweep(await sweepPromptFor(base, decisions));
       if (!result) return json(res, 404, { error: "not_found" });
       if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
       json(res, 202, { id: result.id });
