@@ -23,11 +23,12 @@ const SORTS: { id: Sort; label: string }[] = [
 /** Which research findings belong on which page: skills and MCP servers by kind, and the repository finds on the agents page. */
 const FIND_KINDS: Record<CatalogKind, Kind[]> = { skills: ["skill"], mcp: ["mcp"], agents: ["repo"] };
 
-/** The research findings, read once when the page opens. Null when they cannot be read. */
+/** The research findings, read once when the page opens: undefined while loading, null when they cannot be read. */
 function useFinds(demo: boolean) {
-  const [finds, setFinds] = useState<Finding[] | null>(demo ? demoFindings() : null);
+  const [finds, setFinds] = useState<Finding[] | null | undefined>(demo ? demoFindings() : undefined);
   useEffect(() => {
     if (demo) return setFinds(demoFindings());
+    setFinds(undefined); // never show made-up finds as if they were real while the real ones load
     let live = true;
     void getFindings().then((r) => live && setFinds(r ? r.findings : null));
     return () => {
@@ -116,11 +117,13 @@ const when = (ms: number) => (ms > 0 ? new Date(ms).toLocaleDateString() : "unkn
 export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }) {
   const { setup, reload } = useSetup(demo);
   const finds = useFinds(demo);
-  const [sort, setSort] = useState<Sort>("name");
+  const [chosen, setSort] = useState<Sort>("name");
   const [query, setQuery] = useState("");
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const Icon = ICON[kind];
   const ready = typeof setup === "object" && setup !== null ? setup : null;
+  // Stars only means something while finds exist; if they go away the lists fall back to name order and Name shows as pressed.
+  const sort: Sort = chosen === "stars" && !(finds ?? []).some((f) => FIND_KINDS[kind].includes(f.kind) && f.status !== "reject") ? "name" : chosen;
 
   const skills = useMemo(() => {
     const list = (ready?.skills ?? []).filter((s) => matches(`${s.name} ${s.description}`, query));
@@ -138,6 +141,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
     return [...list].sort((a, b) => (sort === "stars" ? (b.stars ?? -1) - (a.stars ?? -1) : sort === "recent" ? b.date.localeCompare(a.date) : 0) || a.title.localeCompare(b.title));
   }, [finds, kind, query, sort]);
   const foundTotal = (finds ?? []).filter((f) => FIND_KINDS[kind].includes(f.kind) && f.status !== "reject").length;
+  const rejected = (finds ?? []).filter((f) => FIND_KINDS[kind].includes(f.kind) && f.status === "reject").length;
 
   const total = kind === "skills" ? ready?.skills.length : kind === "mcp" ? ready?.mcp.length : ready?.agents.length;
   const shown = kind === "skills" ? skills.length : kind === "mcp" ? servers.length : agents.length;
@@ -156,7 +160,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
           <p className="catalog-blurb">{BLURB[kind]}</p>
           <p className="panel-note" role="status" aria-live="polite">
             {demo ? "Demo mode: made-up items. " : ""}
-            {ready ? `${total} installed, ${foundTotal} found by research${query ? `; ${shown + found.length} match` : ""}` : setup === null ? "Your setup could not be read." : "Loading…"}
+            {ready ? `${total} installed${finds === undefined ? "" : `, ${foundTotal} found by research`}${query ? `; ${shown + found.length} match` : ""}` : setup === null ? "Your setup could not be read." : "Loading…"}
           </p>
         </div>
       </header>
@@ -251,8 +255,10 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
 
       {ready && (
         <>
-          <h2 className="catalog-section">Found by research ({found.length})</h2>
-          {finds === null && !demo && <p className="panel-note">The research findings could not be read.</p>}
+          <h2 className="catalog-section">Found by research{finds ? ` (${found.length})` : ""}</h2>
+          {finds === undefined && <p className="panel-note">Loading…</p>}
+          {finds === null && <p className="panel-note">The research findings could not be read.</p>}
+          {rejected > 0 && <p className="panel-note">{rejected} rejected {rejected === 1 ? "find is" : "finds are"} hidden here. They stay on the research board.</p>}
           <div className="catalog-grid">
             {found.map((f) => (
               <Card
@@ -275,7 +281,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
                 {...(safeLink(f.url) ? { external: f.url } : {})}
               />
             ))}
-            {found.length === 0 && <p className="panel-note">{foundTotal === 0 ? "The research team has not found any yet. Run a sweep from the Research department." : "No find matches."}</p>}
+            {finds && found.length === 0 && <p className="panel-note">{foundTotal === 0 ? "The research team has not found any yet. Run a sweep from the Research department." : "No find matches."}</p>}
           </div>
         </>
       )}

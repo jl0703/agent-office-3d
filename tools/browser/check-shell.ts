@@ -464,6 +464,7 @@ try {
       await page.wait(500);
       const agentCards = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.querySelector("h3")?.textContent + ":" + c.textContent).join(" | ")`);
       expect(agentCards.includes("demo-reviewer") && agentCards.includes("Model sonnet") && agentCards.includes("demo-planner"), `sidebar(${scheme}): the agents page lists agents with model and tools (${agentCards})`);
+      expect((await page.evaluate<string>(`document.querySelector("main")?.textContent ?? ""`)).includes("1 rejected find is hidden"), `sidebar(${scheme}): rejected finds are hidden with a note saying so`);
       expect((await page.evaluate<string>(`document.querySelector(".skill-manager summary")?.textContent ?? ""`)).includes("Add an agent"), `sidebar(${scheme}): the agents page can add an agent`);
       await page.evaluate(`document.querySelector(".skill-manager summary")?.click()`);
       await page.wait(200);
