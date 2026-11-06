@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
 import { forwardRef, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { loadRecent, remember } from "./recent.ts";
 import { startMaster, startResearch, startWorker } from "./api.ts";
 
 type Kind = "worker" | "master" | "research";
@@ -35,10 +36,13 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null; pr
   const [kind, setKind] = useState<Kind>("worker");
   const [cwd, setCwd] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [recent, setRecent] = useState(loadRecent);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const folderId = useId();
   const promptId = useId();
+  const recentId = useId();
+  const listId = useId();
   const copy = COPY[kind];
   const innerRef = useRef<HTMLDetailsElement | null>(null);
 
@@ -57,6 +61,7 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null; pr
     const result = await (kind === "research" ? startResearch(prompt) : kind === "master" ? startMaster(cwd.trim(), prompt) : startWorker(cwd.trim(), prompt));
     setBusy(false);
     if (result.ok) {
+      setRecent(remember(kind === "research" ? "" : cwd, prompt, undefined, recent));
       setPrompt("");
       setMessage(COPY[kind].done);
     } else {
@@ -90,7 +95,25 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null; pr
         {kind !== "research" && (
           <>
             <label htmlFor={folderId}>Folder (full path)</label>
-            <input id={folderId} value={cwd} onChange={(e) => setCwd(e.target.value)} required maxLength={1000} placeholder="C:\path\to\project" />
+            <input id={folderId} value={cwd} onChange={(e) => setCwd(e.target.value)} required maxLength={1000} placeholder="C:\path\to\project" list={listId} />
+            <datalist id={listId}>
+              {recent.folders.map((f) => (
+                <option key={f} value={f} />
+              ))}
+            </datalist>
+          </>
+        )}
+        {recent.prompts.length > 0 && (
+          <>
+            <label htmlFor={recentId}>Reuse an earlier prompt</label>
+            <select id={recentId} value="" onChange={(e) => e.target.value && setPrompt(e.target.value)}>
+              <option value="">Choose one…</option>
+              {recent.prompts.map((p) => (
+                <option key={p} value={p}>
+                  {p.length > 80 ? `${p.slice(0, 80)}…` : p}
+                </option>
+              ))}
+            </select>
           </>
         )}
         <label htmlFor={promptId}>{copy.label}</label>
