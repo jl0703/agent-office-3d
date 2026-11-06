@@ -3,7 +3,9 @@
 /** `added` is true for skills added from the sidebar, the only ones it can remove. */
 export type Skill = { name: string; description: string; added: boolean; modified: number };
 export type McpServer = { name: string; type: "stdio" | "http" | "sse"; command?: string; argCount?: number; host?: string; envCount: number; hasHeaders: boolean; /** True for servers added from this app, the only ones it can remove. */ added: boolean };
-export type Setup = { skills: Skill[]; mcp: McpServer[]; canManage: boolean; canManageMcp: boolean };
+/** A Claude Code agent file. `added` is true for agents added from this app, the only ones it can remove. */
+export type Agent = { name: string; description: string; model: string; tools: string; added: boolean; modified: number };
+export type Setup = { skills: Skill[]; mcp: McpServer[]; agents: Agent[]; canManage: boolean; canManageMcp: boolean; canManageAgents: boolean };
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
@@ -11,6 +13,12 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 
 function toSkill(raw: unknown): Skill | null {
   return isRecord(raw) && typeof raw["name"] === "string" && typeof raw["description"] === "string" ? { name: raw["name"], description: raw["description"], added: raw["added"] === true, modified: typeof raw["modified"] === "number" ? raw["modified"] : 0 } : null;
+}
+
+function toAgent(raw: unknown): Agent | null {
+  if (!isRecord(raw) || typeof raw["name"] !== "string") return null;
+  const text = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string) : "");
+  return { name: raw["name"], description: text("description"), model: text("model"), tools: text("tools"), added: raw["added"] === true, modified: typeof raw["modified"] === "number" ? raw["modified"] : 0 };
 }
 
 function toServer(raw: unknown): McpServer | null {
@@ -34,9 +42,9 @@ export async function getSetup(fetchFn: FetchFn = fetch): Promise<Setup | null> 
   try {
     const res = await fetchFn("/api/setup");
     if (!res.ok) return null;
-    const data = (await res.json()) as { skills?: unknown; mcp?: unknown; canManage?: unknown; canManageMcp?: unknown };
+    const data = (await res.json()) as { skills?: unknown; mcp?: unknown; agents?: unknown; canManage?: unknown; canManageMcp?: unknown; canManageAgents?: unknown };
     if (!Array.isArray(data.skills) || !Array.isArray(data.mcp)) return null;
-    return { skills: data.skills.map(toSkill).filter((s): s is Skill => s !== null), mcp: data.mcp.map(toServer).filter((s): s is McpServer => s !== null), canManage: data.canManage === true, canManageMcp: data.canManageMcp === true };
+    return { skills: data.skills.map(toSkill).filter((s): s is Skill => s !== null), mcp: data.mcp.map(toServer).filter((s): s is McpServer => s !== null), agents: Array.isArray(data.agents) ? data.agents.map(toAgent).filter((a): a is Agent => a !== null) : [], canManage: data.canManage === true, canManageMcp: data.canManageMcp === true, canManageAgents: data.canManageAgents === true };
   } catch {
     return null;
   }
@@ -65,8 +73,13 @@ export function demoSetup(): Setup {
       { name: "demo-files", type: "stdio", command: "node", argCount: 2, envCount: 1, hasHeaders: false, added: false },
       { name: "demo-docs", type: "http", host: "mcp.example.com", envCount: 0, hasHeaders: true, added: true },
     ],
+    agents: [
+      { name: "demo-reviewer", description: "Demo: reviews a diff for bugs", model: "sonnet", tools: "Read, Grep", added: false, modified: Date.UTC(2026, 9, 10) },
+      { name: "demo-planner", description: "Demo: breaks a goal into steps", model: "opus", tools: "Read, Glob", added: true, modified: Date.UTC(2026, 10, 4) },
+    ],
     canManage: true,
     canManageMcp: true,
+    canManageAgents: true,
   };
 }
 
@@ -79,7 +92,8 @@ const FAILURES: Record<string, string> = {
   invalid_name: "The name can only use lowercase letters, digits and hyphens (up to 60 characters).",
   invalid_skill: "The SKILL.md must start with a header (--- lines) that has name (the same as the skill name) and description.",
   too_big: "That is too big (SKILL.md up to 100 KB; a folder up to 50 files and 1 MB).",
-  source_missing: "That folder could not be found.",
+  source_missing: "That file or folder could not be found (an agent must be a .md file).",
+  risky_header: "That agent file has header fields this page does not add (only name, description, tools, model and color; hooks, permission modes and MCP servers are not allowed). Put it in your agents folder by hand if you trust it.",
   not_added: "Only skills added from this menu can be removed here.",
   not_found: "That skill is no longer in the skills folder.",
 };
@@ -103,6 +117,10 @@ export const addSkill = (input: { name: string; content: string } | { name: stri
 
 /** Moves a skill that was added here to the trash folder. */
 export const removeSkill = (name: string, fetchFn: FetchFn = fetch) => change("/api/setup/skills/remove", { name }, fetchFn);
+
+/** The same for Claude Code agents: pasted text or the path of a .md file. */
+export const addAgent = (input: { name: string; content: string } | { name: string; source: string }, fetchFn: FetchFn = fetch) => change("/api/setup/agents", input, fetchFn);
+export const removeAgent = (name: string, fetchFn: FetchFn = fetch) => change("/api/setup/agents/remove", { name }, fetchFn);
 
 /** What the form sends for a new MCP server. The server checks everything again. */
 export type McpInput = { name: string; transport: "stdio" | "http" | "sse"; command?: string; args?: string[]; url?: string; env?: Record<string, string>; headers?: string[] };

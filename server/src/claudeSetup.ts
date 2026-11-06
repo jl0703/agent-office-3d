@@ -1,5 +1,6 @@
 import { lstat, open, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { agentFacts } from "./agentsManage.ts";
 import { UNSAFE_G } from "./findings.ts";
 
 // What the owner has set up for Claude Code, for the sidebar: skill folders and user-level MCP servers.
@@ -60,6 +61,41 @@ export async function listSkills(dir: string | undefined): Promise<Skill[]> {
     skills.push({ name, description, modified });
   }
   return skills;
+}
+
+export type Agent = { name: string; description: string; model: string; tools: string; modified: number };
+
+/** Agent files in the agents folder: `<name>.md`, with the description, model and tools from the header. Links are skipped. */
+export async function listAgents(dir: string | undefined): Promise<Agent[]> {
+  if (!dir) return [];
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names = entries.filter((e) => e.isFile() && e.name.endsWith(".md") && NAME.test(e.name.slice(0, -3))).map((e) => e.name.slice(0, -3)).sort((a, b) => a.localeCompare(b)).slice(0, MAX_ITEMS);
+  const agents: Agent[] = [];
+  for (const name of names) {
+    let head = "";
+    let modified = 0;
+    try {
+      const file = join(dir, `${name}.md`);
+      const handle = await open(file, "r");
+      try {
+        modified = Math.round((await handle.stat()).mtimeMs);
+        const buffer = Buffer.alloc(HEAD_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+        head = buffer.subarray(0, bytesRead).toString("utf8");
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      // listed without details
+    }
+    agents.push({ name, ...agentFacts(head), modified });
+  }
+  return agents;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

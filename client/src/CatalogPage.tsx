@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { hrefFor, KIND_WORD, type CatalogKind } from "./route.ts";
 import { McpManager } from "./McpManager.tsx";
 import { RemoveButton, SkillManager } from "./SkillManager.tsx";
-import { demoSetup, describeServer, getSetup, matches, type McpServer, type Setup, type Skill } from "./setup.ts";
+import { demoSetup, describeServer, getSetup, matches, type Agent, type McpServer, type Setup, type Skill } from "./setup.ts";
 
 const ICON = { skills: Puzzle, mcp: Boxes, agents: Bot } as const;
 const BLURB: Record<CatalogKind, string> = {
@@ -100,9 +100,13 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
     return [...list].sort((a, b) => (sort === "recent" ? b.modified - a.modified || a.name.localeCompare(b.name) : a.name.localeCompare(b.name)));
   }, [ready, sort, query]);
   const servers = useMemo(() => (ready?.mcp ?? []).filter((s) => matches(`${s.name} ${describeServer(s)}`, query)).sort((a, b) => a.name.localeCompare(b.name)), [ready, query]);
+  const agents = useMemo(() => {
+    const list = (ready?.agents ?? []).filter((a) => matches(`${a.name} ${a.description}`, query));
+    return [...list].sort((a, b) => (sort === "recent" ? b.modified - a.modified || a.name.localeCompare(b.name) : a.name.localeCompare(b.name)));
+  }, [ready, sort, query]);
 
-  const total = kind === "skills" ? ready?.skills.length : kind === "mcp" ? ready?.mcp.length : 0;
-  const shown = kind === "skills" ? skills.length : kind === "mcp" ? servers.length : 0;
+  const total = kind === "skills" ? ready?.skills.length : kind === "mcp" ? ready?.mcp.length : ready?.agents.length;
+  const shown = kind === "skills" ? skills.length : kind === "mcp" ? servers.length : agents.length;
 
   return (
     <main className="catalog" aria-labelledby="catalog-title">
@@ -123,10 +127,10 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
         </div>
       </header>
 
-      {kind !== "agents" && (
+      {(
         <div className="catalog-tools">
           <div className="chips" role="group" aria-label="Sort by">
-            {SORTS.filter((s) => kind === "skills" || s.id === "name").map((s) => (
+            {SORTS.filter((s) => kind !== "mcp" || s.id === "name").map((s) => (
               <button key={s.id} type="button" className="chip-filter" aria-pressed={sort === s.id} onClick={() => setSort(s.id)}>
                 {s.label}
               </button>
@@ -181,7 +185,26 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
         </div>
       )}
 
-      {kind === "agents" && <p className="panel-note">Your agents will be listed here. This page arrives in the next update.</p>}
+      {kind === "agents" && ready?.canManageAgents && <SkillManager demo={demo} off={false} noun="agent" onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
+
+      {kind === "agents" && ready && (
+        <div className="catalog-grid">
+          {agents.map((a: Agent) => (
+            <Card
+              key={a.name}
+              title={a.name}
+              by={a.added ? "Added from this app" : "In your agents folder"}
+              {...(a.added ? { badge: "Added here" } : {})}
+              description={a.description}
+              chips={[...(a.model ? [`Model ${a.model}`] : []), ...(a.tools ? [`Tools ${a.tools}`] : []), `Updated ${when(a.modified)}`]}
+              href={hrefFor({ page: "item", kind, name: a.name })}
+            >
+              {a.added && ready.canManageAgents && <RemoveButton name={a.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />}
+            </Card>
+          ))}
+          {agents.length === 0 && <p className="panel-note">{ready.agents.length === 0 ? "No agents found in your agents folder." : "No agent matches."}</p>}
+        </div>
+      )}
     </main>
   );
 }
@@ -193,7 +216,8 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
   const ready = typeof setup === "object" && setup !== null ? setup : null;
   const skill = kind === "skills" ? ready?.skills.find((s) => s.name === name) : undefined;
   const server = kind === "mcp" ? ready?.mcp.find((s) => s.name === name) : undefined;
-  const found = skill ?? server;
+  const agentItem = kind === "agents" ? ready?.agents.find((a) => a.name === name) : undefined;
+  const found = skill ?? server ?? agentItem;
 
   return (
     <main className="catalog" aria-labelledby="catalog-title">
@@ -228,6 +252,27 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
             <>
               <RemoveButton name={skill.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />
               <SkillManager demo={demo} off={false} showAdd={false} onChanged={() => (reload(), onGone())} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
+            </>
+          )}
+        </section>
+      )}
+      {agentItem && (
+        <section className="item-body" aria-label="Details">
+          <p>{agentItem.description || "No description."}</p>
+          <dl className="item-facts">
+            <dt>Model</dt>
+            <dd>{agentItem.model || "Not set (uses your default)"}</dd>
+            <dt>Tools</dt>
+            <dd>{agentItem.tools || "Not set (all tools)"}</dd>
+            <dt>Where it lives</dt>
+            <dd>{agentItem.added ? "In your agents folder, added from this app" : "In your agents folder"}</dd>
+            <dt>Last changed</dt>
+            <dd>{when(agentItem.modified)}</dd>
+          </dl>
+          {agentItem.added && ready?.canManageAgents && (
+            <>
+              <RemoveButton name={agentItem.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />
+              <SkillManager demo={demo} off={false} noun="agent" showAdd={false} onChanged={() => (reload(), onGone())} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
             </>
           )}
         </section>
