@@ -7,6 +7,7 @@ import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
+import { buildWorkshopGoal, type Workshop } from "./workshop.ts";
 import { buildEvaluationPrompt, readEvaluations } from "./evaluations.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
@@ -52,6 +53,10 @@ type Options = {
   autoApprove?: AutoApproveStore;
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
+  /** The Workshop (builds in a copy of the target). Without it the Workshop routes answer 404. */
+  workshop?: Workshop;
+  /** The target folder's display name, for the master's goal. */
+  workshopTargetName?: string;
   /**
    * Dev only. At least 32 characters: the token becomes HMAC(secret, "token") and sessions become signed
    * cookies, so the same link and login survive a restart. Omit it for the strict one-time token.
@@ -64,6 +69,7 @@ const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
 const FINDING_DECISION = /^\/api\/research\/findings\/([^/]{1,200})\/decision$/;
+const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_EVALUATE = /^\/api\/research\/findings\/([^/]{1,200})\/evaluate$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume|plan)$/;
 
@@ -205,6 +211,9 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         const handled = researchRoute(req, res, url.pathname, method);
         if (handled) return;
       }
+      if (url.pathname === "/api/workshop" || url.pathname.startsWith("/api/workshop/")) {
+        if (workshopRoute(req, res, url.pathname, method)) return;
+      }
       if (url.pathname === "/api/auto-approve" && (method === "GET" || method === "POST")) {
         const store = opts.autoApprove;
         if (!store) return json(res, 404, { error: "not_found" });
@@ -288,6 +297,37 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (res.headersSent) res.destroy();
       else json(res, 500, { error: "internal" });
     });
+  }
+
+  /** The Workshop's routes. Returns false for a path that is not one of them. */
+  function workshopRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, method: string): boolean {
+    const shop = opts.workshop;
+    const patch = /^\/api\/workshop\/([0-9a-f]{12})\/patch$/.exec(pathname);
+    const known = (pathname === "/api/workshop" && method === "GET") || (pathname === "/api/workshop/build" && method === "POST" && opts.supervisor) || (patch && method === "GET");
+    if (!known) return false;
+    run(req, res, async () => {
+      if (!shop) return json(res, 404, { error: "not_found" });
+      if (pathname === "/api/workshop") return json(res, 200, { builds: await shop.list() });
+      if (patch) {
+        const got = await shop.patch(patch[1] as string);
+        return got ? json(res, 200, got) : json(res, 404, { error: "not_found" });
+      }
+      const parsed = BuildBody.safeParse(await readJson(req));
+      const base = decisions ? await resolveResearch(opts.researchDir) : null;
+      if (!parsed.success || !decisions || !base) return json(res, 400, { error: "invalid_request" });
+      const finding = await readFinding(base, parsed.data.findingId);
+      if (!finding) return json(res, 404, { error: "not_found" });
+      if ((await decisions.all()).get(finding.id)?.status !== "adopt") return json(res, 409, { reason: "not_adopted" });
+      const fit = (await readEvaluations(base)).get(finding.id);
+      const prepared = await shop.prepare(finding.id, finding.title);
+      if (!prepared.ok) return json(res, prepared.code === "too_big" ? 413 : prepared.code === "too_many" ? 429 : prepared.code === "copy_failed" ? 500 : 400, { error: prepared.code });
+      const started = await opts.supervisor?.startMaster({ cwd: prepared.work, prompt: buildWorkshopGoal(finding, fit, opts.workshopTargetName ?? "the workspace"), workshop: prepared.build.id });
+      if (!started?.ok) await shop.discard(prepared.build.id); // no master, so the copy is not kept
+      if (!started) return json(res, 404, { error: "not_found" });
+      if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
+      return json(res, 202, { id: started.id, build: prepared.build.id });
+    });
+    return true;
   }
 
   /** The Research department's routes. Returns false for a path that is not one of them. */

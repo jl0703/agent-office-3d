@@ -50,8 +50,8 @@ async function rig({ store, ...opts }: { totalBudgetUsd?: number; store?: AutoAp
 
   let next = 0;
   /** Starts a master and returns its id and a caller for its office tools. */
-  const master = async () => {
-    const res = await supervisor.startMaster({ cwd: work, prompt: "the goal" });
+  const master = async (extra: { workshop?: string } = {}) => {
+    const res = await supervisor.startMaster({ cwd: work, prompt: "the goal", ...extra });
     assert.ok(res.ok);
     const session = next++;
     const server = f.calls[session]?.mcpServers?.[OFFICE_SERVER] as { instance: { connect(t: unknown): Promise<void> } };
@@ -342,5 +342,16 @@ describe("auto-approve: paths named in the plan's words", () => {
     await call("submit_plan", { ...validPlan, steps: ["read the code", "also change /etc/hosts"] });
     assert.equal(plan(r, id)?.status, "pending");
     assert.deepEqual(reasons(r), ["paths"]);
+  });
+});
+
+describe("auto-approve: Workshop masters", () => {
+  it("never approves a Workshop master's plan, even one that qualifies", async () => {
+    const r = await rig();
+    await r.enable();
+    const { id, call } = await r.master({ workshop: "0123456789ab" });
+    assert.equal((await call("submit_plan", validPlan)).error, false);
+    assert.equal(plan(r, id)?.status, "pending");
+    assert.deepEqual(reasons(r), ["workshop"]);
   });
 });
