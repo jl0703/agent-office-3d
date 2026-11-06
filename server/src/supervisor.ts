@@ -36,7 +36,7 @@ export type StartResult =
   | {
       ok: false;
       status: 400 | 403 | 409 | 429 | 502;
-      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running" | "plan_not_approved";
+      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running" | "plan_not_approved" | "evaluating";
     };
 
 export type CommandResult =
@@ -48,6 +48,7 @@ export type CommandResult =
       code: "busy" | "stopped" | "detached" | "not_resumable" | "transcript_active" | "budget" | "too_many" | "invalid_folder" | "folder_not_allowed" | "not_found" | "start_failed" | "no_pending_plan" | "master_not_resumable";
     };
 
+export const EVALUATOR_NAME = "Evaluator";
 export const DEFAULT_RESUME_PROMPT = "Continue where you left off.";
 
 const CAP_NOTE: Record<Cap, string> = {
@@ -794,6 +795,12 @@ export function createSupervisor(opts: SupervisorOptions) {
 
     /** Starts a master: a session with the office tools. Only the page does this, never a model. */
     startMaster: (req: StartMasterRequest) => begin(req, "master", null),
+
+    /** Starts one read-only Evaluator for a finding (a research-team worker). One at a time. */
+    startEvaluation: async (findingId: string, prompt: string): Promise<StartResult> => {
+      if (live().some((x) => x.team === "research" && x.role === "worker" && x.name.startsWith(EVALUATOR_NAME))) return { ok: false, status: 409, code: "evaluating" };
+      return begin({ prompt, team: "research", name: `${EVALUATOR_NAME} ${findingId}` }, "worker", null);
+    },
 
     /** Starts the research Lead on a sweep prompt. One at a time; its team's cost is capped together. */
     startSweep: (prompt: string) => begin({ prompt, team: "research", name: "Research Lead", sweep: true }, "master", null),

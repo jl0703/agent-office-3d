@@ -1518,3 +1518,37 @@ textarea {
   align-items: center;
   gap: var(--space-2);
 }
+
+.fit {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-2);
+  border-left: 4px solid var(--status-idle);
+  border-radius: var(--radius-1);
+}
+
+.fit-fits {
+  border-left-color: var(--status-working);
+}
+
+.fit-needs-work {
+  border-left-color: var(--status-waiting);
+}
+
+.fit-doesnt-fit {
+  border-left-color: var(--status-error);
+}
+
+.fit dl {
+  display: grid;
+  gap: 2px;
+  margin: var(--space-1) 0 0;
+}
+
+.fit dt {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.fit dd {
+  margin: 0 0 var(--space-1);
+}

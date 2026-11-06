@@ -1,6 +1,6 @@
 import { ExternalLink, RefreshCw, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type Ref } from "react";
-import { briefFor, byNewest, DECISION_WORD, DECISIONS, demoFindings, getConfig, getFindings, getSchedule, KIND_WORD, KINDS, safeLink, saveConfig, SCHEDULE_MODES, setDecision, setSchedule, SKIP_WORD, startSweep, type Decision, type Finding, type Kind, type ResearchConfig, type Schedule, type ScheduleMode } from "./research.ts";
+import { briefFor, byNewest, evaluateFinding, VERDICT_WORD, DECISION_WORD, DECISIONS, demoFindings, getConfig, getFindings, getSchedule, KIND_WORD, KINDS, safeLink, saveConfig, SCHEDULE_MODES, setDecision, setSchedule, SKIP_WORD, startSweep, type Decision, type Finding, type Kind, type ResearchConfig, type Schedule, type ScheduleMode } from "./research.ts";
 
 type Props = {
   id: string;
@@ -14,7 +14,7 @@ type Props = {
 
 const POLL_MS = 15_000;
 
-function Card({ f, off, onChange, onHand }: { f: Finding; off: string | null; onChange: (id: string, status: Decision, note?: string) => void; onHand: (brief: string) => void }) {
+function Card({ f, off, onChange, onHand, onCheck }: { f: Finding; off: string | null; onChange: (id: string, status: Decision, note?: string) => void; onHand: (brief: string) => void; onCheck: (id: string) => void }) {
   const [note, setNote] = useState(f.note ?? "");
   useEffect(() => setNote(f.note ?? ""), [f.note]);
   return (
@@ -59,6 +59,29 @@ function Card({ f, off, onChange, onHand }: { f: Finding; off: string | null; on
           <input value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (f.note ?? "") && onChange(f.id, f.status, note || undefined)} />
         </label>
       )}
+      {f.fit && (
+        <div className={`fit fit-${f.fit.verdict}`}>
+          <p>
+            <strong>Fit check: {VERDICT_WORD[f.fit.verdict]}</strong> <span className="note">({f.fit.date}, effort {f.fit.effort})</span>
+          </p>
+          <dl>
+            <dt>How it plugs in</dt>
+            <dd>{f.fit.how}</dd>
+            <dt>Clashes</dt>
+            <dd>{f.fit.conflicts}</dd>
+            <dt>Security</dt>
+            <dd>{f.fit.security}</dd>
+            <dt>Undo</dt>
+            <dd>{f.fit.rollback}</dd>
+          </dl>
+        </div>
+      )}
+      {f.status === "looking" && !f.fit && (
+        <button type="button" disabled={Boolean(off)} title={off ?? undefined} onClick={() => onCheck(f.id)}>
+          Check fit
+        </button>
+      )}
+      {f.status === "adopt" && !f.fit && <p className="panel-note">No fit check yet. Mark it Looking and press Check fit first, or go ahead if you are sure.</p>}
       {(f.status === "looking" || f.status === "adopt") && (
         <button type="button" disabled={Boolean(off)} title={off ?? undefined} onClick={() => onHand(briefFor(f))}>
           <Send size={16} strokeWidth={1.75} aria-hidden="true" /> Hand to a master
@@ -128,6 +151,12 @@ export function ResearchBoard({ id, demo, off, headingRef, onClose, onHand }: Pr
     const result = await setDecision(fid, status, note);
     setMessage(result.ok ? "" : result.message);
     await load();
+  };
+
+  const check = async (fid: string) => {
+    if (demo) return setMessage("Demo mode: no fit check is run.");
+    const result = await evaluateFinding(fid);
+    setMessage(result.ok ? "Fit check started. The report appears on the finding when it is written." : result.message);
   };
 
   const sweep = async () => {
@@ -241,7 +270,7 @@ export function ResearchBoard({ id, demo, off, headingRef, onClose, onHand }: Pr
       )}
       <div className="findings">
         {list.map((f) => (
-          <Card key={f.id} f={f} off={off} onChange={(fid, s, n) => void decide(fid, s, n)} onHand={onHand} />
+          <Card key={f.id} f={f} off={off} onChange={(fid, s, n) => void decide(fid, s, n)} onHand={onHand} onCheck={(fid) => void check(fid)} />
         ))}
       </div>
     </aside>

@@ -8,6 +8,13 @@ export type Decision = (typeof DECISIONS)[number];
 export const KIND_WORD: Record<Kind, string> = { skill: "Skill", mcp: "MCP server", repo: "Repository", idea: "Idea", technique: "Technique" };
 export const DECISION_WORD: Record<Decision, string> = { new: "New", looking: "Looking", adopt: "Adopt", later: "Later", reject: "Reject" };
 
+export const VERDICTS = ["fits", "needs-work", "doesnt-fit"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+export const VERDICT_WORD: Record<Verdict, string> = { fits: "Fits", "needs-work": "Needs work", "doesnt-fit": "Doesn't fit" };
+
+/** The Evaluator's report on whether a finding fits this workspace. */
+export type Fit = { verdict: Verdict; how: string; conflicts: string; security: string; effort: string; rollback: string; date: string };
+
 export type Finding = {
   id: string;
   kind: Kind;
@@ -22,6 +29,7 @@ export type Finding = {
   date: string;
   why: string;
   improves?: string;
+  fit?: Fit;
   status: Decision;
   note?: string;
 };
@@ -35,6 +43,13 @@ const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => type
 
 /** A link is only offered when it is a plain https address. */
 export const safeLink = (url: string) => /^https:\/\/[^\s]+$/.test(url) && ![...url].some((c) => c.charCodeAt(0) < 32);
+
+function toFit(raw: unknown): Fit | undefined {
+  if (!isRecord(raw) || !oneOf(VERDICTS, raw["verdict"])) return undefined;
+  const text = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string) : null);
+  const [how, conflicts, security, effort, rollback, date] = ["how", "conflicts", "security", "effort", "rollback", "date"].map(text);
+  return how && conflicts && security && effort && rollback && date ? { verdict: raw["verdict"], how, conflicts, security, effort, rollback, date } : undefined;
+}
 
 function toFinding(raw: unknown): Finding | null {
   if (!isRecord(raw)) return null;
@@ -58,6 +73,7 @@ function toFinding(raw: unknown): Finding | null {
     ...(typeof raw["license"] === "string" ? { license: raw["license"] } : {}),
     ...(typeof raw["note"] === "string" ? { note: raw["note"] } : {}),
     ...(typeof raw["improves"] === "string" ? { improves: raw["improves"] } : {}),
+    ...(toFit(raw["fit"]) ? { fit: toFit(raw["fit"]) as Fit } : {}),
   };
 }
 
@@ -82,6 +98,7 @@ async function send(path: string, body: unknown, fetchFn: FetchFn): Promise<Resu
     if (res.ok) return { ok: true };
     const data = (await res.json().catch(() => ({}))) as { error?: unknown; reason?: unknown };
     const code = [data.error, data.reason].find((v) => typeof v === "string") as string | undefined;
+    if (code === "evaluating") return { ok: false, message: "A fit check is already running. Wait for it to finish." };
     if (code === "sweep_running") return { ok: false, message: "A sweep is already running." };
     if (code === "no_research_folder") return { ok: false, message: "There is no research folder yet. Set OFFICE_VAULT_DIR (or OFFICE_RESEARCH_DIR) in the .env file and restart the server." };
     if (code === "budget") return { ok: false, message: "The usage cap was reached." };
@@ -95,6 +112,8 @@ async function send(path: string, body: unknown, fetchFn: FetchFn): Promise<Resu
 
 export const setDecision = (id: string, status: Decision, note: string | undefined, fetchFn: FetchFn = fetch) =>
   send(`/api/research/findings/${encodeURIComponent(id)}/decision`, { status, ...(note ? { note } : {}) }, fetchFn);
+
+export const evaluateFinding = (id: string, fetchFn: FetchFn = fetch) => send(`/api/research/findings/${encodeURIComponent(id)}/evaluate`, {}, fetchFn);
 
 export const startSweep = (fetchFn: FetchFn = fetch) => send("/api/research/sweep", {}, fetchFn);
 
@@ -133,7 +152,7 @@ export function demoFindings(): Finding[] {
   const base = { found_by: "demo-scout", date: "2026-11-05" };
   return [
     { ...base, id: "demo-review-mcp", kind: "mcp", title: "Demo: a code review MCP server", url: "https://example.com/demo/review-mcp", relevance: 5, effort: "low", risk: "low", why: "Would give masters a safe read-only review tool.", improves: "code-reviewer skill", status: "new", stars: 4200, license: "MIT" },
-    { ...base, id: "demo-skills-pack", kind: "skill", title: "Demo: a pack of documentation skills", url: "https://example.com/demo/skills", relevance: 4, effort: "low", risk: "low", why: "Reusable skills for writing and checking docs.", status: "looking", stars: 880, license: "Apache-2.0", note: "Try on the docs folder first" },
+    { ...base, id: "demo-skills-pack", kind: "skill", title: "Demo: a pack of documentation skills", url: "https://example.com/demo/skills", relevance: 4, effort: "low", risk: "low", why: "Reusable skills for writing and checking docs.", status: "looking", stars: 880, license: "Apache-2.0", note: "Try on the docs folder first", fit: { verdict: "fits", how: "Copy the skills into the skills folder and list them in the docs rule", conflicts: "none", security: "Text files only; Apache-2.0", effort: "low", rollback: "Delete the copied folder", date: "2026-11-06" } },
     { ...base, id: "demo-memory-idea", kind: "idea", title: "Demo: share findings between agents through notes", url: "https://example.com/demo/memory", relevance: 3, effort: "medium", risk: "low", why: "Agents would reuse earlier answers instead of searching again.", status: "later" },
     { ...base, id: "demo-risky-tool", kind: "repo", title: "Demo: an unmaintained shell wrapper", url: "https://example.com/demo/shell", relevance: 2, effort: "high", risk: "high", why: "Needs shell access, which workers must not have.", status: "reject", license: "GPL-3.0" },
   ];

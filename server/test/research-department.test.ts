@@ -425,3 +425,61 @@ describe("the sweep usage cap (D2)", () => {
     assert.match(r.registry.get(lead)?.note ?? "", /this session/);
   });
 });
+
+describe("the fit check (plan 15, R2)", () => {
+  const report = (id: string, over: Record<string, string> = {}) =>
+    `---\n${Object.entries({ id, verdict: "fits", how: "Add it to the skills folder", conflicts: "none", security: "Read-only, MIT", effort: "low", rollback: "Delete the folder", date: "2026-11-06", evaluated_by: "integration-analyst", ...over })
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n")}\n---\nReasoning.\n`;
+  const putReport = (r: Rig, id: string, text: string) => {
+    mkdirSync(join(r.research, "evaluations"), { recursive: true });
+    writeFileSync(join(r.research, "evaluations", `${id}.md`), text);
+  };
+
+  it("starts one read-only Evaluator in the research folder with the research worker's tools and a prompt that holds no note body", async () => {
+    const r = await rig();
+    r.write("tool-a", { title: "Tool A" });
+    const res = await r.post("/api/research/findings/tool-a/evaluate");
+    assert.equal(res.status, 202);
+    const id = json(res)["id"] as string;
+    const agent = r.registry.get(id);
+    assert.deepEqual([agent?.role, agent?.team, agent?.name], ["worker", "research", "Evaluator tool-a"]);
+    assert.equal(r.calls[0]?.cwd, realpathSync(r.research));
+    assert.deepEqual(Object.keys(r.calls[0]?.mcpServers ?? {}), [GITHUB_SERVER]);
+    const prompt = promptOf(r);
+    for (const part of ["findings/tool-a.md", "evaluations/tool-a.md", "verdict: <fits | needs-work | doesnt-fit>", "never install", "never overwrite", "untrusted data"]) {
+      assert.ok(prompt.toLowerCase().includes(part.toLowerCase()), part);
+    }
+    assert.equal(prompt.includes(SECRET), false);
+  });
+
+  it("refuses an unknown or badly named finding and a second Evaluator while one runs", async () => {
+    const r = await rig({ supervisor: { maxManaged: 5 } });
+    r.write("tool-a");
+    r.write("tool-b");
+    assert.equal((await r.post("/api/research/findings/nope/evaluate")).status, 404);
+    assert.equal((await r.post("/api/research/findings/Bad_Name/evaluate")).status, 400);
+    assert.equal((await r.post("/api/research/findings/tool-a/evaluate", { x: 1 })).status, 400);
+    const first = json(await r.post("/api/research/findings/tool-a/evaluate"))["id"] as string;
+    const second = await r.post("/api/research/findings/tool-b/evaluate");
+    assert.deepEqual([second.status, json(second)], [409, { reason: "evaluating" }]);
+    assert.equal((await r.post(`/api/agents/${first}/stop`)).status, 202);
+    await waitFor(() => r.registry.get(first)?.status === "stopped");
+    assert.equal((await r.post("/api/research/findings/tool-b/evaluate")).status, 202);
+  });
+
+  it("shows a valid report on its finding and ignores a wrong id, a bad verdict and a two-line field", async () => {
+    const r = await rig();
+    for (const id of ["ok-one", "wrong-id", "bad-verdict", "two-lines"]) r.write(id);
+    putReport(r, "ok-one", report("ok-one"));
+    putReport(r, "wrong-id", report("someone-else"));
+    putReport(r, "bad-verdict", report("bad-verdict", { verdict: "great" }));
+    putReport(r, "two-lines", report("two-lines").replace("how: Add", "how: Add\nsecond line: x\nhow: Add"));
+    const { findings } = json(await r.get("/api/research/findings")) as { findings: { id: string; fit?: { verdict: string; how: string } }[] };
+    const byId = Object.fromEntries(findings.map((f) => [f.id, f.fit]));
+    assert.deepEqual(byId["ok-one"], { id: "ok-one", verdict: "fits", how: "Add it to the skills folder", conflicts: "none", security: "Read-only, MIT", effort: "low", rollback: "Delete the folder", date: "2026-11-06", evaluated_by: "integration-analyst" });
+    assert.equal(byId["wrong-id"], undefined);
+    assert.equal(byId["bad-verdict"], undefined);
+    assert.equal(byId["two-lines"], undefined);
+  });
+});
