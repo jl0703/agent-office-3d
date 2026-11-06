@@ -468,6 +468,15 @@ describe("the fit check (plan 15, R2)", () => {
     assert.equal((await r.post("/api/research/findings/tool-b/evaluate")).status, 202);
   });
 
+  it("lets only one of two simultaneous requests start an Evaluator", async () => {
+    const r = await rig({ supervisor: { maxManaged: 5 } });
+    r.write("tool-a");
+    r.write("tool-b");
+    const [a, b] = await Promise.all([r.post("/api/research/findings/tool-a/evaluate"), r.post("/api/research/findings/tool-b/evaluate")]);
+    assert.deepEqual([a.status, b.status].sort(), [202, 409]);
+    assert.equal(r.calls.length, 1);
+  });
+
   it("shows a valid report on its finding and ignores a wrong id, a bad verdict and a two-line field", async () => {
     const r = await rig();
     for (const id of ["ok-one", "wrong-id", "bad-verdict", "two-lines"]) r.write(id);

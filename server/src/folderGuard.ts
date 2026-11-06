@@ -1,5 +1,5 @@
-import { realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import type { HookCallback, Options } from "@anthropic-ai/claude-agent-sdk";
 
 // A worker's file tools must stay inside its folder. Permission rules for file tools match
@@ -81,6 +81,18 @@ function isInside(root: string, target: string): boolean {
   return rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel);
 }
 
+/** An Evaluator may create its one report file and nothing else. */
+async function checkSingleFile(root: string, tool: string, input: unknown, allowed: string): Promise<Verdict> {
+  if (tool !== "Write") return DENY("this session may only create its one report file");
+  const inside = await checkToolCall(root, tool, input);
+  if (!inside.ok) return inside;
+  const file = isRecord(input) ? input["file_path"] : undefined;
+  if (typeof file !== "string") return DENY("a path was missing or not text");
+  const real = await realPathOfDeepestParent(isAbsolute(file) ? file : resolve(root, file));
+  if (normalize(real) !== normalize(allowed)) return DENY("this session may only create its one report file");
+  return (await lstat(real).then(() => true, () => false)) ? DENY("the report file already exists") : { ok: true };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -95,6 +107,8 @@ export function folderGuardHooks(
   extraTools: readonly string[] = [],
   /** While true the session is read-only: Write and Edit are denied. */
   readOnly: () => boolean = () => false,
+  /** When set, the only file the session may write: it must not exist yet, and Edit is refused. */
+  writeOnly: string | null = null,
 ): NonNullable<Options["hooks"]> {
   const guard: HookCallback = async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
@@ -102,7 +116,9 @@ export function folderGuardHooks(
     try {
       verdict = readOnly() && (input.tool_name === "Write" || input.tool_name === "Edit")
         ? DENY("planning is read-only: submit a plan and wait for approval")
-        : await checkToolCall(root, input.tool_name, input.tool_input, extraTools);
+        : (input.tool_name === "Write" || input.tool_name === "Edit") && writeOnly !== null
+          ? await checkSingleFile(root, input.tool_name, input.tool_input, writeOnly)
+          : await checkToolCall(root, input.tool_name, input.tool_input, extraTools);
     } catch {
       verdict = DENY("the path could not be checked");
     }
