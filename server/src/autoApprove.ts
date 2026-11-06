@@ -93,6 +93,7 @@ const DRIVE = /^[A-Za-z]:[\\/]/;
 async function resolvesInside(realCwd: string, file: string, cwd: string): Promise<boolean> {
   if (!file || !PLAN_NOTE.test(file)) return false;
   if (/^[\\/]{2}/.test(file)) return false; // UNC and device paths
+  if (DRIVE.test(file) && process.platform !== "win32") return false; // a Windows drive path is never a plain name inside the folder elsewhere
   if (file.slice(DRIVE.test(file) ? 2 : 0).includes(":")) return false; // drive-relative names and alternate streams
   if (file.split(/[\\/]/).includes("..")) return false;
   let existing = resolve(cwd, file);
