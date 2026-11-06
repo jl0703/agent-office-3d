@@ -7,7 +7,8 @@ import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
-import { listMcpServers, listSkills } from "./claudeSetup.ts";
+import { listAgents, listMcpServers, listSkills } from "./claudeSetup.ts";
+import { addAgent, addedAgents, agentDirsFor, removeAgent } from "./agentsManage.ts";
 import type { ClaudeRunner } from "./claudeCli.ts";
 import { addedServers, addServer, buildArgs, previewLine, removeServer, type Failure as McpFailure, type McpInput } from "./mcpManage.ts";
 import { addedSkills, addSkill, dirsFor, removeSkill, SKILL_NAME, type Failure } from "./skillsManage.ts";
@@ -58,7 +59,7 @@ type Options = {
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /** Where the sidebar reads the owner's skills and user-level MCP servers from. Without it the lists are empty. */
-  setup?: { skillsDir: string; mcpFile: string; /** Where the trash and the list of skills added here live. Without it skills cannot be added or removed. */ dataDir?: string; /** Runs the owner's `claude` program for MCP add and remove. Without it MCP servers are listed but not changed. */ runClaude?: ClaudeRunner };
+  setup?: { skillsDir: string; mcpFile: string; /** The folder of Claude Code agent files (name.md). */ agentsDir?: string; /** Where the trash and the list of skills added here live. Without it skills cannot be added or removed. */ dataDir?: string; /** Runs the owner's `claude` program for MCP add and remove. Without it MCP servers are listed but not changed. */ runClaude?: ClaudeRunner };
   /** The Workshop (builds in a copy of the target). Without it the Workshop routes answer 404. */
   workshop?: Workshop;
   /** The target folder's display name, for the master's goal. */
@@ -249,7 +250,10 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           const skills = (await listSkills(opts.setup?.skillsDir)).map((s) => ({ ...s, added: added.has(s.name) }));
           const mcpAdded = opts.setup?.dataDir ? await addedServers(join(opts.setup.dataDir, "mcp-added.json")) : new Set<string>();
           const mcp = (await listMcpServers(opts.setup?.mcpFile)).map((s) => ({ ...s, added: mcpAdded.has(s.name) }));
-          return json(res, 200, { skills, mcp, canManage: Boolean(dirs), canManageMcp: Boolean(opts.setup?.runClaude && opts.setup.dataDir) });
+          const agentDirs = opts.setup?.dataDir && opts.setup.agentsDir ? agentDirsFor(opts.setup.agentsDir, opts.setup.dataDir) : undefined;
+          const agentsAdded = agentDirs ? await addedAgents(agentDirs) : new Set<string>();
+          const agents = (await listAgents(opts.setup?.agentsDir)).map((a) => ({ ...a, added: agentsAdded.has(a.name) }));
+          return json(res, 200, { skills, mcp, agents, canManage: Boolean(dirs), canManageAgents: Boolean(agentDirs), canManageMcp: Boolean(opts.setup?.runClaude && opts.setup.dataDir) });
         });
       }
       if ((url.pathname === "/api/setup/mcp/preview" || url.pathname === "/api/setup/mcp" || url.pathname === "/api/setup/mcp/remove") && method === "POST") {
@@ -274,6 +278,18 @@ export async function startServer(opts: Options): Promise<RunningServer> {
             return args ? json(res, 200, { command: previewLine(args) }) : json(res, 400, { error: "invalid_input" });
           }
           return mcpAnswer(res, await addServer(deps, input), 201);
+        });
+      }
+      if ((url.pathname === "/api/setup/agents" || url.pathname === "/api/setup/agents/remove") && method === "POST") {
+        const agentDirs = opts.setup?.dataDir && opts.setup.agentsDir ? agentDirsFor(opts.setup.agentsDir, opts.setup.dataDir) : undefined;
+        if (!agentDirs) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => {
+          const remove = url.pathname.endsWith("/remove");
+          const parsed = (remove ? RemoveSkillBody : AddSkillBody).safeParse(await readJson(req));
+          if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+          const result = remove ? await removeAgent(agentDirs, parsed.data.name) : await addAgent(agentDirs, parsed.data);
+          if (result.ok) return json(res, remove ? 200 : 201, {});
+          return json(res, SKILL_STATUS[result.code], result.code === "exists" || result.code === "not_added" ? { reason: result.code } : { error: result.code });
         });
       }
       if ((url.pathname === "/api/setup/skills" || url.pathname === "/api/setup/skills/remove") && method === "POST") {

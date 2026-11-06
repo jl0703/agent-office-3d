@@ -454,6 +454,23 @@ try {
       expect((await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`)).includes("Remove the MCP server"), `sidebar(${scheme}): removing a server asks first`);
       await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
       await page.wait(200);
+      // The AI Agents page: cards, add form, remove asks first, details.
+      await page.evaluate(`[...document.querySelectorAll(".app-actions button")].length`);
+      await page.evaluate(`location.hash = "#/agents"`);
+      await page.wait(500);
+      const agentCards = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.querySelector("h2")?.textContent + ":" + c.textContent).join(" | ")`);
+      expect(agentCards.includes("demo-reviewer") && agentCards.includes("Model sonnet") && agentCards.includes("demo-planner"), `sidebar(${scheme}): the agents page lists agents with model and tools (${agentCards})`);
+      expect((await page.evaluate<string>(`document.querySelector(".skill-manager summary")?.textContent ?? ""`)).includes("Add an agent"), `sidebar(${scheme}): the agents page can add an agent`);
+      await page.evaluate(`document.querySelector("[aria-label='Remove demo-planner']")?.click()`);
+      await page.wait(200);
+      expect((await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`)).includes("agents folder"), `sidebar(${scheme}): removing an agent asks first`);
+      await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
+      await page.evaluate(`document.querySelector("[aria-label='View details for demo-reviewer']")?.click()`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector(".item-facts")?.textContent ?? ""`)).includes("sonnet"), `sidebar(${scheme}): an agent's details page shows its model`);
+      await page.evaluate(source);
+      const agentViolations = await axe(page);
+      expect(agentViolations.length === 0, `sidebar(${scheme}): axe on the agent details page: ${agentViolations.join(", ")}`);
       await page.evaluate(`location.hash = "#/"`);
       await page.wait(800);
       expect(await page.evaluate<boolean>(`Boolean(document.querySelector(".app-main"))`), `sidebar(${scheme}): the office is back at #/`);

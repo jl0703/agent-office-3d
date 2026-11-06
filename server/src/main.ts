@@ -57,6 +57,7 @@ const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
 // What a sweep is told about our own setup: skill folder names, MCP server names (never their settings) and recent runs.
 const claudeBin = findClaude(process.env, process.platform);
 const skillsDir = join(homedir(), ".claude", "skills");
+const agentsDir = join(homedir(), ".claude", "agents");
 const mcpFile = join(homedir(), ".claude.json");
 const digest = () => buildDigest({ ...(plansLogDir ? { plansLogDir } : {}), skillsDir, mcpFile });
 // The Workshop builds in a copy of OFFICE_WORKSHOP_TARGET (a folder, set by the owner); without it the Workshop is off.
@@ -115,7 +116,7 @@ const app = await startServer({
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
   digest,
-  setup: { skillsDir, mcpFile, dataDir, ...(claudeBin ? { runClaude: claudeRunner(claudeBin) } : {}) },
+  setup: { skillsDir, agentsDir, mcpFile, dataDir, ...(claudeBin ? { runClaude: claudeRunner(claudeBin) } : {}) },
   ...(workshop && workshopTarget ? { workshop, workshopTargetName: basename(workshopTarget) } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),

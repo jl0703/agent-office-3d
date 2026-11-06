@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addMcp, addSkill, demoSetup, describeServer, getSetup, matches, parseEnv, parseLines, previewMcp, removeMcp, removeSkill, SKILL_NAME } from "../src/setup.ts";
+import { addAgent, addMcp, addSkill, demoSetup, describeServer, getSetup, matches, parseEnv, parseLines, previewMcp, removeAgent, removeMcp, removeSkill, SKILL_NAME } from "../src/setup.ts";
 
 const fake = (status: number, body: unknown) => async () => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Pick<Response, "ok" | "status" | "json">;
 
@@ -92,5 +92,22 @@ describe("MCP servers from the page", () => {
     assert.deepEqual(parseEnv("A=1\nB=x=y\n"), { A: "1", B: "x=y" });
     assert.equal(parseEnv("novalue"), null);
     assert.equal(parseEnv("=x"), null);
+  });
+});
+
+describe("agents from the page", () => {
+  it("reads agents with their model and tools, drops odd rows, and uses the agents routes", async () => {
+    const got = await getSetup(fake(200, { skills: [], mcp: [], agents: [{ name: "reviewer", description: "d", model: "sonnet", tools: "Read", added: true, modified: 5 }, { nope: 1 }, "x"], canManageAgents: true }));
+    assert.deepEqual(got?.agents, [{ name: "reviewer", description: "d", model: "sonnet", tools: "Read", added: true, modified: 5 }]);
+    assert.equal(got?.canManageAgents, true);
+    assert.deepEqual((await getSetup(fake(200, { skills: [], mcp: [] })))?.agents, [], "an older server without agents still works");
+    const calls: { path: string; body: unknown }[] = [];
+    const rec = async (path: string, init?: RequestInit) => {
+      calls.push({ path, body: JSON.parse(String(init?.body)) });
+      return { ok: true, status: 201, json: async () => ({}) } as Pick<Response, "ok" | "status" | "json">;
+    };
+    await addAgent({ name: "x", content: "---" }, rec);
+    await removeAgent("x", rec);
+    assert.deepEqual(calls, [{ path: "/api/setup/agents", body: { name: "x", content: "---", confirm: true } }, { path: "/api/setup/agents/remove", body: { name: "x", confirm: true } }]);
   });
 });
