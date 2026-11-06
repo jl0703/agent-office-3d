@@ -279,7 +279,7 @@ describe("schedule: timer", () => {
     u.clock.t += 24 * HOUR;
     u.scheduler.start();
     u.timers[0]?.fn();
-    await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 200 && u.state.calls < 1; i++) await new Promise((r) => setTimeout(r, 15)); // slow disks need longer than a fixed wait
     await u.scheduler.close();
     assert.equal(u.state.calls, 1);
   });
