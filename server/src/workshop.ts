@@ -93,14 +93,15 @@ export function createWorkshop(opts: WorkshopOptions) {
 
   const running = new Map<string, Promise<Build | null>>();
 
-  async function finishNow(id: string): Promise<Build | null> {
+  async function finishNow(id: string, final: boolean): Promise<Build | null> {
     const meta = await readMeta(id);
     if (!meta) return null;
     let next: Build;
     try {
       const { code, out } = await git(folder(id), ["diff", "--no-index", "--no-prefix", "--no-ext-diff", "--no-textconv", "--binary", "--no-color", "--", "a", "b"]);
       const changed = (out.match(/^diff --git /gm) ?? []).length;
-      if (code === 0 || out === "") next = { ...meta, status: "no-changes", changed: 0 };
+      // Nothing yet at the end of a turn is not the end of the work: stay "building" until the master really ends.
+      if (code === 0 || out === "") next = { ...meta, status: final ? "no-changes" : "building", changed: 0 };
       else if (Buffer.byteLength(out) > (opts.maxPatchBytes ?? MAX_PATCH_BYTES)) next = { ...meta, status: "too-large", changed };
       else {
         await writeAtomic(join(folder(id), "changes.patch"), out);
@@ -154,9 +155,9 @@ export function createWorkshop(opts: WorkshopOptions) {
     },
 
     /** Writes changes.patch and updates the build's status. Calls for one build run one after another. */
-    finish(id: string): Promise<Build | null> {
+    finish(id: string, final = true): Promise<Build | null> {
       const before = running.get(id) ?? Promise.resolve(null);
-      const next = before.then(() => finishNow(id), () => finishNow(id));
+      const next = before.then(() => finishNow(id, final), () => finishNow(id, final));
       running.set(id, next);
       void next.then(() => running.get(id) === next && running.delete(id), () => running.get(id) === next && running.delete(id));
       return next;

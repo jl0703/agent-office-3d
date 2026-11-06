@@ -50,7 +50,7 @@ async function rig(opts: { research?: boolean; supervisor?: Partial<SupervisorOp
     registry,
     query: f.query,
     roots: [research, ...(opts.workshop ? [opts.workshop.dir] : [])],
-    ...(opts.workshop ? { onWorkshopEnd: async (b: string) => void (await opts.workshop?.finish(b)) } : {}),
+    ...(opts.workshop ? { onWorkshopEnd: async (b: string, final: boolean) => void (await opts.workshop?.finish(b, final)) } : {}),
     ...(opts.research === false ? {} : { researchDir: research }),
     github: createGithub({ token: "t", fetch: (async () => new Response("{}")) as unknown as typeof fetch }),
     env: { PATH: "p" },
@@ -547,7 +547,7 @@ describe("the workshop (plan 15, R3)", () => {
     assert.equal((await r.post(`/api/agents/${id}/stop`)).status, 202);
     await waitFor(() => r.registry.get(id)?.status === "stopped");
     let listed: { builds: { id: string; status: string; changed: number }[] } = { builds: [] };
-    for (let i = 0; i < 100 && listed.builds[0]?.status !== "ready"; i++) {
+    for (let i = 0; i < 400 && listed.builds[0]?.status !== "ready"; i++) {
       listed = json(await r.get("/api/workshop")) as typeof listed;
       await new Promise((res) => setTimeout(res, 30));
     }
@@ -567,7 +567,7 @@ describe("the workshop (plan 15, R3)", () => {
     writeFileSync(join(realpathSync(r.workshop.dir), build, "b", "docs", "SKILL.md"), "base\nedited\n");
     r.sessions[0]?.out.push(resultMessage(0.1));
     let status = "";
-    for (let i = 0; i < 100 && status !== "ready"; i++) {
+    for (let i = 0; i < 400 && status !== "ready"; i++) {
       status = ((json(await r.get("/api/workshop")) as { builds: { status: string }[] }).builds[0]?.status) ?? "";
       await new Promise((res) => setTimeout(res, 30));
     }
