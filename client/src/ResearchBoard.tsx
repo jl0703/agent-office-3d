@@ -163,7 +163,7 @@ export function ResearchBoard({ id, demo, off, headingRef, onClose, onHand }: Pr
     setSweeping(true);
     const result = await startSweep();
     setSweeping(false);
-    setMessage(result.ok ? "Sweep started. New findings appear here as the team files them." : result.message);
+    setMessage(result.ok ? "Sweep started. New findings appear here as the team files them. If nothing appears, open the Research Lead in the list to read what it reported." : result.message);
   };
 
   const save = async () => {

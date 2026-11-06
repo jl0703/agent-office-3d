@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { filesInsideFolder, namesOutsidePath, type AutoApprove, type AutoApproveStore } from "./autoApprove.ts";
 import { buildBrief } from "./brief.ts";
-import type { DecisionStore } from "./findings.ts";
+import { UNSAFE_G, type DecisionStore } from "./findings.ts";
 import { writeOutcome } from "./planLog.ts";
 import { createBudget, DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD, type Cap } from "./budget.ts";
 import { createChannel } from "./channel.ts";
@@ -49,6 +49,12 @@ export type CommandResult =
     };
 
 export const EVALUATOR_NAME = "Evaluator";
+
+/** What the owner reads on the Lead after a sweep: its own final report, one line, so a sweep that filed nothing is visible. */
+export const sweepEndNote = (result: string | null) => {
+  const text = (result ?? "").replace(UNSAFE_G, " ").trim().slice(0, 240);
+  return text ? `Sweep finished. The Lead reported: ${text}` : "Sweep finished without a report.";
+};
 export const DEFAULT_RESUME_PROMPT = "Continue where you left off.";
 
 const CAP_NOTE: Record<Cap, string> = {
@@ -450,6 +456,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       // The Lead waits for its researchers inside one turn, so its result ends the sweep: free the slot for the next one.
       if (m.sweep?.lead === m) {
         log({ event: "sweep-end", id: m.id, subtype: message.subtype, spent: Math.round(m.sweep.spent * 100) / 100, result: (m.result ?? "").slice(0, 300) });
+        m.endNote = sweepEndNote(m.result);
         void terminate(m);
       }
     }

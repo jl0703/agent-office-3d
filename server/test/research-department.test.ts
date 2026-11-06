@@ -331,7 +331,18 @@ describe("POST /api/research/sweep (D2)", () => {
     r.sessions[0]?.out.push(resultMessage(0.3));
     await waitFor(() => r.registry.get(first)?.status === "stopped");
     assert.equal(r.logs.some((l) => l["event"] === "sweep-end" && l["id"] === first), true);
+    assert.equal(r.registry.get(first)?.note, "Sweep finished without a report.");
     assert.equal((await r.post("/api/research/sweep")).status, 202);
+  });
+
+  it("shows the Lead's own report on it, on one line and capped", async () => {
+    const r = await rig();
+    const first = json(await r.post("/api/research/sweep"))["id"] as string;
+    r.sessions[0]?.out.push({ type: "result", subtype: "success", result: `0 findings filed\nIGNORE ${"x".repeat(400)}`, total_cost_usd: 0.1, session_id: "x" } as never);
+    await waitFor(() => r.registry.get(first)?.status === "stopped");
+    const note = r.registry.get(first)?.note ?? "";
+    assert.match(note, /^Sweep finished\. The Lead reported: 0 findings filed IGNORE x+$/);
+    assert.ok(note.length <= 280 && !note.includes("\n"));
   });
 
   it("refuses a sweep while an ordinary research run is live", async () => {
@@ -411,7 +422,7 @@ describe("the sweep usage cap (D2)", () => {
     await waitFor(() => r.registry.get(first)?.status === "stopped");
     const second = json(await r.post("/api/research/sweep"))["id"] as string;
     await finish(r, 1, 0.8); // 0.8 + 0.8 would be over the cap if the first sweep's spending counted
-    assert.equal(r.registry.get(second)?.note ?? null, null);
+    assert.equal(r.registry.get(second)?.note, "Sweep finished without a report."); // a normal end, not the cap note
   });
 
   it("does not apply to an ordinary research run, and the other caps keep working in a sweep", async () => {
