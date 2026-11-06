@@ -359,6 +359,7 @@ try {
 
   if (run("sidebar")) {
     const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    const setter = "(sel, value) => { const i = document.querySelector(sel); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, value); i.dispatchEvent(new Event('input', { bubbles: true })); }";
     const axe = async (page: { evaluate<T>(code: string): Promise<T> }) =>
       page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
     for (const [scheme, w, h] of [["light", 1440, 900], ["dark", 375, 740]] as const) {
@@ -431,6 +432,28 @@ try {
       await page.wait(400);
       const servers = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.textContent).join(" | ")`);
       expect(servers.includes("demo-files") && servers.includes("Headers set") && !servers.includes("SECRET"), `sidebar(${scheme}): the MCP page shows servers without secrets (${servers})`);
+      // Adding a server shows the exact command first; nothing runs until Confirm.
+      await page.evaluate(`document.querySelector(".skill-manager details summary")?.click()`);
+      await page.wait(200);
+      await page.evaluate(`((sel, value) => { const i = document.querySelector(sel); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, value); i.dispatchEvent(new Event("input", { bubbles: true })); })('.skill-manager input[placeholder="my-server"]', 'demo-new')`);
+      await page.evaluate(`(${setter})('.skill-manager input[placeholder="npx"]', 'npx')`);
+      await page.wait(100);
+      await page.evaluate(`[...document.querySelectorAll(".skill-manager button")].find((b) => b.textContent.includes("Review the command"))?.click()`);
+      await page.wait(300);
+      const preview = await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`);
+      expect(preview.includes("claude mcp add") && preview.includes("demo-new") && preview.includes("never starts it"), `sidebar(${scheme}): the command is shown before anything runs (${preview})`);
+      expect(await page.evaluate<boolean>(`document.activeElement?.closest(".confirm-box") !== null`), `sidebar(${scheme}): focus moves into the MCP confirm box`);
+      await page.evaluate(source);
+      const mcpViolations = await axe(page);
+      expect(mcpViolations.length === 0, `sidebar(${scheme}): axe on the MCP page with the form and confirm box open: ${mcpViolations.join(", ")}`);
+      await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
+      await page.wait(300);
+      expect(await page.evaluate<string>(`document.activeElement?.textContent ?? ""`) === "Review the command", `sidebar(${scheme}): Cancel returns focus to Review`);
+      await page.evaluate(`document.querySelector("[aria-label='Remove demo-docs']")?.click()`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`)).includes("Remove the MCP server"), `sidebar(${scheme}): removing a server asks first`);
+      await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
+      await page.wait(200);
       await page.evaluate(`location.hash = "#/"`);
       await page.wait(800);
       expect(await page.evaluate<boolean>(`Boolean(document.querySelector(".app-main"))`), `sidebar(${scheme}): the office is back at #/`);

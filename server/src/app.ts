@@ -2,12 +2,14 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import http from "node:http";
-import { extname, resolve, sep } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { listMcpServers, listSkills } from "./claudeSetup.ts";
+import type { ClaudeRunner } from "./claudeCli.ts";
+import { addedServers, addServer, buildArgs, previewLine, removeServer, type Failure as McpFailure, type McpInput } from "./mcpManage.ts";
 import { addedSkills, addSkill, dirsFor, removeSkill, SKILL_NAME, type Failure } from "./skillsManage.ts";
 import { buildWorkshopGoal, type Workshop } from "./workshop.ts";
 import { buildEvaluationPrompt, readEvaluations } from "./evaluations.ts";
@@ -56,7 +58,7 @@ type Options = {
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /** Where the sidebar reads the owner's skills and user-level MCP servers from. Without it the lists are empty. */
-  setup?: { skillsDir: string; mcpFile: string; /** Where the trash and the list of skills added here live. Without it skills cannot be added or removed. */ dataDir?: string };
+  setup?: { skillsDir: string; mcpFile: string; /** Where the trash and the list of skills added here live. Without it skills cannot be added or removed. */ dataDir?: string; /** Runs the owner's `claude` program for MCP add and remove. Without it MCP servers are listed but not changed. */ runClaude?: ClaudeRunner };
   /** The Workshop (builds in a copy of the target). Without it the Workshop routes answer 404. */
   workshop?: Workshop;
   /** The target folder's display name, for the master's goal. */
@@ -79,6 +81,25 @@ const AddSkillBody = z
   .object({ name: z.string().regex(SKILL_NAME), content: z.string().max(200_000).optional(), source: z.string().min(1).max(1000).optional(), confirm: z.literal(true) })
   .strict()
   .refine((b) => (b.content === undefined) !== (b.source === undefined));
+const McpBody = z
+  .object({
+    name: z.string().max(80),
+    transport: z.enum(["stdio", "http", "sse"]),
+    command: z.string().max(400).optional(),
+    args: z.array(z.string().max(600)).max(30).optional(),
+    url: z.string().max(800).optional(),
+    env: z.record(z.string().max(80), z.string().max(800)).optional(),
+    headers: z.array(z.string().max(800)).max(10).optional(),
+  })
+  .strict();
+const AddMcpBody = McpBody.extend({ confirm: z.literal(true) }).strict();
+const RemoveMcpBody = z.object({ name: z.string().max(80), confirm: z.literal(true) }).strict();
+const MCP_STATUS: Record<McpFailure, number> = { invalid_input: 400, exists: 409, not_added: 409, failed: 500 };
+/** The answer to an MCP add or remove: no CLI output is ever passed on, because it can echo secrets. */
+function mcpAnswer(res: http.ServerResponse, result: { ok: true } | { ok: false; code: McpFailure }, okStatus: number) {
+  if (result.ok) return json(res, okStatus, {});
+  return json(res, MCP_STATUS[result.code], result.code === "exists" || result.code === "not_added" ? { reason: result.code } : { error: result.code });
+}
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_EVALUATE = /^\/api\/research\/findings\/([^/]{1,200})\/evaluate$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume|plan)$/;
@@ -226,7 +247,33 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           const dirs = opts.setup?.dataDir && opts.setup.skillsDir ? dirsFor(opts.setup.skillsDir, opts.setup.dataDir) : undefined;
           const added = dirs ? await addedSkills(dirs) : new Set<string>();
           const skills = (await listSkills(opts.setup?.skillsDir)).map((s) => ({ ...s, added: added.has(s.name) }));
-          return json(res, 200, { skills, mcp: await listMcpServers(opts.setup?.mcpFile), canManage: Boolean(dirs) });
+          const mcpAdded = opts.setup?.dataDir ? await addedServers(join(opts.setup.dataDir, "mcp-added.json")) : new Set<string>();
+          const mcp = (await listMcpServers(opts.setup?.mcpFile)).map((s) => ({ ...s, added: mcpAdded.has(s.name) }));
+          return json(res, 200, { skills, mcp, canManage: Boolean(dirs), canManageMcp: Boolean(opts.setup?.runClaude && opts.setup.dataDir) });
+        });
+      }
+      if ((url.pathname === "/api/setup/mcp/preview" || url.pathname === "/api/setup/mcp" || url.pathname === "/api/setup/mcp/remove") && method === "POST") {
+        const setup = opts.setup;
+        const runner = setup?.runClaude;
+        if (!setup?.dataDir || !runner) return json(res, 404, { error: "not_found" });
+        const deps = { run: runner, addedFile: join(setup.dataDir, "mcp-added.json"), existing: async () => (await listMcpServers(setup.mcpFile)).map((s) => s.name) };
+        return run(req, res, async () => {
+          const body = await readJson(req);
+          if (url.pathname.endsWith("/remove")) {
+            const parsed = RemoveMcpBody.safeParse(body);
+            if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            return mcpAnswer(res, await removeServer(deps, parsed.data.name), 200);
+          }
+          const preview = url.pathname.endsWith("/preview");
+          const parsed = (preview ? McpBody : AddMcpBody).safeParse(body);
+          if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+          const d = parsed.data;
+          const input: McpInput = { name: d.name, transport: d.transport, ...(d.command !== undefined ? { command: d.command } : {}), ...(d.args !== undefined ? { args: d.args } : {}), ...(d.url !== undefined ? { url: d.url } : {}), ...(d.env !== undefined ? { env: d.env } : {}), ...(d.headers !== undefined ? { headers: d.headers } : {}) };
+          if (preview) {
+            const args = buildArgs(input);
+            return args ? json(res, 200, { command: previewLine(args) }) : json(res, 400, { error: "invalid_input" });
+          }
+          return mcpAnswer(res, await addServer(deps, input), 201);
         });
       }
       if ((url.pathname === "/api/setup/skills" || url.pathname === "/api/setup/skills/remove") && method === "POST") {

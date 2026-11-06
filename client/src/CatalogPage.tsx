@@ -1,6 +1,7 @@
 import { ArrowRight, Bot, Boxes, ChevronRight, Home, Puzzle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { hrefFor, KIND_WORD, type CatalogKind } from "./route.ts";
+import { McpManager } from "./McpManager.tsx";
 import { RemoveButton, SkillManager } from "./SkillManager.tsx";
 import { demoSetup, describeServer, getSetup, matches, type McpServer, type Setup, type Skill } from "./setup.ts";
 
@@ -138,6 +139,8 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
         </div>
       )}
 
+      {kind === "mcp" && ready?.canManageMcp && <McpManager demo={demo} onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
+
       {kind === "skills" && ready?.canManage && <SkillManager demo={demo} off={false} onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
 
       {kind === "skills" && ready && (
@@ -162,7 +165,17 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
       {kind === "mcp" && ready && (
         <div className="catalog-grid">
           {servers.map((s: McpServer) => (
-            <Card key={s.name} title={s.name} by="In your Claude settings" description={describeServer(s)} chips={[s.type === "stdio" ? "Local program" : s.type.toUpperCase(), ...(s.envCount > 0 ? [`${s.envCount} env value${s.envCount === 1 ? "" : "s"} set`] : []), ...(s.hasHeaders ? ["Headers set"] : [])]} href={hrefFor({ page: "item", kind, name: s.name })} />
+            <Card
+              key={s.name}
+              title={s.name}
+              by={s.added ? "Added from this app" : "In your Claude settings"}
+              {...(s.added ? { badge: "Added here" } : {})}
+              description={describeServer(s)}
+              chips={[s.type === "stdio" ? "Local program" : s.type.toUpperCase(), ...(s.envCount > 0 ? [`${s.envCount} env value${s.envCount === 1 ? "" : "s"} set`] : []), ...(s.hasHeaders ? ["Headers set"] : [])]}
+              href={hrefFor({ page: "item", kind, name: s.name })}
+            >
+              {s.added && ready.canManageMcp && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />}
+            </Card>
           ))}
           {servers.length === 0 && <p className="panel-note">{ready.mcp.length === 0 ? "No user-level MCP servers found." : "No server matches."}</p>}
         </div>
@@ -229,6 +242,12 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
             <dd>In your Claude settings (user level)</dd>
           </dl>
           <p className="panel-note">Secret values and headers are never shown here.</p>
+          {server.added && ready?.canManageMcp && (
+            <>
+              <RemoveButton name={server.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />
+              <McpManager demo={demo} showAdd={false} onChanged={() => (reload(), onGone())} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
+            </>
+          )}
         </section>
       )}
     </main>

@@ -2,8 +2,8 @@
 
 /** `added` is true for skills added from the sidebar, the only ones it can remove. */
 export type Skill = { name: string; description: string; added: boolean; modified: number };
-export type McpServer = { name: string; type: "stdio" | "http" | "sse"; command?: string; argCount?: number; host?: string; envCount: number; hasHeaders: boolean };
-export type Setup = { skills: Skill[]; mcp: McpServer[]; canManage: boolean };
+export type McpServer = { name: string; type: "stdio" | "http" | "sse"; command?: string; argCount?: number; host?: string; envCount: number; hasHeaders: boolean; /** True for servers added from this app, the only ones it can remove. */ added: boolean };
+export type Setup = { skills: Skill[]; mcp: McpServer[]; canManage: boolean; canManageMcp: boolean };
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
@@ -22,6 +22,7 @@ function toServer(raw: unknown): McpServer | null {
     type,
     envCount: typeof raw["envCount"] === "number" ? raw["envCount"] : 0,
     hasHeaders: raw["hasHeaders"] === true,
+    added: raw["added"] === true,
     ...(typeof raw["command"] === "string" ? { command: raw["command"] } : {}),
     ...(typeof raw["argCount"] === "number" ? { argCount: raw["argCount"] } : {}),
     ...(typeof raw["host"] === "string" ? { host: raw["host"] } : {}),
@@ -33,9 +34,9 @@ export async function getSetup(fetchFn: FetchFn = fetch): Promise<Setup | null> 
   try {
     const res = await fetchFn("/api/setup");
     if (!res.ok) return null;
-    const data = (await res.json()) as { skills?: unknown; mcp?: unknown; canManage?: unknown };
+    const data = (await res.json()) as { skills?: unknown; mcp?: unknown; canManage?: unknown; canManageMcp?: unknown };
     if (!Array.isArray(data.skills) || !Array.isArray(data.mcp)) return null;
-    return { skills: data.skills.map(toSkill).filter((s): s is Skill => s !== null), mcp: data.mcp.map(toServer).filter((s): s is McpServer => s !== null), canManage: data.canManage === true };
+    return { skills: data.skills.map(toSkill).filter((s): s is Skill => s !== null), mcp: data.mcp.map(toServer).filter((s): s is McpServer => s !== null), canManage: data.canManage === true, canManageMcp: data.canManageMcp === true };
   } catch {
     return null;
   }
@@ -61,10 +62,11 @@ export function demoSetup(): Setup {
       { name: "demo-docs-writer", description: "Demo: writes short, accurate documentation", added: true, modified: Date.UTC(2026, 10, 5) },
     ],
     mcp: [
-      { name: "demo-files", type: "stdio", command: "node", argCount: 2, envCount: 1, hasHeaders: false },
-      { name: "demo-docs", type: "http", host: "mcp.example.com", envCount: 0, hasHeaders: true },
+      { name: "demo-files", type: "stdio", command: "node", argCount: 2, envCount: 1, hasHeaders: false, added: false },
+      { name: "demo-docs", type: "http", host: "mcp.example.com", envCount: 0, hasHeaders: true, added: true },
     ],
     canManage: true,
+    canManageMcp: true,
   };
 }
 
@@ -101,3 +103,53 @@ export const addSkill = (input: { name: string; content: string } | { name: stri
 
 /** Moves a skill that was added here to the trash folder. */
 export const removeSkill = (name: string, fetchFn: FetchFn = fetch) => change("/api/setup/skills/remove", { name }, fetchFn);
+
+/** What the form sends for a new MCP server. The server checks everything again. */
+export type McpInput = { name: string; transport: "stdio" | "http" | "sse"; command?: string; args?: string[]; url?: string; env?: Record<string, string>; headers?: string[] };
+
+const MCP_FAILURES: Record<string, string> = {
+  exists: "A server with that name already exists. Nothing was changed.",
+  invalid_input: "Check the fields: the name uses letters, digits, dots, hyphens; a local program needs a command; a remote server needs an https address (or http://localhost).",
+  not_added: "Only servers added from this app can be removed here.",
+  failed: "The claude command did not succeed. Nothing was recorded; check your Claude Code installation.",
+};
+
+async function mcpCall(path: string, body: unknown, fetchFn: FetchFn): Promise<{ ok: true; command?: string } | { ok: false; message: string }> {
+  try {
+    const res = await fetchFn(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { command?: unknown };
+      return typeof data.command === "string" ? { ok: true, command: data.command } : { ok: true };
+    }
+    const data = (await res.json().catch(() => ({}))) as { error?: unknown; reason?: unknown };
+    const code = [data.error, data.reason].find((v) => typeof v === "string") as string | undefined;
+    if (code && MCP_FAILURES[code]) return { ok: false, message: MCP_FAILURES[code] };
+    if (res.status === 403) return { ok: false, message: "The session has expired. Open the link printed in the terminal again." };
+    return { ok: false, message: `Something went wrong (error ${res.status}). Nothing was changed.` };
+  } catch {
+    return { ok: false, message: "Could not reach the server." };
+  }
+}
+
+/** The exact command the server would run, with secret values hidden. Runs nothing. */
+export const previewMcp = (input: McpInput, fetchFn: FetchFn = fetch) => mcpCall("/api/setup/mcp/preview", input, fetchFn);
+
+/** Adds the server. The page calls this only after the owner confirmed the preview. */
+export const addMcp = (input: McpInput, fetchFn: FetchFn = fetch) => mcpCall("/api/setup/mcp", { ...input, confirm: true }, fetchFn);
+
+export const removeMcp = (name: string, fetchFn: FetchFn = fetch) => mcpCall("/api/setup/mcp/remove", { name, confirm: true }, fetchFn);
+
+/** Reads the form's text boxes: one argument per line, KEY=value per line, "Name: value" per line. Returns null for a malformed line. */
+export function parseLines(text: string): string[] {
+  return text.split("\n").map((l) => l.replace(/\r$/, "")).filter((l) => l.trim() !== "");
+}
+
+export function parseEnv(text: string): Record<string, string> | null {
+  const env: Record<string, string> = {};
+  for (const line of parseLines(text)) {
+    const at = line.indexOf("=");
+    if (at < 1) return null;
+    env[line.slice(0, at).trim()] = line.slice(at + 1);
+  }
+  return env;
+}
