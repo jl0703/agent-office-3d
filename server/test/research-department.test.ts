@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -17,7 +17,7 @@ import { RESEARCH_LEAD_PROMPT, RESEARCHER_PROMPT } from "../src/research.ts";
 import { MAX_KNOWN, SWEEP_CAP_NOTE } from "../src/sweep.ts";
 import { createSupervisor, type SupervisorOptions } from "../src/supervisor.ts";
 import { createFake, resultMessage } from "./fakeQuery.ts";
-import { loginTo, send } from "./helpers.ts";
+import { loginTo, send, validPlan } from "./helpers.ts";
 
 const SECRET = "BODY-SECRET-77c1d";
 const dirs: string[] = [];
@@ -555,6 +555,35 @@ describe("the workshop (plan 15, R3)", () => {
     const patch = json(await r.get(`/api/workshop/${build}/patch`)) as { patch: string };
     assert.match(patch.patch, /^\+more$/m);
     assert.equal((await r.get("/api/workshop/aaaaaaaaaaaa/patch")).status, 404);
+  });
+
+  it("writes the patch at the end of a turn after approval, while the master is still running", async () => {
+    const r = await shopRig();
+    await r.post("/api/research/findings/tool-a/decision", { status: "adopt" });
+    const { id, build } = json(await r.post("/api/workshop/build", { findingId: "tool-a" })) as { id: string; build: string };
+    const call = await officeOf(r);
+    assert.equal((await call("submit_plan", validPlan)).error, false);
+    assert.equal((await r.post(`/api/agents/${id}/plan`, { decision: "approve" })).status, 202);
+    writeFileSync(join(realpathSync(r.workshop.dir), build, "b", "docs", "SKILL.md"), "base\nedited\n");
+    r.sessions[0]?.out.push(resultMessage(0.1));
+    let status = "";
+    for (let i = 0; i < 100 && status !== "ready"; i++) {
+      status = ((json(await r.get("/api/workshop")) as { builds: { status: string }[] }).builds[0]?.status) ?? "";
+      await new Promise((res) => setTimeout(res, 30));
+    }
+    assert.equal(status, "ready");
+    assert.notEqual(r.registry.get(id)?.status, "stopped", "the master is still running");
+  });
+
+  it("keeps no copy when the master cannot start", async () => {
+    const r = await shopRig();
+    await r.post("/api/research/findings/tool-a/decision", { status: "adopt" });
+    const first = await r.post("/api/workshop/build", { findingId: "tool-a" });
+    assert.equal(first.status, 202);
+    const second = await r.post("/api/workshop/build", { findingId: "tool-a" });
+    assert.equal(second.status, 409);
+    assert.equal(((json(await r.get("/api/workshop")) as { builds: unknown[] }).builds).length, 1);
+    assert.equal(readdirSync(r.workshop.dir).length, 1, "no folder was left for the refused start");
   });
 
   it("answers 404 when the workshop is not set up", async () => {

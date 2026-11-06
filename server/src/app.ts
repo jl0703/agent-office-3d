@@ -320,8 +320,9 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if ((await decisions.all()).get(finding.id)?.status !== "adopt") return json(res, 409, { reason: "not_adopted" });
       const fit = (await readEvaluations(base)).get(finding.id);
       const prepared = await shop.prepare(finding.id, finding.title);
-      if (!prepared.ok) return json(res, prepared.code === "too_big" ? 413 : 400, { error: prepared.code });
+      if (!prepared.ok) return json(res, prepared.code === "too_big" ? 413 : prepared.code === "too_many" ? 429 : prepared.code === "copy_failed" ? 500 : 400, { error: prepared.code });
       const started = await opts.supervisor?.startMaster({ cwd: prepared.work, prompt: buildWorkshopGoal(finding, fit, opts.workshopTargetName ?? "the workspace"), workshop: prepared.build.id });
+      if (!started?.ok) await shop.discard(prepared.build.id); // no master, so the copy is not kept
       if (!started) return json(res, 404, { error: "not_found" });
       if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
       return json(res, 202, { id: started.id, build: prepared.build.id });

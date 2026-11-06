@@ -12,8 +12,8 @@ import { SLUG } from "./findings.ts";
 
 export const MAX_COPY_FILES = 2000;
 export const MAX_COPY_BYTES = 50 * 1024 * 1024;
-export const MAX_PATCH_BYTES = 1024 * 1024;
-export const MAX_SHOWN_PATCH_BYTES = 200 * 1024;
+// The written patch is never longer than what the page shows, so the owner reviews all of what they apply.
+export const MAX_PATCH_BYTES = 200 * 1024;
 export const MAX_BUILDS = 100;
 const SKIP = new Set([".git", "node_modules"]);
 const BUILD_ID = /^[0-9a-f]{12}$/;
@@ -61,7 +61,13 @@ const git = (cwd: string, args: string[]) =>
     });
   });
 
-export type WorkshopOptions = { dir: string; target: string; now?: () => number; maxFiles?: number; maxBytes?: number };
+export type WorkshopOptions = { dir: string; target: string; now?: () => number; maxFiles?: number; maxBytes?: number; maxPatchBytes?: number };
+
+async function writeAtomic(file: string, text: string) {
+  const tmp = `${file}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(tmp, text);
+  await rename(tmp, file);
+}
 
 export function createWorkshop(opts: WorkshopOptions) {
   const now = opts.now ?? Date.now;
@@ -69,9 +75,7 @@ export function createWorkshop(opts: WorkshopOptions) {
 
   async function saveMeta(meta: Build) {
     const file = join(folder(meta.id), "meta.json");
-    const tmp = `${file}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(meta));
-    await rename(tmp, file);
+    await writeAtomic(file, JSON.stringify(meta));
   }
 
   async function readMeta(id: string): Promise<Build | null> {
@@ -87,11 +91,33 @@ export function createWorkshop(opts: WorkshopOptions) {
     }
   }
 
+  const running = new Map<string, Promise<Build | null>>();
+
+  async function finishNow(id: string): Promise<Build | null> {
+    const meta = await readMeta(id);
+    if (!meta) return null;
+    let next: Build;
+    try {
+      const { code, out } = await git(folder(id), ["diff", "--no-index", "--no-prefix", "--no-ext-diff", "--no-textconv", "--binary", "--no-color", "--", "a", "b"]);
+      const changed = (out.match(/^diff --git /gm) ?? []).length;
+      if (code === 0 || out === "") next = { ...meta, status: "no-changes", changed: 0 };
+      else if (Buffer.byteLength(out) > (opts.maxPatchBytes ?? MAX_PATCH_BYTES)) next = { ...meta, status: "too-large", changed };
+      else {
+        await writeAtomic(join(folder(id), "changes.patch"), out);
+        next = { ...meta, status: "ready", changed };
+      }
+    } catch {
+      next = { ...meta, status: "error" };
+    }
+    await saveMeta(next);
+    return next;
+  }
+
   return {
     dir: opts.dir,
 
     /** Copies the target twice (snapshot `a`, working copy `b`) into a new build folder. Returns the build and the real path of `b`. */
-    async prepare(finding: string, title: string): Promise<{ ok: true; build: Build; work: string } | { ok: false; code: "target_missing" | "too_big" }> {
+    async prepare(finding: string, title: string): Promise<{ ok: true; build: Build; work: string } | { ok: false; code: "target_missing" | "too_big" | "too_many" | "copy_failed" }> {
       let target: string;
       try {
         target = await realpath(opts.target);
@@ -99,12 +125,20 @@ export function createWorkshop(opts: WorkshopOptions) {
       } catch {
         return { ok: false, code: "target_missing" };
       }
+      const existing = (await readdir(opts.dir, { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory() && BUILD_ID.test(e.name)).length;
+      if (existing >= MAX_BUILDS) return { ok: false, code: "too_many" };
       const id = randomBytes(6).toString("hex");
       await mkdir(folder(id), { recursive: true });
       const limits = { maxFiles: opts.maxFiles ?? MAX_COPY_FILES, maxBytes: opts.maxBytes ?? MAX_COPY_BYTES };
       const counter: Counter = { files: 0, bytes: 0, ...limits };
-      const snapshot = await copyTree(target, join(folder(id), "a"), counter);
-      const copied = snapshot === "ok" ? await copyTree(target, join(folder(id), "b"), { files: 0, bytes: 0, ...limits }) : "too_big";
+      let copied: "ok" | "too_big";
+      try {
+        const snapshot = await copyTree(target, join(folder(id), "a"), counter);
+        copied = snapshot === "ok" ? await copyTree(target, join(folder(id), "b"), { files: 0, bytes: 0, ...limits }) : "too_big";
+      } catch {
+        await rm(folder(id), { recursive: true, force: true });
+        return { ok: false, code: "copy_failed" };
+      }
       if (copied === "too_big") {
         await rm(folder(id), { recursive: true, force: true });
         return { ok: false, code: "too_big" };
@@ -114,24 +148,17 @@ export function createWorkshop(opts: WorkshopOptions) {
       return { ok: true, build, work: await realpath(join(folder(id), "b")) };
     },
 
-    /** Writes changes.patch and updates the build's status. Call once the master and its workers have ended. */
-    async finish(id: string): Promise<Build | null> {
-      const meta = await readMeta(id);
-      if (!meta) return null;
-      let next: Build;
-      try {
-        const { code, out } = await git(folder(id), ["diff", "--no-index", "--no-prefix", "--binary", "--no-color", "--", "a", "b"]);
-        const changed = (out.match(/^diff --git /gm) ?? []).length;
-        if (code === 0 || out === "") next = { ...meta, status: "no-changes", changed: 0 };
-        else if (Buffer.byteLength(out) > MAX_PATCH_BYTES) next = { ...meta, status: "too-large", changed };
-        else {
-          await writeFile(join(folder(id), "changes.patch"), out);
-          next = { ...meta, status: "ready", changed };
-        }
-      } catch {
-        next = { ...meta, status: "error" };
-      }
-      await saveMeta(next);
+    /** Removes a build whose master never started. */
+    async discard(id: string): Promise<void> {
+      if (BUILD_ID.test(id)) await rm(folder(id), { recursive: true, force: true });
+    },
+
+    /** Writes changes.patch and updates the build's status. Calls for one build run one after another. */
+    finish(id: string): Promise<Build | null> {
+      const before = running.get(id) ?? Promise.resolve(null);
+      const next = before.then(() => finishNow(id), () => finishNow(id));
+      running.set(id, next);
+      void next.then(() => running.get(id) === next && running.delete(id), () => running.get(id) === next && running.delete(id));
       return next;
     },
 
@@ -150,7 +177,7 @@ export function createWorkshop(opts: WorkshopOptions) {
         const file = join(folder(id), "changes.patch");
         if (!(await lstat(file)).isFile()) return null;
         const text = await readFile(file, "utf8");
-        return Buffer.byteLength(text) > MAX_SHOWN_PATCH_BYTES ? { patch: text.slice(0, MAX_SHOWN_PATCH_BYTES), truncated: true } : { patch: text, truncated: false };
+        return Buffer.byteLength(text) > MAX_PATCH_BYTES ? { patch: text.slice(0, MAX_PATCH_BYTES), truncated: true } : { patch: text, truncated: false };
       } catch {
         return null;
       }
