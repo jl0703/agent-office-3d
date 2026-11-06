@@ -7,7 +7,9 @@ import { pipeline } from "node:stream";
 import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
+import { ConfigBody, createDecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import type { Registry } from "./registry.ts";
+import { buildSweepPrompt } from "./sweep.ts";
 import type { Supervisor } from "./supervisor.ts";
 import { createVault } from "./vault.ts";
 
@@ -31,6 +33,10 @@ type Options = {
   supervisor?: Supervisor;
   /** Obsidian vault folder to read titles and links from. Never taken from a request. */
   vaultDir?: string;
+  /** The research folder: findings, focus and needs notes live here. Without it the research routes answer 400. */
+  researchDir?: string;
+  /** The app's data folder, for the decisions file. */
+  dataDir?: string;
   /**
    * Dev only. At least 32 characters: the token becomes HMAC(secret, "token") and sessions become signed
    * cookies, so the same link and login survive a restart. Omit it for the strict one-time token.
@@ -42,6 +48,7 @@ type Options = {
 const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
+const FINDING_DECISION = /^\/api\/research\/findings\/([^/]{1,200})\/decision$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume)$/;
 
 const StartBody = z
@@ -100,6 +107,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   const streams = new Set<http.ServerResponse>();
   const allowedHosts = new Set<string>();
   const vault = createVault(opts.vaultDir);
+  const decisions = opts.researchDir && opts.dataDir ? createDecisionStore(opts.dataDir) : undefined;
 
   const deny = (res: http.ServerResponse, status: number, reason: string, req: http.IncomingMessage) => {
     // Log the path only. The query string can hold the token.
@@ -176,6 +184,10 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         const events = opts.registry?.events(history[1]);
         return events ? json(res, 200, { events }) : json(res, 404, { error: "not_found" });
       }
+      if (url.pathname.startsWith("/api/research/")) {
+        const handled = researchRoute(req, res, url.pathname, method);
+        if (handled) return;
+      }
       if (url.pathname === "/api/usage" && method === "GET" && opts.supervisor) return json(res, 200, opts.supervisor.usage());
       const answer = AGENT_RESULT.exec(url.pathname);
       if (answer?.[1] && method === "GET") {
@@ -238,6 +250,51 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (res.headersSent) res.destroy();
       else json(res, 500, { error: "internal" });
     });
+  }
+
+  /** The Research department's routes. Returns false for a path that is not one of them. */
+  function researchRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, method: string): boolean {
+    const decision = FINDING_DECISION.exec(pathname);
+    const known =
+      (pathname === "/api/research/findings" && method === "GET") ||
+      (pathname === "/api/research/config" && (method === "GET" || method === "POST")) ||
+      (pathname === "/api/research/sweep" && method === "POST" && opts.supervisor) ||
+      (decision && method === "POST");
+    if (!known) return false;
+    run(req, res, async () => {
+      const base = decisions ? await resolveResearch(opts.researchDir) : null;
+      if (!decisions || !base) return json(res, 400, { error: "no_research_folder" });
+      if (pathname === "/api/research/findings") {
+        const { findings, invalid } = await readFindings(base);
+        return json(res, 200, { findings: withDecisions(findings, await decisions.all()), invalid });
+      }
+      if (decision) {
+        const id = decision[1] as string;
+        const parsed = DecisionBody.safeParse(await readJson(req));
+        if (!parsed.success || !SLUG.test(id)) return json(res, 400, { error: "invalid_request" });
+        if (!(await readFinding(base, id))) return json(res, 404, { error: "not_found" });
+        if ((await decisions.set(id, parsed.data)) === "full") return json(res, 400, { error: "too_many_decisions" });
+        return json(res, 200, { id, status: parsed.data.status, ...(parsed.data.note ? { note: parsed.data.note } : {}) });
+      }
+      if (pathname === "/api/research/config") {
+        if (method === "GET") return json(res, 200, await readConfig(base));
+        const parsed = ConfigBody.safeParse(await readJson(req));
+        if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+        await writeConfig(base, parsed.data);
+        return json(res, 200, await readConfig(base));
+      }
+      // The sweep: no body, or an empty object.
+      if (Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined) {
+        if (!z.object({}).strict().safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
+      } else req.resume();
+      const known = withDecisions((await readFindings(base)).findings, await decisions.all());
+      const prompt = buildSweepPrompt({ config: await readConfig(base), known, today: new Date().toISOString().slice(0, 10) });
+      const result = await opts.supervisor?.startSweep(prompt);
+      if (!result) return json(res, 404, { error: "not_found" });
+      if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
+      json(res, 202, { id: result.id });
+    });
+    return true;
   }
 
   async function startWorker(req: http.IncomingMessage, res: http.ServerResponse) {

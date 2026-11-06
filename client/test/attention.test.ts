@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "../../shared/events.ts";
-import { attentionOf, pageTitle, trackFinished } from "../src/attention.ts";
+import { attentionOf, pageTitle, RESEARCH_ID, trackFinished } from "../src/attention.ts";
 
 let n = 0;
 const agent = (over: Partial<Agent> = {}): Agent => ({
@@ -72,5 +72,14 @@ describe("what needs attention", () => {
     assert.equal(pageTitle(3, false), "(3) Agent Office");
     assert.equal(pageTitle(2, true), "(2) [Demo] Agent Office");
     assert.equal(pageTitle(0, true), "[Demo] Agent Office");
+  });
+
+  it("adds an entry for new research findings, after the agents", () => {
+    const err = agent({ status: "error" });
+    const items = attentionOf([err], new Set(), 3);
+    assert.deepEqual(items.map((i) => [i.id === RESEARCH_ID ? "research" : "agent", i.kind]), [["agent", "error"], ["research", "research"]]);
+    assert.equal(items[1]?.text, "3 new findings to judge");
+    assert.equal(attentionOf([], new Set(), 1)[0]?.text, "1 new finding to judge");
+    assert.equal(attentionOf([], new Set(), 0).length, 0);
   });
 });

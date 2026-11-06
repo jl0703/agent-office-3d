@@ -32,8 +32,8 @@ const Store = z.object({ version: z.literal(1), workers: z.array(Worker).max(MAX
 
 export type StoredWorker = z.infer<typeof Worker>;
 
-type WriteOps = { writeFile: typeof writeFile; rename: typeof rename };
-const realOps: WriteOps = { writeFile, rename };
+export type WriteOps = { writeFile: typeof writeFile; rename: typeof rename };
+export const realOps: WriteOps = { writeFile, rename };
 
 /** Removes temporary files left by an interrupted write. Call once at startup, before anything is saved. */
 export async function cleanTmp(dir: string): Promise<void> {
@@ -87,7 +87,7 @@ function safeJson(text: string): unknown {
 }
 
 /** On Windows a rename can fail for a moment while another program (or reader) has the target open. */
-async function renameWithRetry(ops: WriteOps, from: string, to: string): Promise<void> {
+export async function renameWithRetry(ops: WriteOps, from: string, to: string): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await ops.rename(from, to);

@@ -1,9 +1,9 @@
-import { BookOpen, FlaskConical, LayoutGrid, LocateFixed, OctagonX, Wifi, WifiOff } from "lucide-react";
+import { BookOpen, FlaskConical, Microscope, LayoutGrid, LocateFixed, OctagonX, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { EVENT_TYPES, type Agent, type AgentStatus, type ServerEvent } from "../../shared/events.ts";
 import { AgentList, canStop, type RoomGroup } from "./AgentList.tsx";
-import { attentionOf, pageTitle, trackFinished } from "./attention.ts";
+import { attentionOf, pageTitle, RESEARCH_ID, trackFinished } from "./attention.ts";
 import { countByStatus, filterTree, isFiltering, noFilter, step, type Filter } from "./filter.ts";
 import { ListFilter } from "./ListFilter.tsx";
 import { STATUSES } from "./office/palette.ts";
@@ -13,6 +13,8 @@ import { getUsage, getVault, stopAgent, stopAll, type Usage } from "./api.ts";
 import { UsageMeter } from "./UsageMeter.tsx";
 import { HubPanel } from "./HubPanel.tsx";
 import { NeedsYou } from "./NeedsYou.tsx";
+import { demoFindings, getFindings } from "./research.ts";
+import { ResearchBoard } from "./ResearchBoard.tsx";
 import { demoVault } from "./vault.ts";
 import type { VaultInfo } from "../../shared/vault.ts";
 import { applyEvent, buildTree, initialState } from "./agents.ts";
@@ -20,7 +22,7 @@ import { assignRooms, emptyAssignment, roomName } from "./office/rooms.ts";
 import { useDemo, useMediaQuery } from "./office/hooks.ts";
 import { OfficeCanvas } from "./office/OfficeCanvas.tsx";
 import { selection, useSelection } from "./office/selection.ts";
-import { StartForm } from "./StartForm.tsx";
+import { StartForm, type StartPreset } from "./StartForm.tsx";
 import { STATUS_WORD } from "./StatusChip.tsx";
 import "./theme/tokens.css";
 import "./styles.css";
@@ -54,6 +56,9 @@ function App() {
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [hubOpen, setHubOpen] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [newFindings, setNewFindings] = useState(0);
+  const [preset, setPreset] = useState<StartPreset | null>(null);
   const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
   const lastStatus = useRef(new Map<string, AgentStatus>());
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -99,6 +104,23 @@ function App() {
     };
   }, [connection]);
 
+  // How many findings wait for a decision: shown on the Research button and in "Needs you".
+  useEffect(() => {
+    if (demo.active) {
+      setNewFindings(demoFindings().filter((f) => f.status === "new").length);
+      return;
+    }
+    if (connection !== "connected") return;
+    let cancelled = false;
+    const load = () => void getFindings().then((r) => !cancelled && setNewFindings(r ? r.findings.filter((f) => f.status === "new").length : 0));
+    load();
+    const timer = setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [connection, demo.active, researchOpen]);
+
   const loadVault = useCallback((refresh: boolean) => {
     void getVault(refresh).then(setVaultInfo);
   }, []);
@@ -124,7 +146,7 @@ function App() {
     lastStatus.current = new Map(agents.map((a) => [a.id, a.status]));
     setUnseen((u) => trackFinished(before, agents, u, selected));
   }, [agents, selected]);
-  const needs = useMemo(() => attentionOf(agents, unseen), [agents, unseen]);
+  const needs = useMemo(() => attentionOf(agents, unseen, newFindings), [agents, unseen, newFindings]);
   useEffect(() => {
     document.title = pageTitle(needs.length, demo.active);
   }, [needs.length, demo.active]);
@@ -170,28 +192,45 @@ function App() {
     if (selected !== null) {
       setExpanded(false);
       setHubOpen(false);
+      setResearchOpen(false);
     }
   }, [selected]);
-  const panelOpen = (Boolean(current) || hubOpen) && (!narrow || expanded);
+  const panelOpen = (Boolean(current) || hubOpen || researchOpen) && (!narrow || expanded);
   const openHub = () => {
     selection.select(null);
+    setResearchOpen(false);
     setHubOpen(true);
     setExpanded(true);
   };
+  const openResearch = () => {
+    selection.select(null);
+    setHubOpen(false);
+    setResearchOpen(true);
+    setExpanded(true);
+  };
+  // A finding handed to a master: the start form opens with the brief in it.
+  const handToMaster = (brief: string) => {
+    setPreset((p) => ({ prompt: brief, nonce: (p?.nonce ?? 0) + 1 }));
+    setResearchOpen(false);
+    setExpanded(false);
+    setTab("list");
+  };
 
   useEffect(() => {
-    if ((current || hubOpen) && panelOpen && !docked) heading.current?.focus(); // the panel covers content: move into it
-  }, [selected, panelOpen, docked, hubOpen]);
+    if ((current || hubOpen || researchOpen) && panelOpen && !docked) heading.current?.focus(); // the panel covers content: move into it
+  }, [selected, panelOpen, docked, hubOpen, researchOpen]);
 
   useEffect(() => {
     if (selected) lastOpener.current = selected;
   }, [selected]);
 
   const close = useCallback(() => {
-    if (hubOpen) {
+    if (hubOpen || researchOpen) {
+      const button = hubOpen ? "[data-hub-button]" : "[data-research-button]";
       setHubOpen(false);
+      setResearchOpen(false);
       setExpanded(false);
-      requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-hub-button]")?.focus());
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(button)?.focus());
       return;
     }
     const id = selected ?? lastOpener.current;
@@ -202,7 +241,7 @@ function App() {
       const row = id ? visible(document.querySelector<HTMLElement>(`[data-agent-id="${CSS.escape(id)}"]`)) : null;
       (row ?? visible(document.querySelector<HTMLElement>(".office-stage")) ?? document.querySelector<HTMLElement>("[role=tab][aria-selected=true]"))?.focus();
     });
-  }, [selected, hubOpen]);
+  }, [selected, hubOpen, researchOpen]);
 
   useEffect(() => {
     if (!panelOpen && room === null) return;
@@ -331,7 +370,7 @@ function App() {
         <ConnectionBadge connection={connection} />
         <UsageMeter usage={demo.active ? { totalUsd: 3.4, caps: { runUsd: 2, sessionUsd: 5, totalUsd: 20 } } : usage} demo={demo.active} />
         <div className="app-actions">
-          <NeedsYou items={needs} onOpen={(id) => selection.select(id)} />
+          <NeedsYou items={needs} onOpen={(id) => (id === RESEARCH_ID ? openResearch() : selection.select(id))} />
           {demo.active ? (
             <button type="button" onClick={demo.stop}>
               <FlaskConical size={20} strokeWidth={1.75} aria-hidden="true" /> Exit demo
@@ -341,6 +380,10 @@ function App() {
               <FlaskConical size={20} strokeWidth={1.75} aria-hidden="true" /> Demo
             </button>
           )}
+          <button type="button" data-research-button className="label-from-768 tip" aria-label={`Research department${newFindings > 0 ? `, ${newFindings} new` : ""}`} data-tip="Research department" aria-pressed={researchOpen} onClick={openResearch}>
+            <Microscope size={20} strokeWidth={1.75} aria-hidden="true" />
+            <span>Research{newFindings > 0 ? ` (${newFindings})` : ""}</span>
+          </button>
           <button type="button" data-hub-button className="label-from-768 tip" aria-label="Knowledge hub" data-tip="Knowledge hub" aria-pressed={hubOpen} onClick={openHub}>
             <BookOpen size={20} strokeWidth={1.75} aria-hidden="true" />
             <span>Knowledge hub</span>
@@ -396,7 +439,7 @@ function App() {
 
         <div className="workspace">
           <section className="pane pane-list" id="pane-list" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-list" : undefined} aria-label={narrow ? undefined : "Sessions"}>
-            <StartForm ref={startForm} off={off} />
+            <StartForm ref={startForm} off={off} preset={preset} />
             <h2 className="list-title">
               Claude Code sessions <span className="count">({agents.length})</span>
             </h2>
@@ -420,7 +463,7 @@ function App() {
 
           <section className="pane pane-office" id="pane-office" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-office" : undefined}>
             <OfficeCanvas agents={agents} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
-            {current && !hubOpen && narrow && !expanded && (
+            {current && !hubOpen && !researchOpen && narrow && !expanded && (
               <button type="button" className="peek" onClick={() => setExpanded(true)}>
                 <strong>{current.name}</strong> · {STATUS_WORD[current.status]} · Details
               </button>
@@ -428,7 +471,9 @@ function App() {
           </section>
 
           <div className={`panel-slot${panelOpen ? " open" : ""}`}>
-            {panelOpen && hubOpen ? (
+            {panelOpen && researchOpen ? (
+              <ResearchBoard id={PANEL_ID} demo={demo.active} off={off} headingRef={heading} onClose={close} onHand={handToMaster} />
+            ) : panelOpen && hubOpen ? (
             <HubPanel id={PANEL_ID} vault={shownVault} demo={demo.active} headingRef={heading} onClose={close} onRescan={() => loadVault(true)} />
           ) : panelOpen && current ? (
               <AgentPanel

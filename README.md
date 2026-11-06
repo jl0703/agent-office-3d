@@ -59,7 +59,7 @@ npm run build
 
 The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`. Pre-load requests (prefetch, prerender, anything that is not a page navigation) never use the token up. `npm run dev` generates a random secret per run and gives it to the server only (never to Vite, never logged or written to disk); the token is then derived from it and sessions are signed cookies, so the link can be reopened and sessions survive restarts until you stop `npm run dev`. That is weaker than the one-time token and is meant for development only; `npm start` never sets it. `OFFICE_SESSION_SECRET` (32+ characters) can enable the same mode by hand; a shorter value stops the server at startup.
 
-Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED` (default 8), `MAX_MASTERS` (default 1), `MAX_WORKERS_PER_MASTER` (default 5), `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
+Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED` (default 8), `MAX_MASTERS` (default 1), `MAX_WORKERS_PER_MASTER` (default 5), `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_SWEEP_BUDGET_USD` (default 3), `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
 
 ## Obsidian vault
 
@@ -77,3 +77,25 @@ Set `OFFICE_VAULT_DIR` to a vault folder (absolute path) and the hub shows its n
 - **GitHub tools:** only the researchers (never the Lead, ordinary workers or ordinary masters) get `mcp__github__github_search_repos` and `mcp__github__github_repo`. They run inside the server, talk only to `api.github.com` over https, return metadata only (no README or file contents), cache for 10 minutes and allow 8 GitHub calls a minute for the whole app (the answer is `{"error":"rate_limited","retry_after_s":N}`).
 - **Recently popular repos:** GitHub has no per-day star counts, trending API, or view/clone numbers (owner-only). The tools offer honest proxies instead: `created_after` / `pushed_after` (YYYY-MM-DD, validated), `sort=forks`, and `created_at` plus `stars_per_day` (stars since creation divided by age in days, not stars gained today) on every repo. No new host is used.
 - **`GITHUB_TOKEN`** (optional, read-only, no scopes needed) in `.env` raises GitHub's own limit. It is sent only to `api.github.com`, removed from every worker's environment, and never appears in a tool result, log or event.
+
+## Research department
+
+The research folder is also a standing board of findings, a focus list and a needs profile, all plain notes you can edit in Obsidian. Everything below needs the research folder and the session cookie; without the folder every route answers `400 {"error":"no_research_folder"}`.
+
+```
+<research folder>/
+  findings/<slug>.md      one note per finding (written by the Lead)
+  focus.md                one topic per line, at most 20 lines of 100 characters
+  office-needs.md         free text, at most 4000 characters
+  sweeps/YYYY-MM-DD-sweep.md   the Lead's summary of a sweep
+data/research-decisions.json   your decisions (versioned, atomic, at most 1000)
+```
+
+At startup `findings/` is created and, only if missing, a default `focus.md` and a drafted `office-needs.md`.
+
+- **Finding note:** the file starts with `---`, then `key: value` lines only (no lists, quotes or other YAML; unknown keys are ignored; a key may appear once), then `---`. Keys: `id` (slug `^[a-z0-9][a-z0-9-]{0,79}$`, equal to the file name without `.md`), `kind` (`skill|mcp|repo|idea|technique`), `title` (up to 120), `url` (https only, up to 300, no spaces), `stars` (whole number, optional), `license` (up to 40, optional), `relevance` (1-5), `effort` and `risk` (`low|medium|high`), `found_by` (up to 40), `date` (a real `YYYY-MM-DD`), `why` (one line, up to 400). The body is free text for you and the agents. The server reads only the first 8 KB of regular files that really lie inside `findings/` (links are followed and checked), at most 500 files, and never serves a body; notes that do not fit are skipped and counted in `invalid`. Two notes with the same link show as one card (the newest).
+- **`GET /api/research/findings`** answers `{ "findings": [{ id, kind, title, url, stars?, license?, relevance, effort, risk, found_by, date, why, status, note? }], "invalid": 0 }`, newest first. `status` is `new|looking|adopt|later|reject` (`new` until you decide).
+- **`POST /api/research/findings/:id/decision`** with `{ "status": "...", "note": "..." }` (note optional, up to 300 characters) answers `{ id, status, note? }`; `404` when there is no valid note with that id, `400 invalid_request` for a bad body, `400 too_many_decisions` past 1000 entries. Setting `new` without a note clears the decision.
+- **`GET` and `POST /api/research/config`** read and write `{ "focus": ["..."], "needs": "..." }` (both are always required on write; the answer is the stored value). The two files are written only inside the research folder.
+- **`POST /api/research/sweep`** (no body or `{}`) starts the Research Lead with a prompt the server builds from the focus list, the needs profile and up to 150 known findings with your decisions, and answers `202 { "id" }` (the Lead's session id). The Lead may start up to four researchers (repo-scout, skills-mcp-scout, ideas-scout, integration-analyst), files at most 10 new notes, and writes the sweep summary. Only one at a time: while a research Lead is live the answer is `409 { "reason": "sweep_running" }`. Nothing is installed; adopting is always your decision.
+- **Sweep cap:** `OFFICE_SWEEP_BUDGET_USD` (default 3) is the estimated cost of the Lead and its researchers together since the sweep started. Reaching it stops the Lead and its researchers with the note "Stopped: the sweep usage cap was reached." A session's cost is only counted when its run reports, so the real worst case is the per-run cap ($2) times five sessions, about $10. The per-run, per-session and app caps still apply. The Lead ends when its turn ends, so the next sweep can start without stopping anything by hand.
