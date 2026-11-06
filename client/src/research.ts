@@ -136,3 +136,24 @@ export function demoFindings(): Finding[] {
     { ...base, id: "demo-risky-tool", kind: "repo", title: "Demo: an unmaintained shell wrapper", url: "https://example.com/demo/shell", relevance: 2, effort: "high", risk: "high", why: "Needs shell access, which workers must not have.", status: "reject", license: "GPL-3.0" },
   ];
 }
+
+export const SCHEDULE_MODES = ["off", "daily", "weekly"] as const;
+export type ScheduleMode = (typeof SCHEDULE_MODES)[number];
+export type Schedule = { mode: ScheduleMode; nextRunAt: string | null; lastRunAt: string | null; lastSkipped: { reason: string; at: string } | null };
+
+export async function getSchedule(fetchFn: FetchFn = fetch): Promise<Schedule | null> {
+  try {
+    const res = await fetchFn("/api/research/schedule");
+    if (!res.ok) return null;
+    const d = (await res.json()) as Record<string, unknown>;
+    if (!oneOf(SCHEDULE_MODES, d["mode"])) return null;
+    const skipped = isRecord(d["lastSkipped"]) && typeof d["lastSkipped"]["reason"] === "string" && typeof d["lastSkipped"]["at"] === "string" ? { reason: d["lastSkipped"]["reason"], at: d["lastSkipped"]["at"] } : null;
+    return { mode: d["mode"], nextRunAt: typeof d["nextRunAt"] === "string" ? d["nextRunAt"] : null, lastRunAt: typeof d["lastRunAt"] === "string" ? d["lastRunAt"] : null, lastSkipped: skipped };
+  } catch {
+    return null;
+  }
+}
+
+export const setSchedule = (mode: ScheduleMode, fetchFn: FetchFn = fetch) => send("/api/research/schedule", { mode }, fetchFn);
+
+export const SKIP_WORD: Record<string, string> = { sweep_running: "a sweep was running", master_running: "a master was running", budget: "the usage cap was near", too_many: "too many workers were running", near_cap: "the usage cap was near", error: "something went wrong", no_research_folder: "there is no research folder" };
