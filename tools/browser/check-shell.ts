@@ -300,6 +300,33 @@ try {
     }
   }
 
+  if (run("pastruns")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [scheme, w, h] of [["light", 1440, 900], ["dark", 375, 740]] as const) {
+      const { page, close } = await launchBrowser({ width: w, height: h });
+      await page.emulate({ scheme });
+      await page.viewport(w, h);
+      const server = await login(page);
+      await demo(page, server.base);
+      await page.evaluate(`document.querySelector("[data-hub-button]")?.click()`);
+      await page.wait(600);
+      await page.evaluate(`document.querySelector(".peek")?.click()`);
+      await page.wait(400);
+      const info = await page.evaluate<string>(`JSON.stringify({ runs: document.querySelectorAll(".past-runs > li").length, filter: Boolean(document.querySelector(".panel select")) })`);
+      expect(info.includes('"runs":2') && info.includes('"filter":true'), `pastruns(${scheme}): runs listed with a project filter ${info}`);
+      await page.evaluate(`document.querySelector(".past-runs summary")?.click()`);
+      await page.wait(200);
+      const again = await page.evaluate<boolean>(`Boolean([...document.querySelectorAll(".past-runs button")].find((b) => b.textContent.includes("Plan again like this")))`);
+      expect(again, `pastruns(${scheme}): a run can be planned again`);
+      await page.screenshot(join(out, `pastruns-${scheme}.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
+      expect(violations.length === 0, `pastruns(${scheme}): axe: ${violations.join(", ")}`);
+      console.log(`pastruns(${scheme}): ${info} axe=${violations.length}`);
+      await close();
+    }
+  }
+
   if (run("axe")) {
     const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
     for (const scheme of ["light", "dark"] as const) {

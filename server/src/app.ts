@@ -9,6 +9,7 @@ import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
+import { listOutcomes } from "./planLog.ts";
 import { AutoApproveBody, type AutoApproveStore } from "./autoApprove.ts";
 import { ModeBody, type Scheduler } from "./schedule.ts";
 import type { Registry } from "./registry.ts";
@@ -38,6 +39,8 @@ type Options = {
   vaultDir?: string;
   /** The research folder: findings, focus and needs notes live here. Without it the research routes answer 400. */
   researchDir?: string;
+  /** The vault's plans-log folder (outcome notes). Without it the outcomes route answers an empty list. */
+  plansLogDir?: string;
   /** The app's data folder, for the decisions file. */
   dataDir?: string;
   /** The scheduled-sweep setting and its timer. Without it the schedule routes answer 404. */
@@ -188,6 +191,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (url.pathname === "/api/vault" && method === "GET") {
         return run(req, res, async () => json(res, 200, await vault.get(url.searchParams.get("refresh") === "1")));
       }
+      if (url.pathname === "/api/outcomes" && method === "GET") return run(req, res, async () => json(res, 200, await listOutcomes(opts.plansLogDir)));
       const history = AGENT_EVENTS.exec(url.pathname);
       if (history?.[1] && method === "GET") {
         const events = opts.registry?.events(history[1]);

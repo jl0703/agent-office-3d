@@ -108,12 +108,41 @@ export async function readRecentOutcomes(dir: string | undefined, project: strin
   for (const name of names) {
     if (out.length >= limit) break;
     const note = await readNote(join(base, name));
-    if (note && note.project === project) out.push(note.past);
+    if (note && note.project === project) out.push({ goal: note.goal, planStatus: note.planStatus, ended: note.ended, result: oneLine(note.result, 160) });
   }
   return out;
 }
 
-async function readNote(path: string): Promise<{ project: string; past: PastOutcome } | null> {
+export const MAX_LISTED_OUTCOMES = 100;
+export const MAX_LISTED_STEPS = 12;
+const SCAN_LISTED = 300;
+export type ListedOutcome = Omit<Outcome, "planStatus" | "costUsd"> & { plan_status: Outcome["planStatus"]; cost_usd: number };
+
+/** The newest notes (up to 100) for the page, plus how many .md files could not be read. Same guards as the brief. */
+export async function listOutcomes(dir: string | undefined): Promise<{ outcomes: ListedOutcome[]; invalid: number }> {
+  const none = { outcomes: [], invalid: 0 };
+  if (!dir) return none;
+  let base: string;
+  let entries;
+  try {
+    base = await realpath(dir);
+    entries = await readdir(base, { withFileTypes: true });
+  } catch {
+    return none;
+  }
+  const md = entries.filter((e) => e.name.endsWith(".md"));
+  const good = md.filter((e) => e.isFile() && NOTE_NAME.test(e.name)).map((e) => e.name).sort().reverse().slice(0, SCAN_LISTED);
+  const outcomes: ListedOutcome[] = [];
+  for (const name of good) {
+    const note = await readNote(join(base, name));
+    if (note) outcomes.push({ id: name.slice(0, -3), project: note.project, goal: note.goal, plan_status: note.planStatus, workers: note.workers, cost_usd: note.costUsd, ended: note.ended, date: note.date, steps: note.steps, result: note.result });
+  }
+  return { outcomes: outcomes.slice(0, MAX_LISTED_OUTCOMES), invalid: md.length - outcomes.length };
+}
+
+type Note = Omit<Outcome, "id">;
+
+async function readNote(path: string): Promise<Note | null> {
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.size > MAX_NOTE_BYTES) return null; // not a link, not a folder, not huge
@@ -134,7 +163,16 @@ async function readNote(path: string): Promise<{ project: string; past: PastOutc
     const at = lines.findIndex((l) => l.startsWith("## Result"));
     const quoted = at === -1 ? undefined : lines.slice(at + 1).find((l) => l.startsWith("> "));
     const d = parsed.data;
-    return { project: d.project, past: { goal: d.goal, planStatus: d.plan_status, ended: d.ended, result: oneLine(quoted?.slice(2) ?? "", 160) } };
+    const planAt = lines.indexOf("## Plan");
+    const steps: string[] = [];
+    for (const l of planAt === -1 ? [] : lines.slice(planAt + 1)) {
+      if (!l.startsWith("- ")) break;
+      steps.push(oneLine(l.slice(2), 200));
+    }
+    return {
+      project: d.project, goal: d.goal, planStatus: d.plan_status, workers: Number(d.workers), costUsd: Number(d.cost_usd), ended: d.ended, date: d.date,
+      steps: steps.filter(Boolean).slice(0, MAX_LISTED_STEPS), result: oneLine(quoted?.slice(2) ?? "", 300),
+    };
   } catch {
     return null;
   }

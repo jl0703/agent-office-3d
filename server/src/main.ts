@@ -91,6 +91,7 @@ const app = await startServer({
   supervisor,
   autoApprove,
   ...(researchDir ? { researchDir } : {}),
+  ...(plansLogDir ? { plansLogDir } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),
   dataDir,
