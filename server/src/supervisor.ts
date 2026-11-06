@@ -234,6 +234,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       ...(master ? { phase: m.phase, plan: m.plan } : {}),
       ...(m.team ? { team: m.team } : {}),
       ...(m.owner?.id ? { ownerId: m.owner.id } : {}),
+      ...(m.sweep ? { sweep: true as const } : {}),
     };
   }
 
@@ -848,10 +849,10 @@ export function createSupervisor(opts: SupervisorOptions) {
         registry.setNote(w.id, "Detached after a restart. Press Resume to continue the conversation.");
         detached.set(w.id, { ...w, pid: null, processName: null, pidStartedAt: null });
       }
-      // A master that was running when the app stopped never wrote its note: leave one now. Sweep Leads (research, executing) keep none.
+      // A master that was running when the app stopped never wrote its note: leave one now. Sweep Leads keep none.
       if (opts.plansLogDir) {
         for (const w of stored) {
-          if (!w.phase || w.pid === null || (w.team === "research" && w.phase === "executing")) continue;
+          if (!w.phase || w.pid === null || w.sweep) continue;
           const workers = stored.filter((x) => x.ownerId === w.id).length;
           await writeOutcome(opts.plansLogDir, { id: w.id, date: new Date(now()).toISOString().slice(0, 10), project: w.project, goal: w.task, planStatus: w.plan?.status ?? "none", workers, costUsd: w.costUsdTotal, ended: "stopped", steps: w.plan?.steps ?? [], result: "Cut off by a restart of the office." }).catch(() => log({ event: "plans-log-error", id: w.id, message: "restart note" }));
         }
