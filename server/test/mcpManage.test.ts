@@ -68,7 +68,7 @@ describe("mcp: finding the claude program", () => {
     assert.equal(findClaude({ OFFICE_CLAUDE_BIN: "/nope" }, "linux", has()), null);
     assert.equal(findClaude({ PATH: ["/a", "/b"].join(delimiter) }, "linux", has(join("/b", "claude"))), join("/b", "claude"));
     assert.equal(findClaude({ PATH: "/a" }, "linux", has()), null);
-    const dir = join("C:", "npm");
+    const dir = join("/", "npm"); // no drive letter: the PATH separator on Linux is a colon
     const shim = join(dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
     assert.equal(findClaude({ PATH: dir }, "win32", has(join(dir, "claude.cmd"), shim)), shim);
     assert.equal(findClaude({ PATH: dir }, "win32", has(join(dir, "claude.cmd"))), null, "a .cmd alone cannot be started without a shell");
