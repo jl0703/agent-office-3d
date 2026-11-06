@@ -145,3 +145,18 @@ export async function getAgentResult(id: string, fetchFn: FetchFn = fetch): Prom
     return undefined;
   }
 }
+
+export type AutoApprove = { enabled: boolean; maxCostUsd: number; maxWorkers: number };
+
+export async function getAutoApprove(fetchFn: FetchFn = fetch): Promise<AutoApprove | null> {
+  try {
+    const res = await fetchFn("/api/auto-approve");
+    if (!res.ok) return null;
+    const d = (await res.json()) as Partial<AutoApprove>;
+    return typeof d.enabled === "boolean" && typeof d.maxCostUsd === "number" && typeof d.maxWorkers === "number" ? { enabled: d.enabled, maxCostUsd: d.maxCostUsd, maxWorkers: d.maxWorkers } : null;
+  } catch {
+    return null;
+  }
+}
+
+export const setAutoApprove = (change: Partial<AutoApprove>, fetchFn: FetchFn = fetch) => post("/api/auto-approve", change, fetchFn);

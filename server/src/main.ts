@@ -8,6 +8,7 @@ import { DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD } from "./budget.t
 import { createDecisionStore, ensureResearchLayout } from "./findings.ts";
 import { PLANS_LOG_DIR } from "./planLog.ts";
 import { createGithub } from "./github.ts";
+import { createAutoApproveStore } from "./autoApprove.ts";
 import { createScheduleStore, createScheduler } from "./schedule.ts";
 import { DEFAULT_SWEEP_BUDGET_USD, sweepPromptFor } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
@@ -52,8 +53,10 @@ const plansLogDir = vaultDir && isAbsolute(vaultDir) ? join(vaultDir, "agent-wor
 const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
+const autoApprove = createAutoApproveStore(dataDir);
 const supervisor = createSupervisor({
   registry,
+  autoApprove,
   query,
   roots,
   ...(researchDir ? { researchDir } : {}),
@@ -86,6 +89,7 @@ const app = await startServer({
   staticDir: fileURLToPath(new URL("../../client/dist", import.meta.url)),
   registry,
   supervisor,
+  autoApprove,
   ...(researchDir ? { researchDir } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),

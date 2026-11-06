@@ -22,6 +22,7 @@ import { assignRooms, emptyAssignment, roomName } from "./office/rooms.ts";
 import { useDemo, useMediaQuery } from "./office/hooks.ts";
 import { OfficeCanvas } from "./office/OfficeCanvas.tsx";
 import { selection, useSelection } from "./office/selection.ts";
+import { AutoApprove } from "./AutoApprove.tsx";
 import { StartForm, type StartPreset } from "./StartForm.tsx";
 import { STATUS_WORD } from "./StatusChip.tsx";
 import "./theme/tokens.css";
@@ -440,6 +441,7 @@ function App() {
         <div className="workspace">
           <section className="pane pane-list" id="pane-list" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-list" : undefined} aria-label={narrow ? undefined : "Sessions"}>
             <StartForm ref={startForm} off={off} preset={preset} />
+            <AutoApprove off={demo.active ? "Not available in demo mode." : off} />
             <h2 className="list-title">
               Claude Code sessions <span className="count">({agents.length})</span>
             </h2>

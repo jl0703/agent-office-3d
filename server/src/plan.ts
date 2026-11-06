@@ -19,7 +19,7 @@ export const PLAN_NOTE = /^[^\p{Cc}\p{Cf}\u2028\u2029\uFFFD]*$/u;
 export const PlanNote = z.string().max(500).regex(PLAN_NOTE);
 
 export const PlanStatus = z.enum(["pending", "approved", "changes", "rejected"]);
-export const StoredPlan = PlanInput.extend({ status: PlanStatus, note: PlanNote.optional() }).strict();
+export const StoredPlan = PlanInput.extend({ status: PlanStatus, note: PlanNote.optional(), auto: z.boolean().optional() }).strict();
 export const Phase = z.enum(["planning", "executing"]);
 
 export const PlanBody = z.object({ decision: z.enum(["approve", "changes", "reject"]), note: PlanNote.optional() }).strict();

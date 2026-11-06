@@ -25,7 +25,7 @@ export function PlanCard({ agent, plan, off }: { agent: Agent; plan: Plan; off: 
   return (
     <section className="plan-card" aria-label="Plan">
       <h3>
-        Plan <span className={`plan-status plan-${plan.status}`}>{STATUS_WORD[plan.status]}</span>
+        Plan <span className={`plan-status plan-${plan.status}`}>{plan.auto && plan.status === "approved" ? "Approved automatically by your rule" : STATUS_WORD[plan.status]}</span>
       </h3>
       <p>{plan.goal}</p>
       <ol>

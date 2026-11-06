@@ -24,7 +24,7 @@ export type OfficeApi = {
   wait(ids: string[] | undefined, seconds: number): Promise<Reply>;
   stop(id: string): Promise<Reply>;
   list(): Reply;
-  submitPlan(plan: z.infer<typeof PlanInput>): Reply;
+  submitPlan(plan: z.infer<typeof PlanInput>): Reply | Promise<Reply>;
 };
 
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
@@ -71,7 +71,7 @@ export function createOfficeServer(api: OfficeApi) {
         "submit_plan",
         "Submit your plan for the owner's approval while you are in the planning phase. Submitting again replaces the plan. Afterwards end your turn and wait for the decision.",
         PlanInput.shape,
-        async (args) => text(api.submitPlan(args)),
+        async (args) => text(await api.submitPlan(args)),
       ),
     ],
   });

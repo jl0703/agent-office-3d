@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { filesInsideFolder, type AutoApprove, type AutoApproveStore } from "./autoApprove.ts";
 import { buildBrief } from "./brief.ts";
 import type { DecisionStore } from "./findings.ts";
 import { writeOutcome } from "./planLog.ts";
@@ -15,6 +16,7 @@ import { lockdownOptions, MAX_BUDGET_USD, MAX_TURNS } from "./lockdown.ts";
 import { cleanTmp, freshOnly, loadStore, saveStore, type StoredWorker } from "./managedStore.ts";
 import { createOfficeServer, MASTER_SYSTEM_PROMPT, MAX_RESULT_CHARS, PLAN_FIRST_PROMPT, MAX_WAIT_SECONDS, OFFICE_SERVER, OFFICE_TOOL_NAMES, type OfficeApi, type Reply } from "./officeTools.ts";
 import type { Plan } from "../../shared/events.ts";
+import { PlanInput } from "./plan.ts";
 import { isInside, resolveAllowedFolder } from "./paths.ts";
 import { inspectProcess, killLeftovers, type ProcessInfo } from "./processInfo.ts";
 import type { Registry } from "./registry.ts";
@@ -80,6 +82,8 @@ export type SupervisorOptions = {
   plansLogDir?: string;
   /** The owner's decisions on findings, for the context brief. */
   decisions?: DecisionStore;
+  /** The owner's auto-approve rule for plans. Without it every plan waits for the owner. */
+  autoApprove?: AutoApproveStore;
   /** GitHub client for the research workers' tools. */
   github?: Github;
   sessionBudgetUsd?: number;
@@ -654,7 +658,7 @@ export function createSupervisor(opts: SupervisorOptions) {
   }
 
   /** The owner's decision on a master's pending plan. */
-  function decidePlan(id: string, decision: "approve" | "changes" | "reject", note?: string): CommandResult {
+  function decidePlan(id: string, decision: "approve" | "changes" | "reject", note?: string, auto = false): CommandResult {
     const m = byId.get(id);
     if (!m || m.role !== "master") return { ok: false, status: 404, code: "not_found" };
     if (m.state !== "running") return { ok: false, status: 409, code: "stopped" };
@@ -662,19 +666,48 @@ export function createSupervisor(opts: SupervisorOptions) {
     if (decision !== "reject" && budget.refuses(sessionCost(m))) return { ok: false, status: 429, code: "budget" };
     const status = decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "changes";
     const text = note ? clean(note) : "";
-    m.plan = { ...m.plan, status, ...(text ? { note: text } : {}) };
+    const base = { ...m.plan };
+    delete base.auto;
+    m.plan = { ...base, status, ...(text ? { note: text } : {}), ...(auto ? { auto: true } : {}) };
     if (decision === "approve") m.phase = "executing";
     registry.setPlan(id, m.phase, m.plan);
     log({ event: "managed-plan", id, decision });
+    const approved = auto ? "Your plan was approved automatically by the owner's rule. Go ahead." : "Your plan was approved. Go ahead.";
     if (decision === "reject") {
       m.endNote = "Plan rejected.";
       void terminate(m);
       persist();
     } else {
-      m.task = clean(decision === "approve" ? "Your plan was approved. Go ahead." : `The owner asked for changes${text ? `: ${text}` : ""}. Revise and submit_plan again.`);
-      deliver(m, id, decision === "approve" ? "Your plan was approved. Go ahead." : `The owner asked for changes${text ? `: ${text}` : ""}. Revise and submit_plan again.`);
+      const message = decision === "approve" ? approved : `The owner asked for changes${text ? `: ${text}` : ""}. Revise and submit_plan again.`;
+      m.task = clean(message);
+      deliver(m, id, message);
     }
     return { ok: true };
+  }
+
+  /**
+   * The owner's opt-in rule. The plan's numbers are the master's own claim, so they only decide whether the owner is asked:
+   * the real caps and the folder guard still apply to everything the master does afterwards.
+   */
+  async function autoApprove(m: Managed, plan: Plan) {
+    const needsOwner = (reason: string) => log({ event: "plan-needs-owner", id: m.id, reason });
+    const unqualified = (rule: AutoApprove | undefined) =>
+      !rule?.enabled ? "disabled" : plan.costUsd > rule.maxCostUsd ? "cost" : plan.workers > rule.maxWorkers ? "workers" : null;
+    try {
+      if (!m.id || m.sweep) return needsOwner("sweep");
+      const first = unqualified(await opts.autoApprove?.get());
+      if (first) return needsOwner(first);
+      if (!(await filesInsideFolder(plan.files, m.cwd))) return needsOwner("files");
+      // The owner may have switched the rule off or decided, or the master replaced the plan, while the files were checked.
+      const last = unqualified(await opts.autoApprove?.get());
+      if (last) return needsOwner(last);
+      if (m.plan !== plan) return needsOwner("changed");
+      const res = decidePlan(m.id, "approve", undefined, true);
+      if (!res.ok) return needsOwner(res.code);
+      log({ event: "plan-auto-approved", id: m.id });
+    } catch (error) {
+      log({ event: "plan-auto-error", id: m.id, message: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   const REFUSALS: Record<string, string> = {
@@ -740,12 +773,13 @@ export function createSupervisor(opts: SupervisorOptions) {
       list() {
         return { ok: true, data: { workers: ownedBy(owner).map((w) => ({ ...row(w), task: w.task })) } };
       },
-      submitPlan(plan) {
+      async submitPlan(plan) {
         if (owner.phase !== "planning") return { ok: false, error: "Your plan is already approved; no new plan is needed." };
         if (owner.plan?.status === "pending") return { ok: false, error: "Your plan is already waiting for the owner's decision. Wait for it; do not submit again." };
-        owner.plan = { ...plan, status: "pending" };
+        owner.plan = { ...PlanInput.parse(plan), status: "pending" }; // only the plan fields: nothing stored can ride along
         if (owner.id) registry.setPlan(owner.id, owner.phase, owner.plan);
         persist();
+        await autoApprove(owner, owner.plan);
         return { ok: true, data: { status: "pending", message: "Plan received. Wait for the owner's decision: end your turn now and do not start workers. The decision arrives as your next message." } };
       },
     };
