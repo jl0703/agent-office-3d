@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { filesInsideFolder, type AutoApprove, type AutoApproveStore } from "./autoApprove.ts";
+import { filesInsideFolder, namesOutsidePath, type AutoApprove, type AutoApproveStore } from "./autoApprove.ts";
 import { buildBrief } from "./brief.ts";
 import type { DecisionStore } from "./findings.ts";
 import { writeOutcome } from "./planLog.ts";
@@ -701,6 +701,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       const first = unqualified(await opts.autoApprove?.get());
       if (first) return needsOwner(first);
       if (!(await filesInsideFolder(plan.files, m.cwd))) return needsOwner("files");
+      if (namesOutsidePath(plan)) return needsOwner("paths");
       // The owner may have switched the rule off or decided, or the master replaced the plan, while the files were checked.
       const last = unqualified(await opts.autoApprove?.get());
       if (last) return needsOwner(last);
