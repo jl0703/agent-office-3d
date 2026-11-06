@@ -42,8 +42,8 @@ export type Finding = {
 export type FindingView = Finding & { status: Status; note?: string };
 
 // Control, format (bidi, zero-width) and line-separator characters never belong in a one-line field.
-const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029\uFFFD]/u;
-const UNSAFE_G = new RegExp(UNSAFE.source, "gu");
+export const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029\uFFFD]/u;
+export const UNSAFE_G = new RegExp(UNSAFE.source, "gu");
 const LINE = /^([A-Za-z_][A-Za-z0-9_-]{0,39}):[ ]*(.*)$/;
 
 const oneLine = (max: number) => z.string().min(1).max(max).refine((v) => !UNSAFE.test(v));
@@ -78,8 +78,8 @@ function isRealDate(value: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(value);
 }
 
-/** Parses the frontmatter of one note's first bytes. Returns null for anything that is not exactly the documented format. */
-export function parseFrontmatter(head: string, fileId: string): Finding | null {
+/** The strict "key: value" lines of a note's frontmatter, or null for anything else. */
+export function parseKeyLines(head: string): Map<string, string> | null {
   if (head.includes("\0")) return null;
   const lines = head.split("\n").map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
   if (lines[0] !== "---") return null;
@@ -94,6 +94,13 @@ export function parseFrontmatter(head: string, fileId: string): Finding | null {
     if (!m || key === undefined || raw.has(key)) return null; // not "key: value", or a repeated key
     raw.set(key, (m[2] ?? "").trim());
   }
+  return raw;
+}
+
+/** Parses the frontmatter of one note's first bytes. Returns null for anything that is not exactly the documented format. */
+export function parseFrontmatter(head: string, fileId: string): Finding | null {
+  const raw = parseKeyLines(head);
+  if (!raw) return null;
   const parsed = Fields.safeParse({
     id: raw.get("id"),
     kind: raw.get("kind"),

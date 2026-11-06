@@ -5,7 +5,8 @@ import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer } from "./app.ts";
 import { DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD } from "./budget.ts";
-import { ensureResearchLayout } from "./findings.ts";
+import { createDecisionStore, ensureResearchLayout } from "./findings.ts";
+import { PLANS_LOG_DIR } from "./planLog.ts";
 import { createGithub } from "./github.ts";
 import { DEFAULT_SWEEP_BUDGET_USD } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
@@ -45,6 +46,9 @@ if (researchSetting && isAbsolute(researchSetting)) {
 }
 
 const dataDir = process.env["OFFICE_DATA_DIR"] || fileURLToPath(new URL("../../data", import.meta.url));
+// Outcome notes of ended masters go next to the research folder, in the vault only.
+const plansLogDir = vaultDir && isAbsolute(vaultDir) ? join(vaultDir, "agent-workspace", PLANS_LOG_DIR) : undefined;
+const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
 const supervisor = createSupervisor({
@@ -52,6 +56,8 @@ const supervisor = createSupervisor({
   query,
   roots,
   ...(researchDir ? { researchDir } : {}),
+  ...(plansLogDir ? { plansLogDir } : {}),
+  ...(decisions ? { decisions } : {}),
   github: createGithub({ token: process.env["GITHUB_TOKEN"] }),
   env: process.env,
   maxManaged: numberFromEnv("MAX_MANAGED", 8, 1, 20),
@@ -72,6 +78,7 @@ const app = await startServer({
   registry,
   supervisor,
   ...(researchDir ? { researchDir } : {}),
+  ...(decisions ? { decisions } : {}),
   dataDir,
   ...(process.env["OFFICE_VAULT_DIR"] ? { vaultDir: process.env["OFFICE_VAULT_DIR"] } : {}),
 });
