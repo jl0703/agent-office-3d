@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { forwardRef, useId, useState, type FormEvent } from "react";
+import { forwardRef, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { startMaster, startResearch, startWorker } from "./api.ts";
 
 type Kind = "worker" | "master" | "research";
@@ -29,7 +29,9 @@ const COPY: Record<Kind, { summary: string; note: string; label: string; button:
 };
 
 /** The form that starts a worker or a master. `off` is the reason it is switched off, or null. */
-export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null }>(function StartForm({ off }, ref) {
+export type StartPreset = { prompt: string; nonce: number };
+
+export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null; preset?: StartPreset | null }>(function StartForm({ off, preset }, ref) {
   const [kind, setKind] = useState<Kind>("worker");
   const [cwd, setCwd] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -38,6 +40,15 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null }>(
   const folderId = useId();
   const promptId = useId();
   const copy = COPY[kind];
+  const innerRef = useRef<HTMLDetailsElement | null>(null);
+
+  // A finding handed to a master fills the form (as a master's goal) and opens it; the person still has to press Start.
+  useEffect(() => {
+    if (!preset) return;
+    setKind("master");
+    setPrompt(preset.prompt);
+    if (innerRef.current) innerRef.current.open = true;
+  }, [preset?.nonce]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -54,7 +65,14 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null }>(
   }
 
   return (
-    <details className="start" ref={ref}>
+    <details
+      className="start"
+      ref={(el) => {
+        innerRef.current = el;
+        if (typeof ref === "function") ref(el);
+        else if (ref) ref.current = el;
+      }}
+    >
       <summary>
         <Plus size={20} strokeWidth={1.75} aria-hidden="true" /> Start a worker or master
       </summary>

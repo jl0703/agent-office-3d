@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|research|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|research|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -241,6 +241,36 @@ try {
     expect(violations.length === 0, `filter: axe: ${violations.join(", ")}`);
     console.log(`filter: rows ${all} -> search ${some} -> chip ${byStatus}, status="${status}", axe=${violations.length}`);
     await close();
+  }
+
+  if (run("research")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const scheme of ["light", "dark"] as const) {
+      const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+      await page.emulate({ scheme });
+      await page.viewport(1440, 900);
+      const server = await login(page);
+      await demo(page, server.base);
+      await page.evaluate(`[...document.querySelectorAll(".app-actions button")].find((b) => b.textContent.includes("Research"))?.click()`);
+      await page.wait(600);
+      const cards = await page.evaluate<number>(`document.querySelectorAll(".finding").length`);
+      expect(cards === 4, `research(${scheme}): board shows the demo findings (${cards})`);
+      await page.screenshot(join(out, `research-${scheme}.png`));
+      // Judge a finding: Looking, then hand it to a master.
+      await page.evaluate(`document.querySelector(".finding .decisions button:nth-child(2)")?.click()`);
+      await page.wait(300);
+      const pressed = await page.evaluate<number>(`document.querySelectorAll(".finding .decisions button[aria-pressed=true]").length`);
+      expect(pressed === 4, `research(${scheme}): each card shows its decision (${pressed})`);
+      const hand = await page.evaluate<boolean>(`Boolean([...document.querySelectorAll(".finding button")].find((b) => b.textContent.includes("Hand to a master")))`);
+      expect(hand, `research(${scheme}): a finding being looked at can be handed to a master`);
+      const links = await page.evaluate<string[]>(`[...document.querySelectorAll(".finding h3 a")].map((a) => a.rel + " " + a.target)`);
+      expect(links.length > 0 && links.every((l) => l.includes("noopener") && l.includes("_blank")), `research(${scheme}): links open safely`);
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ") + " :: " + (n.any[0] && n.any[0].message || "")).join(" | ")))`);
+      expect(violations.length === 0, `research(${scheme}): axe: ${violations.join(", ")}`);
+      console.log(`research(${scheme}): cards=${cards} pressed=${pressed} axe=${violations.length}`);
+      await close();
+    }
   }
 
   if (run("axe")) {

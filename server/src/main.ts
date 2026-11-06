@@ -5,7 +5,9 @@ import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer } from "./app.ts";
 import { DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD } from "./budget.ts";
+import { ensureResearchLayout } from "./findings.ts";
 import { createGithub } from "./github.ts";
+import { DEFAULT_SWEEP_BUDGET_USD } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
 import { createRegistry } from "./registry.ts";
 import { createSupervisor } from "./supervisor.ts";
@@ -34,6 +36,7 @@ let researchDir: string | undefined;
 if (researchSetting && isAbsolute(researchSetting)) {
   try {
     await mkdir(researchSetting, { recursive: true });
+    await ensureResearchLayout(researchSetting);
     researchDir = researchSetting;
     roots.push(researchDir);
   } catch {
@@ -41,6 +44,7 @@ if (researchSetting && isAbsolute(researchSetting)) {
   }
 }
 
+const dataDir = process.env["OFFICE_DATA_DIR"] || fileURLToPath(new URL("../../data", import.meta.url));
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
 const supervisor = createSupervisor({
@@ -53,10 +57,11 @@ const supervisor = createSupervisor({
   maxManaged: numberFromEnv("MAX_MANAGED", 8, 1, 20),
   maxMasters: numberFromEnv("MAX_MASTERS", 1, 1, 5),
   maxWorkersPerMaster: numberFromEnv("MAX_WORKERS_PER_MASTER", 5, 1, 19),
-  dataDir: process.env["OFFICE_DATA_DIR"] || fileURLToPath(new URL("../../data", import.meta.url)),
+  dataDir,
   projectsDir,
   sessionBudgetUsd: numberFromEnv("OFFICE_SESSION_BUDGET_USD", DEFAULT_SESSION_BUDGET_USD, 0.01, 1000),
   totalBudgetUsd: numberFromEnv("OFFICE_TOTAL_BUDGET_USD", DEFAULT_TOTAL_BUDGET_USD, 0.01, 10_000),
+  sweepBudgetUsd: numberFromEnv("OFFICE_SWEEP_BUDGET_USD", DEFAULT_SWEEP_BUDGET_USD, 0.01, 1000),
 });
 const app = await startServer({
   port: numberFromEnv("OFFICE_PORT", 4777, 1, 65535),
@@ -66,6 +71,8 @@ const app = await startServer({
   staticDir: fileURLToPath(new URL("../../client/dist", import.meta.url)),
   registry,
   supervisor,
+  ...(researchDir ? { researchDir } : {}),
+  dataDir,
   ...(process.env["OFFICE_VAULT_DIR"] ? { vaultDir: process.env["OFFICE_VAULT_DIR"] } : {}),
 });
 

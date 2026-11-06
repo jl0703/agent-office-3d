@@ -1,11 +1,14 @@
 // What needs the person's attention, worked out from the agents the page already has.
 import type { Agent } from "../../shared/events.ts";
 
-export type AttentionKind = "error" | "cap" | "waiting" | "result";
+export type AttentionKind = "error" | "cap" | "waiting" | "result" | "research";
 
 export type Attention = { id: string; kind: AttentionKind; name: string; text: string };
 
-const ORDER: Record<AttentionKind, number> = { error: 0, cap: 1, waiting: 2, result: 3 };
+const ORDER: Record<AttentionKind, number> = { error: 0, cap: 1, waiting: 2, result: 3, research: 4 };
+
+/** The id of the research entry: choosing it opens the research board, not an agent. */
+export const RESEARCH_ID = "research-board";
 const FINISHED = ["idle", "done", "stopped"] as const;
 
 const short = (text: string, max = 90) => {
@@ -34,7 +37,7 @@ export function trackFinished(previous: ReadonlyMap<string, Agent["status"]>, ag
 }
 
 /** The things to show in the "Needs you" list, most urgent first. */
-export function attentionOf(agents: readonly Agent[], unseen: ReadonlySet<string>): Attention[] {
+export function attentionOf(agents: readonly Agent[], unseen: ReadonlySet<string>, newFindings = 0): Attention[] {
   const items: Attention[] = [];
   for (const a of agents) {
     if (a.status === "error") items.push({ id: a.id, kind: "error", name: a.name, text: short(a.note ?? a.activity ?? "Open it to see what went wrong") });
@@ -42,6 +45,7 @@ export function attentionOf(agents: readonly Agent[], unseen: ReadonlySet<string
     else if (a.status === "waiting") items.push({ id: a.id, kind: "waiting", name: a.name, text: short(a.note ?? "Open it to see why") });
     else if (unseen.has(a.id)) items.push({ id: a.id, kind: "result", name: a.name, text: "Finished: the result is ready" });
   }
+  if (newFindings > 0) items.push({ id: RESEARCH_ID, kind: "research", name: "Research department", text: `${newFindings} new ${newFindings === 1 ? "finding" : "findings"} to judge` });
   return items.sort((x, y) => ORDER[x.kind] - ORDER[y.kind] || x.name.localeCompare(y.name) || x.id.localeCompare(y.id));
 }
 

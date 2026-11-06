@@ -16,6 +16,7 @@ import { inspectProcess, killLeftovers, type ProcessInfo } from "./processInfo.t
 import type { Registry } from "./registry.ts";
 import { RESEARCH_LEAD_PROMPT, RESEARCHER_PROMPT } from "./research.ts";
 import { clean, parseValue } from "./transcript.ts";
+import { DEFAULT_SWEEP_BUDGET_USD, SWEEP_CAP_NOTE } from "./sweep.ts";
 import { transcriptActive } from "./transcriptActivity.ts";
 
 /** The SDK's `query` function. Passed in so tests can use a scripted stand-in. */
@@ -23,13 +24,13 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 /** A research team's master: the folder is optional and defaults to the research folder. */
-export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research" };
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true };
 export type StartResult =
   | { ok: true; id: string }
   | {
       ok: false;
       status: 400 | 403 | 409 | 429 | 502;
-      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder";
+      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running";
     };
 
 export type CommandResult =
@@ -75,11 +76,16 @@ export type SupervisorOptions = {
   github?: Github;
   sessionBudgetUsd?: number;
   totalBudgetUsd?: number;
+  /** Estimated cost one research sweep (its Lead and researchers together) may reach. */
+  sweepBudgetUsd?: number;
   inspect?: (pid: number) => Promise<ProcessInfo | null>;
   killTree?: (pid: number) => Promise<void>;
   now?: () => number;
   log?: (line: Record<string, unknown>) => void;
 };
+
+/** What one sweep has spent so far, shared by its Lead and the researchers the Lead started. */
+type Sweep = { spent: number; capUsd: number; lead: Managed | null };
 
 type Managed = {
   id: string | null;
@@ -103,6 +109,7 @@ type Managed = {
   role: "worker" | "master";
   /** Set for a research team's master and the workers it starts. */
   team: "research" | null;
+  sweep: Sweep | null;
   /** The master that started this worker. Set by the server, never by a model. */
   owner: Managed | null;
   /** Final text of the last finished task, at most MAX_RESULT_CHARS. In memory only. */
@@ -128,7 +135,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; owner?: Managed | null; team?: Managed["team"] };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -142,6 +149,7 @@ export function createSupervisor(opts: SupervisorOptions) {
   const now = opts.now ?? Date.now;
   const inspect = opts.inspect ?? inspectProcess;
   const log = opts.log ?? ((line) => console.log(JSON.stringify(line)));
+  const sweepBudgetUsd = opts.sweepBudgetUsd ?? DEFAULT_SWEEP_BUDGET_USD;
   const budget = createBudget({
     runUsd: MAX_BUDGET_USD,
     sessionUsd: opts.sessionBudgetUsd ?? DEFAULT_SESSION_BUDGET_USD,
@@ -272,6 +280,14 @@ export function createSupervisor(opts: SupervisorOptions) {
     void terminate(m);
   }
 
+  /** The sweep is out of budget: the Lead stops, and with it every researcher. */
+  function stopSweep(sweep: Sweep) {
+    log({ event: "managed-cap", id: sweep.lead?.id ?? null, cap: "sweep" });
+    if (!sweep.lead) return;
+    sweep.lead.endNote = SWEEP_CAP_NOTE;
+    void terminate(sweep.lead);
+  }
+
   /** A resumed run took over its conversation: the earlier record of it is replaced. */
   function adopt(m: Managed, id: string) {
     const old = byId.get(id);
@@ -346,14 +362,21 @@ export function createSupervisor(opts: SupervisorOptions) {
       const run = message.total_cost_usd;
       if (Number.isFinite(run) && run > m.runCost) {
         budget.add(run - m.runCost);
+        if (m.sweep) m.sweep.spent += run - m.runCost;
         m.runCost = run;
       }
       registry.setUsd(m.id, cents(sessionCost(m)));
       log({ event: "managed-turn-end", id: m.id, subtype: message.subtype });
+      if (m.sweep && m.sweep.spent >= m.sweep.capUsd) return stopSweep(m.sweep);
       const cap = message.subtype === "error_max_budget_usd" ? "run" : budget.reached(m.runCost, sessionCost(m));
       if (cap) return capReached(m, cap);
       m.updatedAt = now();
       persist();
+      // The Lead waits for its researchers inside one turn, so its result ends the sweep: free the slot for the next one.
+      if (m.sweep?.lead === m) {
+        log({ event: "sweep-end", id: m.id, subtype: message.subtype, spent: Math.round(m.sweep.spent * 100) / 100, result: (m.result ?? "").slice(0, 300) });
+        void terminate(m);
+      }
     }
   }
 
@@ -406,6 +429,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       forgetTimer: null,
       role: "worker",
       team: null,
+      sweep: null,
       owner: null,
       result: null,
       lastText: "",
@@ -514,6 +538,7 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
     // No await between these checks and adding the session, so two starts cannot both pass.
     if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
     if (owner && owner.state !== "running") return refuse(409, "master_stopped");
+    if (req.sweep && live().some((x) => x.role === "master" && x.team === "research")) return refuse(409, "sweep_running");
     if (role === "master" && live().filter((x) => x.role === "master").length >= maxMasters) return refuse(409, "master_running");
     if (owner && ownedBy(owner).filter((w) => w.state !== "ended").length >= maxWorkersPerMaster) return refuse(429, "worker_limit");
     if (live().length >= maxManaged) return refuse(429, "too_many");
@@ -527,7 +552,9 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       role,
       owner,
       team,
+      sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
+    if (m.sweep && !owner) m.sweep.lead = m;
     const id = await launch(m, req.prompt);
     return id ? { ok: true, id } : { ok: false, status: 502, code: "start_failed" };
   }
@@ -625,6 +652,9 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
 
     /** Starts a master: a session with the office tools. Only the page does this, never a model. */
     startMaster: (req: StartMasterRequest) => begin(req, "master", null),
+
+    /** Starts the research Lead on a sweep prompt. One at a time; its team's cost is capped together. */
+    startSweep: (prompt: string) => begin({ prompt, team: "research", name: "Research Lead", sweep: true }, "master", null),
 
     /** Gives an idle worker a new task. Answers at once; the work continues in the background. */
     assign: assignTask,
