@@ -75,6 +75,14 @@ describe("GET /api/outcomes", () => {
     assert.equal(o.result.length, 300);
   });
 
+  it("reads a long note to its end, so the result after a 20 KB plan is still there", async () => {
+    const { log, get } = await rig();
+    const filler = Array.from({ length: 100 }, (_, i) => `- step ${i} ${"x".repeat(190)}`).join("\n");
+    writeFileSync(join(log, "2026-11-06-long.md"), `---\nproject: demo\ngoal: g\nplan_status: none\nworkers: 0\ncost_usd: 0.00\nended: done\ndate: 2026-11-06\n---\n## Plan\n${filler}\n\n## Result (untrusted)\n> the end\n`);
+    const o = (await get()).body.outcomes[0] as { result: string };
+    assert.equal(o.result, "the end");
+  });
+
   it("counts symlinked, oversized, badly named and badly formed notes as invalid", async () => {
     const { log, get } = await rig();
     writeFileSync(join(log, "2026-11-06-ok.md"), note("2026-11-06"));
