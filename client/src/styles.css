@@ -1884,3 +1884,16 @@ textarea {
 .card-open:hover {
   background: var(--color-surface-2);
 }
+
+.command-preview {
+  margin: 0;
+  padding: var(--space-2);
+  overflow-x: auto;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+}

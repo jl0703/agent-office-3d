@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addSkill, demoSetup, describeServer, getSetup, matches, removeSkill, SKILL_NAME } from "../src/setup.ts";
+import { addMcp, addSkill, demoSetup, describeServer, getSetup, matches, parseEnv, parseLines, previewMcp, removeMcp, removeSkill, SKILL_NAME } from "../src/setup.ts";
 
 const fake = (status: number, body: unknown) => async () => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Pick<Response, "ok" | "status" | "json">;
 
@@ -56,5 +56,41 @@ describe("adding and removing skills from the page", () => {
       assert.equal(r.ok === false && word.test(r.message), true, JSON.stringify(body));
     }
     assert.deepEqual(["ok-name", "a", "Bad", "a b", "", "-x"].map((n) => SKILL_NAME.test(n)), [true, true, false, false, false, false]);
+  });
+});
+
+describe("MCP servers from the page", () => {
+  const sent = () => {
+    const calls: { path: string; body: Record<string, unknown> }[] = [];
+    const fn = async (path: string, init?: RequestInit) => {
+      calls.push({ path, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return { ok: true, status: 200, json: async () => ({ command: "claude mcp add x" }) } as Pick<Response, "ok" | "status" | "json">;
+    };
+    return { fn, calls };
+  };
+  const input = { name: "x", transport: "stdio" as const, command: "npx", args: ["-y", "x"], env: { K: "v" } };
+
+  it("previews without confirm, adds and removes with confirm, and returns the preview text", async () => {
+    const a = sent();
+    assert.deepEqual(await previewMcp(input, a.fn), { ok: true, command: "claude mcp add x" });
+    assert.deepEqual(a.calls[0], { path: "/api/setup/mcp/preview", body: input });
+    assert.equal("confirm" in (a.calls[0]?.body ?? {}), false);
+    const b = sent();
+    await addMcp(input, b.fn);
+    assert.deepEqual(b.calls[0], { path: "/api/setup/mcp", body: { ...input, confirm: true } });
+    const c = sent();
+    await removeMcp("x", c.fn);
+    assert.deepEqual(c.calls[0], { path: "/api/setup/mcp/remove", body: { name: "x", confirm: true } });
+  });
+
+  it("explains refusals and reads the text boxes", async () => {
+    for (const [status, body, word] of [[409, { reason: "exists" }, /already exists/], [400, { error: "invalid_input" }, /Check the fields/], [500, { error: "failed" }, /claude command did not succeed/]] as const) {
+      const r = await addMcp(input, fake(status, body));
+      assert.equal(r.ok === false && word.test(r.message), true, JSON.stringify(body));
+    }
+    assert.deepEqual(parseLines("a\r\n\n  \nb\n"), ["a", "b"]);
+    assert.deepEqual(parseEnv("A=1\nB=x=y\n"), { A: "1", B: "x=y" });
+    assert.equal(parseEnv("novalue"), null);
+    assert.equal(parseEnv("=x"), null);
   });
 });

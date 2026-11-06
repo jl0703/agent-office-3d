@@ -11,6 +11,7 @@ import { createGithub } from "./github.ts";
 import { createAutoApproveStore } from "./autoApprove.ts";
 import { createScheduleStore, createScheduler } from "./schedule.ts";
 import { buildDigest } from "./digest.ts";
+import { claudeRunner, findClaude } from "./claudeCli.ts";
 import { createWorkshop } from "./workshop.ts";
 import { DEFAULT_SWEEP_BUDGET_USD, sweepPromptFor } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
@@ -54,6 +55,7 @@ const dataDir = process.env["OFFICE_DATA_DIR"] || fileURLToPath(new URL("../../d
 const plansLogDir = vaultDir && isAbsolute(vaultDir) ? join(vaultDir, "agent-workspace", PLANS_LOG_DIR) : undefined;
 const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
 // What a sweep is told about our own setup: skill folder names, MCP server names (never their settings) and recent runs.
+const claudeBin = findClaude(process.env, process.platform);
 const skillsDir = join(homedir(), ".claude", "skills");
 const mcpFile = join(homedir(), ".claude.json");
 const digest = () => buildDigest({ ...(plansLogDir ? { plansLogDir } : {}), skillsDir, mcpFile });
@@ -113,7 +115,7 @@ const app = await startServer({
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
   digest,
-  setup: { skillsDir, mcpFile, dataDir },
+  setup: { skillsDir, mcpFile, dataDir, ...(claudeBin ? { runClaude: claudeRunner(claudeBin) } : {}) },
   ...(workshop && workshopTarget ? { workshop, workshopTargetName: basename(workshopTarget) } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),
