@@ -6,7 +6,7 @@ import { after, describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { startServer, type RunningServer } from "../src/app.ts";
-import { AUTO_APPROVE_FILE, createAutoApproveStore, type AutoApproveStore } from "../src/autoApprove.ts";
+import { AUTO_APPROVE_FILE, createAutoApproveStore, namesOutsidePath, type AutoApproveStore } from "../src/autoApprove.ts";
 import { OFFICE_SERVER } from "../src/officeTools.ts";
 import { createRegistry } from "../src/registry.ts";
 import { createSupervisor } from "../src/supervisor.ts";
@@ -313,5 +313,27 @@ describe("auto-approve: settings", () => {
     const r = await rig();
     const res = await send(r.srv.port, "/api/auto-approve", { method: "GET", headers: { host: `127.0.0.1:${r.srv.port}` } });
     assert.equal(res.status, 403);
+  });
+});
+
+describe("auto-approve: paths named in the plan's words", () => {
+  const withPlan = (over: Partial<typeof validPlan>) => ({ ...validPlan, ...over });
+
+  it("flags a root, home, drive, UNC or `..` path anywhere in the text, and leaves ordinary text alone", () => {
+    for (const text of ["edit /etc/hosts", "copy to C:\\Users\\x", "read ~/notes", "see \\\\server\\share", "open ../other/file", "cd .. && ls", "(/var/log)", "x\\..\\y"]) {
+      assert.equal(namesOutsidePath(withPlan({ steps: [text] })), true, text);
+    }
+    assert.equal(namesOutsidePath(withPlan({ undo: "rm /tmp/x" })), true);
+    assert.equal(namesOutsidePath(withPlan({ goal: "use https://example.com/a and/or src/a.ts, then wait... done" })), false);
+    assert.equal(namesOutsidePath(withPlan({})), false);
+  });
+
+  it("sends a plan with such a path to the owner even when its files list is fine", async () => {
+    const r = await rig();
+    await r.enable();
+    const { id, call } = await r.master();
+    await call("submit_plan", { ...validPlan, steps: ["read the code", "also change /etc/hosts"] });
+    assert.equal(plan(r, id)?.status, "pending");
+    assert.deepEqual(reasons(r), ["paths"]);
   });
 });
