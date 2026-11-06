@@ -357,6 +357,37 @@ try {
     }
   }
 
+  if (run("sidebar")) {
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [scheme, w, h] of [["light", 1440, 900], ["dark", 375, 740]] as const) {
+      const { page, close } = await launchBrowser({ width: w, height: h });
+      await page.emulate({ scheme });
+      await page.viewport(w, h);
+      const server = await login(page);
+      await demo(page, server.base);
+      await page.evaluate(`document.querySelector("[data-sidebar-button]")?.click()`);
+      await page.wait(500);
+      const skills = await page.evaluate<number>(`document.querySelectorAll(".drawer .setup-list li").length`);
+      expect(skills === 3, `sidebar(${scheme}): three demo skills are listed (${skills})`);
+      const expanded = await page.evaluate<string>(`document.querySelector("[data-sidebar-button]")?.getAttribute("aria-expanded") ?? ""`);
+      expect(expanded === "true", `sidebar(${scheme}): the button says it is expanded`);
+      await page.evaluate(`[...document.querySelectorAll(".drawer .chip-filter")].find((b) => b.textContent.includes("MCP"))?.click()`);
+      await page.wait(200);
+      const servers = await page.evaluate<string>(`[...document.querySelectorAll(".drawer .setup-list li")].map((li) => li.textContent).join(" | ")`);
+      expect(servers.includes("demo-files") && servers.includes("headers set") && !servers.includes("SECRET"), `sidebar(${scheme}): servers listed without secrets (${servers})`);
+      await page.screenshot(join(out, `sidebar-${scheme}.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
+      expect(violations.length === 0, `sidebar(${scheme}): axe: ${violations.join(", ")}`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
+      const closed = await page.evaluate<string>(`JSON.stringify({ drawer: Boolean(document.querySelector(".drawer")), focus: document.activeElement?.getAttribute("data-sidebar-button") !== null })`);
+      expect(closed === '{"drawer":false,"focus":true}', `sidebar(${scheme}): Escape closes it and returns focus to the button ${closed}`);
+      console.log(`sidebar(${scheme}): skills=${skills} axe=${violations.length}`);
+      await close();
+    }
+  }
+
   if (run("axe")) {
     const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
     for (const scheme of ["light", "dark"] as const) {
