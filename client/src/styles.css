@@ -1635,3 +1635,231 @@ textarea {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 13px;
 }
+
+.menu-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu-list a {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  color: var(--color-text);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+}
+
+.menu-list a:hover {
+  background: var(--color-surface-2);
+}
+
+.menu-list a[aria-current="page"] {
+  font-weight: 600;
+  border-color: var(--color-border);
+  background: var(--color-surface-2);
+}
+
+.catalog {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4);
+}
+
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.breadcrumb li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+}
+
+.breadcrumb [aria-current="page"] {
+  font-weight: 600;
+}
+
+.catalog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.catalog-head h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.catalog-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+}
+
+.catalog-blurb {
+  max-width: 62ch;
+  margin: var(--space-1) 0;
+  color: var(--color-text-muted);
+}
+
+.catalog-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.catalog-search input {
+  min-width: min(280px, 100%);
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 1000px) {
+  .catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .catalog-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .catalog-head h1 {
+    font-size: 26px;
+  }
+}
+
+.card {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2, 10px);
+}
+
+.card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.card-by {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.card-desc {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  color: var(--color-text);
+}
+
+.card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card-chips li,
+.badge {
+  padding: 2px 10px;
+  font-size: 12px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+}
+
+.card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+
+.item-body {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 70ch;
+}
+
+.item-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.item-facts dt {
+  color: var(--color-text-muted);
+}
+
+.item-facts dd {
+  margin: 0;
+}
+
+.app-title {
+  color: inherit;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+}

@@ -14,7 +14,10 @@ import { UsageMeter } from "./UsageMeter.tsx";
 import { HubPanel } from "./HubPanel.tsx";
 import { NeedsYou } from "./NeedsYou.tsx";
 import { demoFindings, getFindings } from "./research.ts";
+import { CatalogPage, ItemPage } from "./CatalogPage.tsx";
 import { Sidebar } from "./Sidebar.tsx";
+import { hrefFor } from "./route.ts";
+import { useRoute } from "./useRoute.ts";
 import { ResearchBoard } from "./ResearchBoard.tsx";
 import { WorkshopPanel } from "./WorkshopPanel.tsx";
 import { demoVault } from "./vault.ts";
@@ -58,6 +61,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("office");
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const route = useRoute();
   const [hubOpen, setHubOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
   const [workshopOpen, setWorkshopOpen] = useState(false);
@@ -383,8 +387,14 @@ function App() {
   return (
     <div className="app" data-tab={tab}>
       <header className="app-head">
-        <Sidebar demo={demo.active} />
-        <h1>Agent Office</h1>
+        <Sidebar route={route} />
+        {route.page === "office" ? (
+          <h1>Agent Office</h1>
+        ) : (
+          <a className="app-title" href={hrefFor({ page: "office" })}>
+            Agent Office
+          </a>
+        )}
         <ConnectionBadge connection={connection} />
         <UsageMeter usage={demo.active ? { totalUsd: 3.4, caps: { runUsd: 2, sessionUsd: 5, totalUsd: 20 } } : usage} demo={demo.active} />
         <div className="app-actions">
@@ -437,6 +447,7 @@ function App() {
         </div>
       </header>
 
+      {route.page === "office" ? (
       <main className="app-main">
         {demo.active && (
           <p className="demo-banner">
@@ -525,6 +536,11 @@ function App() {
           </div>
         </div>
       </main>
+      ) : route.page === "list" ? (
+        <CatalogPage kind={route.kind} demo={demo.active} />
+      ) : (
+        <ItemPage kind={route.kind} name={route.name} demo={demo.active} onGone={() => (window.location.hash = hrefFor({ page: "list", kind: route.kind }))} />
+      )}
     </div>
   );
 }

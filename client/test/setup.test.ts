@@ -12,7 +12,7 @@ describe("sidebar data", () => {
         mcp: [{ name: "s", type: "stdio", command: "node", argCount: 2, envCount: 1, hasHeaders: false }, { name: "t", type: "weird" }, { name: "u", type: "http", host: "h.example", hasHeaders: true }],
       }),
     );
-    assert.deepEqual(got?.skills, [{ name: "a", description: "d", added: false }]);
+    assert.deepEqual(got?.skills, [{ name: "a", description: "d", added: false, modified: 0 }]);
     assert.deepEqual(got?.mcp.map((m) => m.name), ["s", "u"]);
     assert.equal(await getSetup(fake(403, {})), null);
     assert.equal(await getSetup(fake(200, { skills: [] })), null);

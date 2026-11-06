@@ -1,7 +1,7 @@
 // The owner's skills and user-level MCP servers, as the sidebar shows them. Names and shapes only: the server never sends secrets.
 
 /** `added` is true for skills added from the sidebar, the only ones it can remove. */
-export type Skill = { name: string; description: string; added: boolean };
+export type Skill = { name: string; description: string; added: boolean; modified: number };
 export type McpServer = { name: string; type: "stdio" | "http" | "sse"; command?: string; argCount?: number; host?: string; envCount: number; hasHeaders: boolean };
 export type Setup = { skills: Skill[]; mcp: McpServer[]; canManage: boolean };
 
@@ -10,7 +10,7 @@ type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
 function toSkill(raw: unknown): Skill | null {
-  return isRecord(raw) && typeof raw["name"] === "string" && typeof raw["description"] === "string" ? { name: raw["name"], description: raw["description"], added: raw["added"] === true } : null;
+  return isRecord(raw) && typeof raw["name"] === "string" && typeof raw["description"] === "string" ? { name: raw["name"], description: raw["description"], added: raw["added"] === true, modified: typeof raw["modified"] === "number" ? raw["modified"] : 0 } : null;
 }
 
 function toServer(raw: unknown): McpServer | null {
@@ -56,9 +56,9 @@ export const matches = (text: string, query: string) => text.toLowerCase().inclu
 export function demoSetup(): Setup {
   return {
     skills: [
-      { name: "demo-clean-code", description: "Demo: pragmatic coding standards", added: false },
-      { name: "demo-code-reviewer", description: "Demo: reviews a diff for bugs and style", added: false },
-      { name: "demo-docs-writer", description: "Demo: writes short, accurate documentation", added: true },
+      { name: "demo-clean-code", description: "Demo: pragmatic coding standards", added: false, modified: Date.UTC(2026, 9, 1) },
+      { name: "demo-code-reviewer", description: "Demo: reviews a diff for bugs and style", added: false, modified: Date.UTC(2026, 9, 20) },
+      { name: "demo-docs-writer", description: "Demo: writes short, accurate documentation", added: true, modified: Date.UTC(2026, 10, 5) },
     ],
     mcp: [
       { name: "demo-files", type: "stdio", command: "node", argCount: 2, envCount: 1, hasHeaders: false },
