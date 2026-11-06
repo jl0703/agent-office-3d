@@ -1,7 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer } from "./app.ts";
 import { DEFAULT_SESSION_BUDGET_USD, DEFAULT_TOTAL_BUDGET_USD } from "./budget.ts";
@@ -11,6 +11,7 @@ import { createGithub } from "./github.ts";
 import { createAutoApproveStore } from "./autoApprove.ts";
 import { createScheduleStore, createScheduler } from "./schedule.ts";
 import { buildDigest } from "./digest.ts";
+import { createWorkshop } from "./workshop.ts";
 import { DEFAULT_SWEEP_BUDGET_USD, sweepPromptFor } from "./sweep.ts";
 import { parseRoots } from "./paths.ts";
 import { createRegistry } from "./registry.ts";
@@ -54,12 +55,26 @@ const plansLogDir = vaultDir && isAbsolute(vaultDir) ? join(vaultDir, "agent-wor
 const decisions = researchDir ? createDecisionStore(dataDir) : undefined;
 // What a sweep is told about our own setup: skill folder names, MCP server names (never their settings) and recent runs.
 const digest = () => buildDigest({ ...(plansLogDir ? { plansLogDir } : {}), skillsDir: join(homedir(), ".claude", "skills"), mcpFile: join(homedir(), ".claude.json") });
+// The Workshop builds in a copy of OFFICE_WORKSHOP_TARGET (a folder, set by the owner); without it the Workshop is off.
+const workshopTarget = process.env["OFFICE_WORKSHOP_TARGET"];
+let workshop: ReturnType<typeof createWorkshop> | undefined;
+if (workshopTarget && isAbsolute(workshopTarget)) {
+  const workshopDir = process.env["OFFICE_WORKSHOP_DIR"] || join(dataDir, "workshop");
+  try {
+    await mkdir(workshopDir, { recursive: true });
+    workshop = createWorkshop({ dir: workshopDir, target: workshopTarget });
+    roots.push(workshopDir);
+  } catch {
+    console.error("The workshop folder could not be created; the workshop is off.");
+  }
+}
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
 const autoApprove = createAutoApproveStore(dataDir);
 const supervisor = createSupervisor({
   registry,
   autoApprove,
+  ...(workshop ? { onWorkshopEnd: async (build: string) => void (await workshop?.finish(build)) } : {}),
   query,
   roots,
   ...(researchDir ? { researchDir } : {}),
@@ -96,6 +111,7 @@ const app = await startServer({
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
   digest,
+  ...(workshop && workshopTarget ? { workshop, workshopTargetName: basename(workshopTarget) } : {}),
   ...(decisions ? { decisions } : {}),
   ...(scheduler ? { scheduler } : {}),
   dataDir,

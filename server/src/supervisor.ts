@@ -30,7 +30,7 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 /** A research team's master: the folder is optional and defaults to the research folder. */
-export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A finding id: an Evaluator, which may only create evaluations/<id>.md. */ evaluator?: string };
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A finding id: an Evaluator, which may only create evaluations/<id>.md. */ evaluator?: string; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string };
 export type StartResult =
   | { ok: true; id: string }
   | {
@@ -85,6 +85,8 @@ export type SupervisorOptions = {
   decisions?: DecisionStore;
   /** The owner's auto-approve rule for plans. Without it every plan waits for the owner. */
   autoApprove?: AutoApproveStore;
+  /** Called once a Workshop master and its workers have ended, with the build id, so the office can write the patch. */
+  onWorkshopEnd?: (build: string) => Promise<void>;
   /** GitHub client for the research workers' tools. */
   github?: Github;
   sessionBudgetUsd?: number;
@@ -134,6 +136,8 @@ type Managed = {
   sweep: Sweep | null;
   /** An Evaluator's one allowed file (real path); other sessions have none. */
   writeOnly: string | null;
+  /** The Workshop build this master works on, if any. */
+  workshop: string | null;
   /** The master that started this worker. Set by the server, never by a model. */
   owner: Managed | null;
   /** Final text of the last finished task, at most MAX_RESULT_CHARS. In memory only. */
@@ -159,7 +163,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null; workshop?: string | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -278,6 +282,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     m.updatedAt = now();
     if (m.role === "master") stopWorkersOf(m);
     if (m.role === "master" && !m.sweep && m.id) void logOutcome(m, status);
+    if (m.role === "master" && m.workshop) void finishWorkshop(m, true);
     notify();
     if (m.id) {
       registry.setTerminal(m.id, status);
@@ -290,6 +295,18 @@ export function createSupervisor(opts: SupervisorOptions) {
     } else {
       all.delete(m);
       m.rejectId(new Error("ended before the session started"));
+    }
+  }
+
+  /** Waits (up to 15 s) for a Workshop master's workers to stop, then lets the office write the patch. */
+  async function finishWorkshop(m: Managed, waitForWorkers: boolean) {
+    const build = m.workshop;
+    if (!build || !opts.onWorkshopEnd) return;
+    try {
+      for (let i = 0; waitForWorkers && i < 150 && ownedBy(m).some((w) => w.state !== "ended"); i++) await new Promise((r) => setTimeout(r, 100));
+      await opts.onWorkshopEnd(build);
+    } catch (error) {
+      log({ event: "workshop-end-error", build, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -428,6 +445,8 @@ export function createSupervisor(opts: SupervisorOptions) {
       if (cap) return capReached(m, cap);
       m.updatedAt = now();
       persist();
+      // A Workshop master that has finished a turn after its plan was approved: write the patch now, so it can be reviewed without stopping it.
+      if (m.role === "master" && m.workshop && m.phase === "executing") void finishWorkshop(m, false);
       // The Lead waits for its researchers inside one turn, so its result ends the sweep: free the slot for the next one.
       if (m.sweep?.lead === m) {
         log({ event: "sweep-end", id: m.id, subtype: message.subtype, spent: Math.round(m.sweep.spent * 100) / 100, result: (m.result ?? "").slice(0, 300) });
@@ -492,6 +511,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       team: null,
       sweep: null,
       writeOnly: null,
+      workshop: null,
       owner: null,
       result: null,
       lastText: "",
@@ -626,6 +646,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       team,
       // Every master plans first, except a research sweep's Lead, which starts executing.
       phase: role === "master" && !req.sweep ? "planning" : "executing",
+      workshop: req.workshop ?? null,
       writeOnly: req.evaluator ? join(folder.path, "evaluations", `${req.evaluator}.md`) : null,
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
@@ -704,6 +725,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       !rule?.enabled ? "disabled" : plan.costUsd > rule.maxCostUsd ? "cost" : plan.workers > rule.maxWorkers ? "workers" : null;
     try {
       if (!m.id || m.sweep) return needsOwner("sweep");
+      if (m.workshop) return needsOwner("workshop");
       const first = unqualified(await opts.autoApprove?.get());
       if (first) return needsOwner(first);
       if (!(await filesInsideFolder(plan.files, m.cwd))) return needsOwner("files");

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createWorkshop, type Workshop } from "../src/workshop.ts";
 import { startServer, type RunningServer } from "../src/app.ts";
 import { ensureResearchLayout } from "../src/findings.ts";
 import { createGithub } from "../src/github.ts";
@@ -32,7 +33,7 @@ const fields = (id: string, over: Record<string, string> = {}) => ({
 });
 const noteText = (f: Record<string, string>, body = `${SECRET}\n`) => `---\n${Object.entries(f).map(([k, v]) => `${k}: ${v}`).join("\n")}\n---\n${body}`;
 
-async function rig(opts: { research?: boolean; supervisor?: Partial<SupervisorOptions> } = {}) {
+async function rig(opts: { research?: boolean; supervisor?: Partial<SupervisorOptions>; workshop?: Workshop } = {}) {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "department-")));
   dirs.push(root);
   const research = join(root, "vault", "research");
@@ -48,7 +49,8 @@ async function rig(opts: { research?: boolean; supervisor?: Partial<SupervisorOp
   const supervisor = createSupervisor({
     registry,
     query: f.query,
-    roots: [research],
+    roots: [research, ...(opts.workshop ? [opts.workshop.dir] : [])],
+    ...(opts.workshop ? { onWorkshopEnd: async (b: string) => void (await opts.workshop?.finish(b)) } : {}),
     ...(opts.research === false ? {} : { researchDir: research }),
     github: createGithub({ token: "t", fetch: (async () => new Response("{}")) as unknown as typeof fetch }),
     env: { PATH: "p" },
@@ -60,6 +62,7 @@ async function rig(opts: { research?: boolean; supervisor?: Partial<SupervisorOp
   closers.push(() => supervisor.close());
   const srv: RunningServer = await startServer({
     port: 0, staticDir, registry, supervisor, log: () => {},
+    ...(opts.workshop ? { workshop: opts.workshop, workshopTargetName: "target" } : {}),
     ...(opts.research === false ? {} : { researchDir: research, dataDir: data }),
   });
   closers.push(() => srv.close());
@@ -504,5 +507,58 @@ describe("the fit check (plan 15, R2)", () => {
     assert.equal(byId["wrong-id"], undefined);
     assert.equal(byId["bad-verdict"], undefined);
     assert.equal(byId["two-lines"], undefined);
+  });
+});
+
+describe("the workshop (plan 15, R3)", () => {
+  async function shopRig() {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "shoprig-")));
+    dirs.push(root);
+    const target = join(root, "skills");
+    mkdirSync(join(target, "docs"), { recursive: true });
+    writeFileSync(join(target, "docs", "SKILL.md"), "base\n");
+    const workshop = createWorkshop({ dir: join(root, "shop"), target });
+    const r = await rig({ workshop });
+    r.write("tool-a", { title: "Tool A" });
+    return { ...r, workshop, target };
+  }
+
+  it("builds only an adopted finding, in a copy, with a plan-first master that is never auto-approved", async () => {
+    const r = await shopRig();
+    assert.deepEqual([(await r.post("/api/workshop/build", { findingId: "nope" })).status, (await r.post("/api/workshop/build", {})).status], [404, 400]);
+    const refused = await r.post("/api/workshop/build", { findingId: "tool-a" });
+    assert.deepEqual([refused.status, json(refused)], [409, { reason: "not_adopted" }]);
+    assert.equal((await r.post("/api/research/findings/tool-a/decision", { status: "adopt" })).status, 200);
+    const res = await r.post("/api/workshop/build", { findingId: "tool-a" });
+    assert.equal(res.status, 202);
+    const { id, build } = json(res) as { id: string; build: string };
+    assert.equal(r.registry.get(id)?.phase, "planning");
+    assert.equal(r.calls[0]?.cwd, join(realpathSync(r.workshop.dir), build, "b"));
+    assert.ok(promptOf(r).includes("Tool A"));
+    assert.ok(promptOf(r).includes("Build this improvement inside your folder"));
+    assert.equal(readFileSync(join(r.target, "docs", "SKILL.md"), "utf8"), "base\n", "the target is untouched");
+  });
+
+  it("writes the patch when the master stops, and serves it", async () => {
+    const r = await shopRig();
+    await r.post("/api/research/findings/tool-a/decision", { status: "adopt" });
+    const { id, build } = json(await r.post("/api/workshop/build", { findingId: "tool-a" })) as { id: string; build: string };
+    writeFileSync(join(realpathSync(r.workshop.dir), build, "b", "docs", "SKILL.md"), "base\nmore\n");
+    assert.equal((await r.post(`/api/agents/${id}/stop`)).status, 202);
+    await waitFor(() => r.registry.get(id)?.status === "stopped");
+    let listed: { builds: { id: string; status: string; changed: number }[] } = { builds: [] };
+    for (let i = 0; i < 100 && listed.builds[0]?.status !== "ready"; i++) {
+      listed = json(await r.get("/api/workshop")) as typeof listed;
+      await new Promise((res) => setTimeout(res, 30));
+    }
+    assert.deepEqual([listed.builds[0]?.id, listed.builds[0]?.status, listed.builds[0]?.changed], [build, "ready", 1]);
+    const patch = json(await r.get(`/api/workshop/${build}/patch`)) as { patch: string };
+    assert.match(patch.patch, /^\+more$/m);
+    assert.equal((await r.get("/api/workshop/aaaaaaaaaaaa/patch")).status, 404);
+  });
+
+  it("answers 404 when the workshop is not set up", async () => {
+    const r = await rig();
+    assert.equal((await r.get("/api/workshop")).status, 404);
   });
 });
