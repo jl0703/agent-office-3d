@@ -169,6 +169,7 @@ function App() {
     const now = hrefFor(route);
     if (now === lastRoute.current) return;
     lastRoute.current = now;
+    if (route.page === "office" && (hubOpen || researchOpen || workshopOpen)) return; // an office panel just opened and takes the focus itself
     requestAnimationFrame(() => document.querySelector<HTMLElement>("#catalog-title, .app-head h1")?.focus());
   }, [route]);
 
