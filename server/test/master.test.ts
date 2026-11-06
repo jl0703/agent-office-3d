@@ -9,9 +9,10 @@ import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { checkToolCall } from "../src/folderGuard.ts";
 import { lockdownOptions, MASTER_MAX_TURNS, MAX_TURNS, WORKER_TOOLS } from "../src/lockdown.ts";
 import { loadStore, STORE_FILE } from "../src/managedStore.ts";
-import { MASTER_SYSTEM_PROMPT, OFFICE_SERVER, OFFICE_TOOL_NAMES } from "../src/officeTools.ts";
+import { MASTER_SYSTEM_PROMPT, PLAN_FIRST_PROMPT, OFFICE_SERVER, OFFICE_TOOL_NAMES } from "../src/officeTools.ts";
 import { createRegistry } from "../src/registry.ts";
 import { createSupervisor, type SupervisorOptions } from "../src/supervisor.ts";
+import { validPlan } from "./helpers.ts";
 import { createFake, type FakeOptions } from "./fakeQuery.ts";
 
 const made: string[] = [];
@@ -72,9 +73,15 @@ async function waitFor(check: () => boolean | Promise<boolean>, ms = 3000) {
   assert.fail(`condition not met within ${ms} ms`);
 }
 
-async function startMaster(r: Rig, cwd = r.work) {
+/** Starts a master. By default its plan is submitted and approved, so it may start workers. */
+async function startMaster(r: Rig, cwd = r.work, approve = true) {
   const res = await r.supervisor.startMaster({ cwd, prompt: "the goal" });
   assert.ok(res.ok);
+  if (approve) {
+    const call = await officeFor(r, r.calls.length - 1);
+    assert.equal((await call("submit_plan", validPlan)).error, false);
+    assert.deepEqual(r.supervisor.decidePlan(res.id, "approve"), { ok: true });
+  }
   return res.id;
 }
 
@@ -86,7 +93,15 @@ async function finishTurn(r: Rig, session: number, text = "done", cost = 0.1) {
 }
 
 /** Calls a master's tool the way the model does, through the real in-process tool server of the session. */
+const callers = new Map<Rig, Map<number, Awaited<ReturnType<typeof makeCaller>>>>();
 async function officeFor(r: Rig, session = 0) {
+  const byRig = callers.get(r) ?? new Map();
+  callers.set(r, byRig);
+  if (!byRig.has(session)) byRig.set(session, await makeCaller(r, session));
+  return byRig.get(session) as Awaited<ReturnType<typeof makeCaller>>;
+}
+
+async function makeCaller(r: Rig, session: number) {
   const server = r.calls[session]?.mcpServers?.[OFFICE_SERVER] as { instance: { connect(t: unknown): Promise<void> } } | undefined;
   assert.ok(server, "the session got the office tool server");
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -104,19 +119,21 @@ async function officeFor(r: Rig, session = 0) {
 }
 
 describe("the master session", () => {
-  it("is a master in the list, has exactly the worker tools plus the five office tools, and keeps the lockdown", async () => {
+  it("is a master in the list, has exactly the worker tools plus the six office tools, and keeps the lockdown", async () => {
     const r = rig();
     const id = await startMaster(r);
     assert.equal(r.registry.get(id)?.role, "master");
     assert.equal(r.registry.get(id)?.parentId, null);
     const o = r.calls[0] as Options;
     const expected = [...WORKER_TOOLS, ...OFFICE_TOOL_NAMES];
-    assert.deepEqual(OFFICE_TOOL_NAMES, ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers"].map((n) => `mcp__office__${n}`));
+    assert.deepEqual(OFFICE_TOOL_NAMES, ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers", "submit_plan"].map((n) => `mcp__office__${n}`));
     assert.deepEqual(o.tools, expected);
     assert.deepEqual(o.allowedTools, expected);
     assert.equal(o.strictMcpConfig, true);
     assert.deepEqual(Object.keys(o.mcpServers ?? {}), [OFFICE_SERVER]);
-    assert.deepEqual(o.systemPrompt, { type: "preset", preset: "claude_code", append: MASTER_SYSTEM_PROMPT });
+    assert.deepEqual(o.systemPrompt, { type: "preset", preset: "claude_code", append: `${MASTER_SYSTEM_PROMPT}
+
+${PLAN_FIRST_PROMPT}` });
     for (const key of ["permissionMode", "settingSources", "disallowedTools", "maxBudgetUsd"] as const) {
       assert.deepEqual(o[key], lockdownOptions()[key], key);
     }
@@ -356,8 +373,7 @@ describe("ownership (M4)", () => {
   it("lets a master see and change only its own workers", async () => {
     const r = rig({}, { maxMasters: 2 });
     await startMaster(r);
-    const second = await r.supervisor.startMaster({ cwd: r.work, prompt: "other goal" });
-    assert.ok(second.ok);
+    await startMaster(r);
     const mine = await officeFor(r, 0);
     const theirs = await officeFor(r, 1);
     const a = (await mine("spawn_worker", { name: "Mine", folder: r.sub, task: "t" })).data["id"] as string; // session 2
@@ -379,8 +395,7 @@ describe("ownership (M4)", () => {
   it("says not yours for another master, the master itself and an observed session, and changes nothing", async () => {
     const r = rig({}, { maxMasters: 2 });
     const m1 = await startMaster(r);
-    const m2 = await r.supervisor.startMaster({ cwd: r.work, prompt: "x" });
-    assert.ok(m2.ok);
+    const m2 = { ok: true as const, id: await startMaster(r) };
     r.registry.upsert("observed-1", { kind: "session", origin: "observed", parentId: null, project: "p", name: "n", currentTask: null });
     const call = await officeFor(r, 0);
     for (const id of [m2.id, m1, "observed-1", "unknown"]) {

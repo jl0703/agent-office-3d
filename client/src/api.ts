@@ -24,6 +24,10 @@ export function describeFailure(status: number, code: string | undefined): strin
       return "There is no research folder yet. Set OFFICE_VAULT_DIR (or OFFICE_RESEARCH_DIR) in the .env file and restart the server.";
     case "master_running":
       return "A master is already running. Stop it first, or give it a new goal.";
+    case "master_not_resumable":
+      return "A master cannot be resumed. Start a new master with the goal, so it plans and waits for your approval.";
+    case "no_pending_plan":
+      return "There is no plan waiting for an answer (it may have been answered already).";
     case "busy":
       return "That worker is occupied with an earlier task. Wait for it to finish.";
     case "stopped":
@@ -72,6 +76,10 @@ export const startResearch = (topic: string, fetchFn: FetchFn = fetch) =>
 /** A master gets a goal, splits it up and runs workers of its own. */
 export const startMaster = (cwd: string, goal: string, fetchFn: FetchFn = fetch) =>
   post("/api/agents", { role: "master", cwd, prompt: goal }, fetchFn);
+
+/** The owner's answer to a master's plan: approve it, ask for changes (with a note) or reject it. */
+export const decidePlan = (id: string, decision: "approve" | "changes" | "reject", note: string | undefined, fetchFn: FetchFn = fetch) =>
+  post(`/api/agents/${encodeURIComponent(id)}/plan`, { decision, ...(note ? { note } : {}) }, fetchFn);
 
 export const stopAgent = (id: string, fetchFn: FetchFn = fetch) =>
   post(`/api/agents/${encodeURIComponent(id)}/stop`, {}, fetchFn);

@@ -74,6 +74,14 @@ describe("what needs attention", () => {
     assert.equal(pageTitle(0, true), "[Demo] Agent Office");
   });
 
+  it("lists a master whose plan waits for an answer, right after errors", () => {
+    const plan = { goal: "Add settings", steps: ["a"], files: [], workers: 1, costUsd: 1, risks: "", undo: "", status: "pending" as const };
+    const items = attentionOf([agent({ id: "m", role: "master", phase: "planning", plan }), agent({ id: "e", status: "error" })], new Set());
+    assert.deepEqual(items.map((i) => i.kind), ["error", "plan"]);
+    assert.match(items[1]?.text ?? "", /Plan to approve: Add settings/);
+    assert.equal(attentionOf([agent({ role: "master", phase: "planning", plan: { ...plan, status: "approved" } })], new Set()).length, 0);
+  });
+
   it("adds an entry for new research findings, after the agents", () => {
     const err = agent({ status: "error" });
     const items = attentionOf([err], new Set(), 3);

@@ -78,3 +78,6 @@ export function openStream(port: number, headers: Record<string, string>): Promi
 }
 
 export const parse = (e: { data: string }) => JSON.parse(e.data) as ServerEvent;
+
+/** A plan that passes submit_plan. */
+export const validPlan = { goal: "Fix the bug", steps: ["read the code", "change it"], files: ["src/a.ts"], workers: 1, costUsd: 0.5, risks: "none", undo: "git checkout" };

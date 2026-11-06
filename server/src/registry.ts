@@ -1,7 +1,7 @@
-import type { ActivityEntry, Agent, AgentStatus, ServerEvent } from "../../shared/events.ts";
+import type { ActivityEntry, Agent, AgentStatus, Plan, ServerEvent } from "../../shared/events.ts";
 import type { Fact } from "./transcript.ts";
 
-type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team" | "usd">>;
+type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team" | "usd" | "phase" | "plan">>;
 type Entry = {
   agent: Agent;
   pending: Set<string>;
@@ -78,6 +78,7 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
         note: null,
         ...(init.team ? { team: init.team } : {}),
         ...(init.usd === undefined ? {} : { usd: init.usd }),
+        ...(init.phase ? { phase: init.phase, plan: init.plan ?? null } : {}),
       };
       entries.set(id, { agent, pending: new Set(), lastEventAt: 0, finished: false, terminal: null, waiting: false, log: [] });
       emit({ type: "agent.spawned", agent: { ...agent } });
@@ -164,6 +165,14 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
       const e = entries.get(id);
       if (!e || e.agent.usd === usd) return;
       e.agent.usd = usd;
+      emit({ type: "agent.updated", agent: { ...e.agent } });
+    },
+
+    setPlan(id: string, phase: "planning" | "executing", plan: Plan | null) {
+      const e = entries.get(id);
+      if (!e) return;
+      e.agent.phase = phase;
+      e.agent.plan = plan && { ...plan, steps: [...plan.steps], files: [...plan.files] };
       emit({ type: "agent.updated", agent: { ...e.agent } });
     },
 

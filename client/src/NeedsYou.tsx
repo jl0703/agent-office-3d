@@ -2,7 +2,7 @@ import { Bell } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { Attention } from "./attention.ts";
 
-const LABEL: Record<Attention["kind"], string> = { error: "Failed", cap: "Usage cap", waiting: "Waiting", result: "Result ready", research: "Research" };
+const LABEL: Record<Attention["kind"], string> = { error: "Failed", cap: "Usage cap", waiting: "Waiting", result: "Result ready", research: "Research", plan: "Plan to approve" };
 
 /** The "Needs you" button in the header and the short list under it. */
 export function NeedsYou({ items, onOpen }: { items: readonly Attention[]; onOpen: (id: string) => void }) {

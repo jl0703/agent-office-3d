@@ -3,6 +3,20 @@
 // "waiting" (usage limit reached) and "detached" (found again after a restart, not running) come from managed workers.
 export type AgentStatus = "working" | "idle" | "done" | "stopped" | "error" | "waiting" | "detached";
 
+/** A master's plan. The owner decides on it before any worker starts. */
+export type Plan = {
+  goal: string;
+  steps: string[];
+  files: string[];
+  workers: number;
+  costUsd: number;
+  risks: string;
+  undo: string;
+  status: "pending" | "approved" | "changes" | "rejected";
+  /** The owner's note from the last decision, at most 500 characters. */
+  note?: string;
+};
+
 export type Agent = {
   id: string;
   kind: "session" | "subagent";
@@ -28,6 +42,10 @@ export type Agent = {
   note: string | null;
   /** Estimated usage of this session across resumes, in US dollars rounded to cents. Managed agents only. */
   usd?: number;
+  /** Masters only. A master starts in "planning" (read-only, no workers) until its plan is approved. */
+  phase?: "planning" | "executing";
+  /** Masters only. The latest submitted plan, or null before the first one. */
+  plan?: Plan | null;
 };
 
 /** One tool call in an agent's recent history. */

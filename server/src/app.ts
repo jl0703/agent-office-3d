@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { ConfigBody, createDecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
+import { PlanBody } from "./plan.ts";
 import type { Registry } from "./registry.ts";
 import { buildSweepPrompt } from "./sweep.ts";
 import type { Supervisor } from "./supervisor.ts";
@@ -49,7 +50,7 @@ const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
 const FINDING_DECISION = /^\/api\/research\/findings\/([^/]{1,200})\/decision$/;
-const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume)$/;
+const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume|plan)$/;
 
 const StartBody = z
   .object({
@@ -208,6 +209,17 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (command?.[1] && method === "POST") {
         const agent = opts.registry?.get(command[1]);
         if (!agent) return json(res, 404, { error: "not_found" });
+        if (command[2] === "plan") {
+          if (agent.role !== "master" || !opts.supervisor) return json(res, 404, { error: "not_found" });
+          const supervisor = opts.supervisor;
+          return run(req, res, async () => {
+            const parsed = PlanBody.safeParse(await readJson(req));
+            if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            const result = supervisor.decidePlan(agent.id, parsed.data.decision, parsed.data.note);
+            if (result.ok) return json(res, 202, {});
+            json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
+          });
+        }
         // Agents seen only through their logs are view-only.
         if (agent.origin === "observed") return json(res, 409, { reason: "observed" });
         const supervisor = opts.supervisor;

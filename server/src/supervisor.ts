@@ -10,7 +10,8 @@ import { createGithubServer, GITHUB_SERVER, GITHUB_TOOL_NAMES } from "./githubTo
 import { killTree as defaultKillTree } from "./killTree.ts";
 import { lockdownOptions, MAX_BUDGET_USD, MAX_TURNS } from "./lockdown.ts";
 import { cleanTmp, freshOnly, loadStore, saveStore, type StoredWorker } from "./managedStore.ts";
-import { createOfficeServer, MASTER_SYSTEM_PROMPT, MAX_RESULT_CHARS, MAX_WAIT_SECONDS, OFFICE_SERVER, OFFICE_TOOL_NAMES, type OfficeApi, type Reply } from "./officeTools.ts";
+import { createOfficeServer, MASTER_SYSTEM_PROMPT, MAX_RESULT_CHARS, PLAN_FIRST_PROMPT, MAX_WAIT_SECONDS, OFFICE_SERVER, OFFICE_TOOL_NAMES, type OfficeApi, type Reply } from "./officeTools.ts";
+import type { Plan } from "../../shared/events.ts";
 import { isInside, resolveAllowedFolder } from "./paths.ts";
 import { inspectProcess, killLeftovers, type ProcessInfo } from "./processInfo.ts";
 import type { Registry } from "./registry.ts";
@@ -30,7 +31,7 @@ export type StartResult =
   | {
       ok: false;
       status: 400 | 403 | 409 | 429 | 502;
-      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running";
+      code: "invalid_folder" | "folder_not_allowed" | "too_many" | "start_failed" | "budget" | "master_running" | "worker_limit" | "master_stopped" | "no_research_folder" | "sweep_running" | "plan_not_approved";
     };
 
 export type CommandResult =
@@ -39,7 +40,7 @@ export type CommandResult =
       ok: false;
       status: 400 | 403 | 404 | 409 | 429 | 502;
       /** 409 answers are sent as a `reason`, the others as an `error` code. */
-      code: "busy" | "stopped" | "detached" | "not_resumable" | "transcript_active" | "budget" | "too_many" | "invalid_folder" | "folder_not_allowed" | "not_found" | "start_failed";
+      code: "busy" | "stopped" | "detached" | "not_resumable" | "transcript_active" | "budget" | "too_many" | "invalid_folder" | "folder_not_allowed" | "not_found" | "start_failed" | "no_pending_plan" | "master_not_resumable";
     };
 
 export const DEFAULT_RESUME_PROMPT = "Continue where you left off.";
@@ -107,6 +108,9 @@ type Managed = {
   cwd: string;
   task: string;
   role: "worker" | "master";
+  /** A master in "planning" is read-only and may not start workers. Workers and the sweep's Lead are always "executing". */
+  phase: "planning" | "executing";
+  plan: Plan | null;
   /** Set for a research team's master and the workers it starts. */
   team: "research" | null;
   sweep: Sweep | null;
@@ -135,7 +139,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -196,6 +200,7 @@ export function createSupervisor(opts: SupervisorOptions) {
   }
 
   function toStored(m: Managed & { id: string }): StoredWorker {
+    const master = m.role === "master";
     const running = m.state !== "ended" && m.procName !== null && m.pidStartedAt !== null;
     return {
       id: m.id,
@@ -209,6 +214,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       processName: running ? m.procName : null,
       pidStartedAt: running ? m.pidStartedAt : null,
       costUsdTotal: sessionCost(m),
+      ...(master ? { phase: m.phase, plan: m.plan } : {}),
     };
   }
 
@@ -337,6 +343,7 @@ export function createSupervisor(opts: SupervisorOptions) {
             name: m.name,
             currentTask: m.task,
             usd: cents(sessionCost(m)),
+            ...(m.role === "master" ? { phase: m.phase, plan: m.plan } : {}),
           });
         }
         byId.set(id, m);
@@ -428,6 +435,8 @@ export function createSupervisor(opts: SupervisorOptions) {
       endNote: null,
       forgetTimer: null,
       role: "worker",
+      phase: "executing",
+      plan: null,
       team: null,
       sweep: null,
       owner: null,
@@ -458,9 +467,7 @@ export function createSupervisor(opts: SupervisorOptions) {
                 systemPrompt: {
                   type: "preset" as const,
                   preset: "claude_code" as const,
-                  append: m.team === "research" ? `${MASTER_SYSTEM_PROMPT}
-
-${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
+                  append: [MASTER_SYSTEM_PROMPT, m.team === "research" ? RESEARCH_LEAD_PROMPT : null, m.phase === "planning" ? PLAN_FIRST_PROMPT : null].filter(Boolean).join("\n\n"),
                 },
               }
             : {}),
@@ -473,7 +480,7 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
             : {}),
           ...(m.expectedId ? { resume: m.expectedId } : {}),
           // Keeps every file tool inside this folder; permission rules alone would allow any path.
-          hooks: folderGuardHooks(m.cwd, (tool, reason) => log({ event: "managed-tool-denied", tool, reason }), extra),
+          hooks: folderGuardHooks(m.cwd, (tool, reason) => log({ event: "managed-tool-denied", tool, reason }), extra, () => m.phase === "planning"),
           cwd: m.cwd,
           env: buildChildEnv(env),
           abortController: m.abort,
@@ -538,6 +545,7 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
     // No await between these checks and adding the session, so two starts cannot both pass.
     if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
     if (owner && owner.state !== "running") return refuse(409, "master_stopped");
+    if (owner?.phase === "planning") return refuse(409, "plan_not_approved");
     if (req.sweep && live().some((x) => x.role === "master" && x.team === "research")) return refuse(409, "sweep_running");
     if (role === "master" && live().filter((x) => x.role === "master").length >= maxMasters) return refuse(409, "master_running");
     if (owner && ownedBy(owner).filter((w) => w.state !== "ended").length >= maxWorkersPerMaster) return refuse(429, "worker_limit");
@@ -552,6 +560,8 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       role,
       owner,
       team,
+      // Every master plans first, except a research sweep's Lead, which starts executing.
+      phase: role === "master" && !req.sweep ? "planning" : "executing",
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
     if (m.sweep && !owner) m.sweep.lead = m;
@@ -568,17 +578,46 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       log({ event: "managed-refused", reason: "budget", id });
       return { ok: false, status: 429, code: "budget" };
     }
+    m.task = clean(prompt);
+    deliver(m, id, prompt);
+    log({ event: "managed-assign", id });
+    return { ok: true };
+  }
+
+  /** Sends the session its next message and marks it busy. */
+  function deliver(m: Managed, id: string, prompt: string) {
     m.waiting = false;
     m.busy = true;
     m.result = null;
-    m.task = clean(prompt);
     m.updatedAt = now();
     registry.setWaiting(id, false);
     registry.setNote(id, null);
     registry.apply(id, [{ kind: "prompt", text: m.task }, { kind: "event" }], null);
     m.input.push(userMessage(prompt));
-    log({ event: "managed-assign", id });
     persist();
+  }
+
+  /** The owner's decision on a master's pending plan. */
+  function decidePlan(id: string, decision: "approve" | "changes" | "reject", note?: string): CommandResult {
+    const m = byId.get(id);
+    if (!m || m.role !== "master") return { ok: false, status: 404, code: "not_found" };
+    if (m.state !== "running") return { ok: false, status: 409, code: "stopped" };
+    if (m.phase !== "planning" || m.plan?.status !== "pending") return { ok: false, status: 409, code: "no_pending_plan" };
+    if (decision !== "reject" && budget.refuses(sessionCost(m))) return { ok: false, status: 429, code: "budget" };
+    const status = decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "changes";
+    const text = note ? clean(note) : "";
+    m.plan = { ...m.plan, status, ...(text ? { note: text } : {}) };
+    if (decision === "approve") m.phase = "executing";
+    registry.setPlan(id, m.phase, m.plan);
+    log({ event: "managed-plan", id, decision });
+    if (decision === "reject") {
+      m.endNote = "Plan rejected.";
+      void terminate(m);
+      persist();
+    } else {
+      m.task = clean(decision === "approve" ? "Your plan was approved. Go ahead." : `The owner asked for changes${text ? `: ${text}` : ""}. Revise and submit_plan again.`);
+      deliver(m, id, decision === "approve" ? "Your plan was approved. Go ahead." : `The owner asked for changes${text ? `: ${text}` : ""}. Revise and submit_plan again.`);
+    }
     return { ok: true };
   }
 
@@ -588,6 +627,7 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
     detached: "That worker is detached and cannot take tasks.",
     budget: "The usage cap was reached.",
     too_many: "Too many sessions are running. Stop one first.",
+    plan_not_approved: "plan_not_approved: submit_plan and wait for the owner's approval before starting workers.",
     worker_limit: `You already have ${maxWorkersPerMaster} running workers. Stop one first.`,
     folder_not_allowed: "That folder is not allowed. It must be inside your own folder.",
     invalid_folder: "That folder does not exist.",
@@ -644,6 +684,14 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       list() {
         return { ok: true, data: { workers: ownedBy(owner).map((w) => ({ ...row(w), task: w.task })) } };
       },
+      submitPlan(plan) {
+        if (owner.phase !== "planning") return { ok: false, error: "Your plan is already approved; no new plan is needed." };
+        if (owner.plan?.status === "pending") return { ok: false, error: "Your plan is already waiting for the owner's decision. Wait for it; do not submit again." };
+        owner.plan = { ...plan, status: "pending" };
+        if (owner.id) registry.setPlan(owner.id, owner.phase, owner.plan);
+        persist();
+        return { ok: true, data: { status: "pending", message: "Plan received. Wait for the owner's decision: end your turn now and do not start workers. The decision arrives as your next message." } };
+      },
     };
   }
 
@@ -655,6 +703,9 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
 
     /** Starts the research Lead on a sweep prompt. One at a time; its team's cost is capped together. */
     startSweep: (prompt: string) => begin({ prompt, team: "research", name: "Research Lead", sweep: true }, "master", null),
+
+    /** Records the owner's decision on a master's pending plan and tells the master. */
+    decidePlan,
 
     /** Gives an idle worker a new task. Answers at once; the work continues in the background. */
     assign: assignTask,
@@ -669,6 +720,8 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       const from = old ?? detached.get(id);
       if (!from) return refuse(404, "not_found");
       if ((old && old.state !== "ended") || resuming.has(id)) return refuse(409, "not_resumable");
+      // A resumed session would come back as a plain worker, outside the plan gate. Masters start again instead.
+      if (old?.role === "master" || (!old && (from as StoredWorker).phase !== undefined)) return refuse(409, "master_not_resumable");
       const baseCost = old ? sessionCost(old) : (from as StoredWorker).costUsdTotal;
       if (budget.refuses(baseCost)) return refuse(429, "budget");
 
@@ -698,7 +751,7 @@ ${RESEARCH_LEAD_PROMPT}` : MASTER_SYSTEM_PROMPT,
       const killed = await killLeftovers(everything, { inspect, kill: killTree });
       const stored = freshOnly(everything, now());
       for (const w of stored) {
-        registry.upsert(w.id, { kind: "session", origin: "managed", role: "worker", parentId: null, project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal) });
+        registry.upsert(w.id, { kind: "session", origin: "managed", role: w.phase ? "master" : "worker", parentId: null, project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal), ...(w.phase ? { phase: w.phase, plan: w.plan ?? null } : {}) });
         registry.setTerminal(w.id, "detached");
         registry.setNote(w.id, "Detached after a restart. Press Resume to continue the conversation.");
         detached.set(w.id, { ...w, pid: null, processName: null, pidStartedAt: null });

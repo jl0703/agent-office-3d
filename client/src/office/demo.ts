@@ -78,6 +78,9 @@ export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): De
       desk: i,
       updatedAt: new Date(nowMs).toISOString(),
       note: null,
+      ...(isSession && i === 0
+        ? { phase: "planning" as const, plan: { goal: "Add a settings page with tests", steps: ["Read the existing pages", "Add the route and form", "Write tests", "Run lint and tests"], files: ["src/settings"], workers: 2, costUsd: 1.2, risks: "Touches the shared layout.", undo: "Revert the branch.", status: "pending" as const } }
+        : {}),
     });
     world.log.set(id, [{ ts: new Date(nowMs).toISOString(), tool, summary: activity }]);
     world.nextChange.set(id, nowMs + 2000 + rng() * 4000);

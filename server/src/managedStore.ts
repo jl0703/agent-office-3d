@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { Phase, StoredPlan } from "./plan.ts";
 
 // What survives a restart: just enough to show a worker as detached, stop a leftover
 // process, and resume the conversation. No prompts, tokens or environment values.
@@ -26,6 +27,9 @@ const Worker = z
     processName: z.string().min(1).max(100).nullable(),
     pidStartedAt: Millis.nullable(),
     costUsdTotal: z.number().min(0).max(100_000),
+    // Masters only. Files from before the plan gate lack both and still load.
+    phase: Phase.optional(),
+    plan: StoredPlan.nullable().optional(),
   })
   .strict();
 const Store = z.object({ version: z.literal(1), workers: z.array(Worker).max(MAX_STORED) }).strict();
