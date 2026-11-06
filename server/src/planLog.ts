@@ -10,7 +10,6 @@ import { parseKeyLines, UNSAFE, UNSAFE_G } from "./findings.ts";
 export const PLANS_LOG_DIR = "plans-log";
 export const MAX_LOG_NOTES = 200;
 export const MAX_RESULT_EXCERPT = 1500;
-const HEAD_BYTES = 8 * 1024;
 const MAX_NOTE_BYTES = 32 * 1024;
 const SCAN_NOTES = 60;
 const NOTE_NAME = /^\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.md$/;
@@ -149,8 +148,8 @@ async function readNote(path: string): Promise<Note | null> {
     const handle = await open(path, "r");
     let text: string;
     try {
-      const buffer = Buffer.alloc(HEAD_BYTES);
-      const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+      const buffer = Buffer.alloc(MAX_NOTE_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, MAX_NOTE_BYTES, 0);
       text = buffer.subarray(0, bytesRead).toString("utf8");
     } finally {
       await handle.close();
