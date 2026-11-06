@@ -121,7 +121,7 @@ describe("workshop: limits and safety", () => {
 
     const full = createWorkshop({ dir: join(root, "full"), target: t });
     for (let i = 0; i < 100; i++) mkdirSync(join(root, "full", i.toString(16).padStart(12, "0")), { recursive: true });
-    assert.deepEqual(await full.prepare("tool-c", "C"), { ok: false, code: "too_many" });
+    assert.deepEqual(await full.prepare("tool-c", "C"), { ok: false, code: "too_many_builds" });
   });
 });
 
