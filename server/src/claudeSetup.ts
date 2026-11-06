@@ -83,7 +83,7 @@ export async function listMcpServers(file: string | undefined): Promise<McpServe
         hasHeaders: isRecord(s["headers"]) && Object.keys(s["headers"]).length > 0,
       };
       if (type === "stdio") {
-        out.push({ ...base, ...(typeof s["command"] === "string" ? { command: oneLine(s["command"], 120) } : {}), argCount: Array.isArray(s["args"]) ? s["args"].length : 0 });
+        out.push({ ...base, ...(typeof s["command"] === "string" ? { command: oneLine(s["command"], 120).split(" ")[0] ?? "" } : {}), argCount: Array.isArray(s["args"]) ? s["args"].length : 0 });
       } else {
         let host: string | undefined;
         try {

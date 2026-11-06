@@ -36,6 +36,7 @@ function fixture() {
         local: { type: "stdio", command: "node", args: ["server.js", "--token=SECRET-ARG"], env: { KEY: "SECRET-ENV", B: "x" } },
         remote: { type: "http", url: "https://mcp.example.com/path/SECRET-PATH?key=SECRET-QUERY", headers: { Authorization: "Bearer SECRET-HEADER" } },
         "bad name\n": { command: "x" },
+        wholeline: { type: "stdio", command: "npx -y foo --token=SECRET-CMD", args: [] },
       },
     }),
   );
@@ -66,6 +67,7 @@ describe("claude setup: skills and MCP servers for the sidebar", () => {
     assert.deepEqual(list, [
       { name: "local", type: "stdio", command: "node", argCount: 2, envCount: 2, hasHeaders: false },
       { name: "remote", type: "http", host: "mcp.example.com", envCount: 0, hasHeaders: true },
+      { name: "wholeline", type: "stdio", command: "npx", argCount: 0, envCount: 0, hasHeaders: false },
     ]);
     assert.doesNotMatch(JSON.stringify(list), /SECRET/);
     assert.deepEqual(await listMcpServers(join(tmp(), "none.json")), []);
@@ -82,7 +84,7 @@ describe("claude setup: skills and MCP servers for the sidebar", () => {
     const got = await send(srv.port, "/api/setup", { headers: { host: auth.host, cookie: auth.cookie } });
     assert.equal(got.status, 200);
     const body = JSON.parse(got.body) as { skills: unknown[]; mcp: unknown[] };
-    assert.deepEqual([body.skills.length, body.mcp.length], [2, 2]);
+    assert.deepEqual([body.skills.length, body.mcp.length], [2, 3]);
     assert.doesNotMatch(got.body, /SECRET/);
     assert.equal((await send(srv.port, "/api/setup", { headers: { host: auth.host } })).status, 403);
   });
