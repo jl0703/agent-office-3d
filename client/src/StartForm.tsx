@@ -61,7 +61,7 @@ export const StartForm = forwardRef<HTMLDetailsElement, { off: string | null; pr
     const result = await (kind === "research" ? startResearch(prompt) : kind === "master" ? startMaster(cwd.trim(), prompt) : startWorker(cwd.trim(), prompt));
     setBusy(false);
     if (result.ok) {
-      setRecent(remember(kind === "research" ? "" : cwd, prompt));
+      setRecent(remember(kind === "research" ? "" : cwd, prompt, undefined, recent));
       setPrompt("");
       setMessage(COPY[kind].done);
     } else {

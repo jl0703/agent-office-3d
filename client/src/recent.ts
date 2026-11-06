@@ -21,8 +21,7 @@ export function loadRecent(store: Store | null = safeStore()): Recent {
 const push = (list: string[], item: string) => (item ? [item, ...list.filter((x) => x !== item)].slice(0, RECENT_MAX) : list);
 
 /** Puts a started folder (may be empty for research) and prompt first; returns the new lists. */
-export function remember(folder: string, prompt: string, store: Store | null = safeStore()): Recent {
-  const before = loadRecent(store);
+export function remember(folder: string, prompt: string, store: Store | null = safeStore(), before: Recent = loadRecent(store)): Recent {
   const next = { folders: push(before.folders, folder.trim()), prompts: push(before.prompts, prompt.trim()) };
   try {
     store?.setItem(KEY, JSON.stringify(next));

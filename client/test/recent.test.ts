@@ -27,3 +27,11 @@ describe("recent starts", () => {
     assert.deepEqual(loadRecent(null), { folders: [], prompts: [] });
   });
 });
+
+describe("recent starts without storage", () => {
+  it("still accumulates from the lists already on screen", () => {
+    const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("full"); } };
+    const first = remember("a", "x", broken);
+    assert.deepEqual(remember("b", "y", broken, first), { folders: ["b", "a"], prompts: ["y", "x"] });
+  });
+});
