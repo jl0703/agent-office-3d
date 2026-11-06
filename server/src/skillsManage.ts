@@ -16,7 +16,7 @@ const ADDED_FILE = "skills-added.json";
 const SKIP = new Set([".git", "node_modules"]);
 
 export type SkillsDirs = { skillsDir: string; trashDir: string; addedFile: string };
-export type Failure = "invalid_name" | "invalid_skill" | "too_big" | "exists" | "not_found" | "not_added" | "source_missing" | "failed";
+export type Failure = "invalid_name" | "invalid_skill" | "too_big" | "exists" | "not_found" | "not_added" | "source_missing" | "risky_header" | "failed";
 export type Result = { ok: true } | { ok: false; code: Failure };
 
 export const dirsFor = (skillsDir: string, dataDir: string): SkillsDirs => ({ skillsDir, trashDir: join(dataDir, "skills-trash"), addedFile: join(dataDir, ADDED_FILE) });

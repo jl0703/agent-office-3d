@@ -8,6 +8,19 @@ import { readAdded, SKILL_NAME, MAX_SKILL_BYTES, validSkillText, writeAdded, typ
 // moves the file to a trash folder. Nothing here runs anything.
 
 export const AGENT_NAME = SKILL_NAME;
+
+// Header fields that give an agent more power than its description says: its own hooks (shell commands), a permission
+// mode, or MCP servers. This page does not add such agents; the owner can put one in the folder by hand.
+const RISKY_KEYS = new Set(["hooks", "permissionmode", "mcpservers"]);
+
+/** True when the file's header has one of the fields above. */
+export function hasRiskyHeader(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return false;
+  const end = lines.indexOf("---", 1);
+  return lines.slice(1, end === -1 ? undefined : end).some((l) => RISKY_KEYS.has((/^([A-Za-z_][\w-]*)\s*:/.exec(l)?.[1] ?? "").toLowerCase()));
+}
+
 export type AgentDirs = { agentsDir: string; trashDir: string; addedFile: string };
 export type Result = { ok: true } | { ok: false; code: Failure };
 
@@ -23,6 +36,7 @@ export async function addAgent(dirs: AgentDirs, input: { name: string; content?:
     text = input.content;
   } else if (input.source !== undefined) {
     if (input.source.startsWith("\\\\") || input.source.startsWith("//")) return { ok: false, code: "source_missing" }; // network paths are not followed
+    if (!input.source.toLowerCase().endsWith(".md")) return { ok: false, code: "source_missing" };
     try {
       const real = await realpath(input.source);
       const info = await stat(real);
@@ -37,6 +51,7 @@ export async function addAgent(dirs: AgentDirs, input: { name: string; content?:
   }
   if (Buffer.byteLength(text) > MAX_SKILL_BYTES) return { ok: false, code: "too_big" };
   if (!validSkillText(input.name, text)) return { ok: false, code: "invalid_skill" };
+  if (hasRiskyHeader(text)) return { ok: false, code: "risky_header" };
   const target = join(dirs.agentsDir, `${input.name}.md`);
   try {
     await mkdir(dirs.agentsDir, { recursive: true });

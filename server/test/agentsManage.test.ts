@@ -127,3 +127,24 @@ describe("agents: the routes", () => {
     assert.equal(r.status, 404);
   });
 });
+
+describe("agents: header fields that add power", () => {
+  it("refuses an agent file with hooks, a permission mode or its own MCP servers, however the key is written", async () => {
+    const { d } = rig();
+    for (const extra of ["hooks:\n  PreToolUse: x\n", "permissionMode: bypassPermissions\n", "PermissionMode: acceptEdits\n", "mcpServers:\n  x: y\n", "HOOKS: x\n"]) {
+      assert.deepEqual(await addAgent(d, { name: "risky", content: agent("risky", extra) }), { ok: false, code: "risky_header" }, extra);
+    }
+    assert.deepEqual(await addAgent(d, { name: "fine", content: agent("fine", "tools: Read, Grep\nmodel: haiku\ncolor: blue\n") }), { ok: true });
+    assert.equal(existsSync(join(d.agentsDir, "risky.md")), false);
+  });
+
+  it("copies only a .md file, and removes the file again when the list of added agents cannot be saved", async () => {
+    const { root, d } = rig();
+    const text = join(root, "agent.txt");
+    writeFileSync(text, agent("from-text"));
+    assert.deepEqual(await addAgent(d, { name: "from-text", source: text }), { ok: false, code: "source_missing" });
+    mkdirSync(d.addedFile, { recursive: true }); // a folder where the list file should be: the write fails
+    assert.deepEqual(await addAgent(d, { name: "unsaved", content: agent("unsaved") }), { ok: false, code: "failed" });
+    assert.equal(existsSync(join(d.agentsDir, "unsaved.md")), false, "the new file is removed again");
+  });
+});

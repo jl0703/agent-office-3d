@@ -8,6 +8,9 @@ type Pending = { kind: "add"; name: string; content?: string; source?: string } 
 const TEMPLATE = (name: string) => `---\nname: ${name || "my-skill"}\ndescription: One line saying when to use it\n---\n\nWhat the skill tells Claude to do.\n`;
 const AGENT_TEMPLATE = (name: string) => `---\nname: ${name || "my-agent"}\ndescription: One line saying when to use it\ntools: Read, Grep\nmodel: sonnet\n---\n\nWhat the agent does and how.\n`;
 
+/** One header value of pasted text, such as tools or model, on one line. Empty when the field is missing. */
+const headerValue = (text: string, key: string) => text.split("\n").find((l) => l.toLowerCase().startsWith(`${key}:`))?.slice(key.length + 1).trim().slice(0, 120) ?? "";
+
 /** Add and remove skills or agents. Every change shows what will happen and waits for a click on Confirm. */
 export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChanged, pendingRemove, onAskRemove }: {
   demo: boolean;
@@ -129,6 +132,11 @@ export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChan
               ? `Move the ${noun} "${active.name}" from your ${noun}s folder to the trash folder. You can move it back by hand.`
               : `Create the ${noun} "${active.name}" in your ${noun}s folder${active.content !== undefined ? ` from the pasted text (${new Blob([active.content]).size} bytes)` : ` by copying ${active.source}`}. Claude Code will load it in new sessions. Read it first if you did not write it.`}
           </p>
+          {active.kind === "add" && agent && active.content !== undefined && (
+            <p className="panel-note">
+              Tools: {headerValue(active.content, "tools") || "not set, which means it can use every tool"}. Model: {headerValue(active.content, "model") || "not set (your default)"}.
+            </p>
+          )}
           <div className="board-actions">
             <button type="button" disabled={busy} onClick={() => void run(active)}>
               {busy ? "Working…" : "Confirm"}

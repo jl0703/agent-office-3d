@@ -76,7 +76,7 @@ const SESSION_COOKIE = "office_session";
 const AGENT_EVENTS = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/events$/;
 const AGENT_RESULT = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/result$/;
 const FINDING_DECISION = /^\/api\/research\/findings\/([^/]{1,200})\/decision$/;
-const SKILL_STATUS: Record<Failure, number> = { invalid_name: 400, invalid_skill: 400, too_big: 413, exists: 409, not_found: 404, not_added: 409, source_missing: 400, failed: 500 };
+const SKILL_STATUS: Record<Failure, number> = { invalid_name: 400, invalid_skill: 400, too_big: 413, exists: 409, not_found: 404, not_added: 409, source_missing: 400, risky_header: 400, failed: 500 };
 const RemoveSkillBody = z.object({ name: z.string().regex(SKILL_NAME), confirm: z.literal(true) }).strict();
 const AddSkillBody = z
   .object({ name: z.string().regex(SKILL_NAME), content: z.string().max(200_000).optional(), source: z.string().min(1).max(1000).optional(), confirm: z.literal(true) })

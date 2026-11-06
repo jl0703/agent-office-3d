@@ -447,7 +447,7 @@ try {
       const mcpViolations = await axe(page);
       expect(mcpViolations.length === 0, `sidebar(${scheme}): axe on the MCP page with the form and confirm box open: ${mcpViolations.join(", ")}`);
       await page.evaluate(`[...document.querySelectorAll(".confirm-box button")].find((b) => b.textContent === "Cancel")?.click()`);
-      await page.wait(300);
+      for (let i = 0; i < 20 && (await page.evaluate<string>(`document.activeElement?.textContent ?? ""`)) !== "Review the command"; i++) await page.wait(100);
       expect(await page.evaluate<string>(`document.activeElement?.textContent ?? ""`) === "Review the command", `sidebar(${scheme}): Cancel returns focus to Review`);
       await page.evaluate(`document.querySelector("[aria-label='Remove demo-docs']")?.click()`);
       await page.wait(300);
@@ -461,6 +461,16 @@ try {
       const agentCards = await page.evaluate<string>(`[...document.querySelectorAll(".catalog-grid .card")].map((c) => c.querySelector("h2")?.textContent + ":" + c.textContent).join(" | ")`);
       expect(agentCards.includes("demo-reviewer") && agentCards.includes("Model sonnet") && agentCards.includes("demo-planner"), `sidebar(${scheme}): the agents page lists agents with model and tools (${agentCards})`);
       expect((await page.evaluate<string>(`document.querySelector(".skill-manager summary")?.textContent ?? ""`)).includes("Add an agent"), `sidebar(${scheme}): the agents page can add an agent`);
+      await page.evaluate(`document.querySelector(".skill-manager summary")?.click()`);
+      await page.wait(200);
+      await page.evaluate(`(${setter})('.skill-manager input[placeholder="my-agent"]', 'demo-new-agent')`);
+      await page.evaluate(`(() => { const t = document.querySelector('.skill-manager textarea'); const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; set.call(t, 'x'); t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await page.wait(100);
+      await page.evaluate(`[...document.querySelectorAll('.skill-manager button')].find((b) => b.textContent === 'Review')?.click()`);
+      await page.wait(200);
+      expect((await page.evaluate<string>(`document.querySelector('.confirm-box')?.textContent ?? ''`)).includes('every tool'), `sidebar(${scheme}): adding an agent without tools says it can use every tool`);
+      await page.evaluate(`[...document.querySelectorAll('.confirm-box button')].find((b) => b.textContent === 'Cancel')?.click()`);
+      await page.wait(200);
       await page.evaluate(`document.querySelector("[aria-label='Remove demo-planner']")?.click()`);
       await page.wait(200);
       expect((await page.evaluate<string>(`document.querySelector(".confirm-box")?.textContent ?? ""`)).includes("agents folder"), `sidebar(${scheme}): removing an agent asks first`);
