@@ -477,6 +477,20 @@ describe("the fit check (plan 15, R2)", () => {
     assert.equal(r.calls.length, 1);
   });
 
+  it("gives the Evaluator's session a guard that allows only its own report file", async () => {
+    const r = await rig();
+    r.write("tool-a");
+    assert.equal((await r.post("/api/research/findings/tool-a/evaluate")).status, 202);
+    const hook = r.calls[0]?.hooks?.PreToolUse?.[0]?.hooks[0];
+    assert.ok(hook);
+    const allowed = async (file: string) => {
+      const out = (await hook({ hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: file }, tool_use_id: "t" } as never, "t", { signal: new AbortController().signal })) as { hookSpecificOutput?: unknown };
+      return out.hookSpecificOutput === undefined;
+    };
+    assert.equal(await allowed(join(realpathSync(r.research), "evaluations", "tool-a.md")), true);
+    assert.equal(await allowed(join(realpathSync(r.research), "findings", "tool-a.md")), false);
+  });
+
   it("shows a valid report on its finding and ignores a wrong id, a bad verdict and a two-line field", async () => {
     const r = await rig();
     for (const id of ["ok-one", "wrong-id", "bad-verdict", "two-lines"]) r.write(id);
