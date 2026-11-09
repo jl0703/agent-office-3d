@@ -407,7 +407,7 @@ function App() {
   return (
     <div className="app" data-tab={tab}>
       <header className="app-head">
-        <Sidebar route={route} />
+        <Sidebar route={route} demo={demo.active} />
         {route.page === "office" ? (
           <h1 tabIndex={-1}>Agent Office</h1>
         ) : (
