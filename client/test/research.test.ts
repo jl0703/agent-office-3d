@@ -111,3 +111,13 @@ describe("the fit check on the page", () => {
     assert.equal(busy.ok === false && /already running/.test(busy.message), true);
   });
 });
+
+describe("repository facts on a finding", () => {
+  it("reads language and forks when they are text and a number, and ignores them otherwise", async () => {
+    const got = await getFindings(fake(200, { findings: [raw({ id: "a", language: "Rust", forks: 12 }), raw({ id: "b", language: 5, forks: "12" }), raw({ id: "c" })], invalid: 0 }).fn);
+    const by = Object.fromEntries((got?.findings ?? []).map((f) => [f.id, f]));
+    assert.deepEqual([by["a"]?.language, by["a"]?.forks], ["Rust", 12]);
+    assert.deepEqual([by["b"]?.language, by["b"]?.forks], [undefined, undefined]);
+    assert.deepEqual([by["c"]?.language, by["c"]?.forks], [undefined, undefined]);
+  });
+});
