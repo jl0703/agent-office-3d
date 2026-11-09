@@ -386,15 +386,14 @@ try {
       const server = await login(page);
       await demo(page, server.base);
       // The menu: links to the office and the three pages.
-      await page.evaluate(`document.querySelector("[data-sidebar-button]")?.click()`);
-      await page.wait(400);
-      const links = await page.evaluate<string>(`[...document.querySelectorAll(".drawer nav a")].map((a) => a.textContent.trim() + "=" + a.getAttribute("href")).join(" | ")`);
-      expect(links.includes("Skills=#/skills") && links.includes("MCP servers=#/mcp") && links.includes("AI Agents=#/agents") && links.includes("Office=#/"), `sidebar(${scheme}): the menu has links to every page (${links})`);
-      await page.evaluate(`[...document.querySelectorAll(".drawer nav a")].find((a) => a.textContent.includes("Skills"))?.click()`);
+      const links = await page.evaluate<string>(`[...document.querySelectorAll(".rail a")].map((a) => a.textContent.trim() + "=" + a.getAttribute("href")).join(" | ")`);
+      expect(links === "Office=#/ | Skills=#/skills | MCP=#/mcp | Agents=#/agents | Settings=#/settings", `sidebar(${scheme}): the rail has links to every page, Settings last (${links})`);
+      const railBox = await page.evaluate<string>(`(() => { const r = document.querySelector(".rail").getBoundingClientRect(); return r.left === 0 && r.width < 100 && r.height > 600 ? "side" : r.bottom >= innerHeight - 1 && r.width > 300 ? "bottom" : "odd"; })()`);
+      expect(railBox === (w > 600 ? "side" : "bottom"), `sidebar(${scheme}): the rail is a side bar, a bottom bar on a phone (${railBox})`);
+      await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Skills"))?.click()`);
       await page.wait(500);
       const hash = await page.evaluate<string>(`location.hash`);
       expect(hash === "#/skills", `sidebar(${scheme}): choosing Skills goes to its own page (${hash})`);
-      expect(await page.evaluate<boolean>(`!document.querySelector(".drawer")`), `sidebar(${scheme}): the menu closes after choosing`);
       const head = await page.evaluate<string>(`document.querySelector("h1")?.textContent ?? ""`);
       expect(head === "Skills", `sidebar(${scheme}): the page title is Skills (${head})`);
       expect(await page.evaluate<string>(`document.activeElement?.id ?? ""`) === "catalog-title", `sidebar(${scheme}): focus moves to the page title`);
@@ -464,12 +463,8 @@ try {
       await page.wait(400);
       expect((await page.evaluate<string>(`location.hash`)) === "#/finds/demo-skills-pack", `sidebar(${scheme}): a find card opens its own page`);
       await page.wait(200);
-      await page.evaluate(`document.querySelector("button[aria-label='Menu']")?.click()`);
-      await page.wait(300);
-      const marked = await page.evaluate<string>(`document.querySelector("nav[aria-label='Pages'] a[aria-current=page]")?.textContent ?? ""`);
-      await page.evaluate(`document.querySelector("button[aria-label='Close menu']")?.click()`);
-      await page.wait(300);
-      expect(marked.trim() === "Skills", `sidebar(${scheme}): a find keeps its list marked in the menu (${marked})`);
+      const marked = await page.evaluate<string>(`document.querySelector(".rail a[aria-current=page]")?.textContent ?? ""`);
+      expect(marked.trim() === "Skills", `sidebar(${scheme}): a find keeps its list marked in the rail (${marked})`);
       expect((await page.evaluate<string>(`document.title`)).includes("Demo: a pack of documentation skills"), `sidebar(${scheme}): the tab title names the find`);
       const findText = await page.evaluate<string>(`document.querySelector("main")?.textContent ?? ""`);
       expect(findText.includes("Fit check: Fits") && findText.includes("Skills") && findText.includes("Open on GitHub"), `sidebar(${scheme}): the find page shows the fit check, its place in the breadcrumb and the source link (${findText.slice(0, 160)})`);
@@ -502,6 +497,14 @@ try {
       expect(findViolations.length === 0, `sidebar(${scheme}): axe on the find page: ${findViolations.join(", ")}`);
       await page.evaluate(`history.back()`);
       await page.wait(400);
+      // The Settings page, reached from the end of the rail.
+      await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Settings"))?.click()`);
+      await page.wait(400);
+      expect((await page.evaluate<string>(`location.hash + "|" + document.title + "|" + document.querySelector("h1")?.textContent + "|" + document.querySelector(".rail a[aria-current=page]")?.textContent`)) === "#/settings|Settings - Agent Office|Settings|Settings", `sidebar(${scheme}): Settings opens its page and is marked in the rail`);
+      const settingsText = await page.evaluate<string>(`document.querySelector("main")?.textContent ?? ""`);
+      expect(settingsText.includes("Demo mode") && settingsText.includes("Usage limit") && settingsText.includes("Plans that start without asking"), `sidebar(${scheme}): Settings shows the demo switch, the usage limit and the auto-approve rule`);
+      const settingsViolations = await axe(page);
+      expect(settingsViolations.length === 0, `sidebar(${scheme}): axe on Settings: ${settingsViolations.join(", ")}`);
       // The MCP page, and the way back to the office.
       await page.evaluate(`location.hash = "#/mcp"`);
       await page.wait(400);

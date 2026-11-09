@@ -10,6 +10,8 @@ describe("routes", () => {
     assert.deepEqual(parseRoute("#/mcp/"), { page: "list", kind: "mcp" });
     assert.deepEqual(parseRoute("#/agents"), { page: "list", kind: "agents" });
     assert.deepEqual(parseRoute("#/finds/demo-skills-pack"), { page: "find", id: "demo-skills-pack" });
+    assert.deepEqual(parseRoute("#/settings"), { page: "settings" });
+    assert.deepEqual(parseRoute("#/settings/x"), { page: "office" });
     assert.deepEqual(parseRoute("#/skills/clean-code"), { page: "item", kind: "skills", name: "clean-code" });
     assert.deepEqual(parseRoute("#/mcp/claude.ai%20Notion"), { page: "item", kind: "mcp", name: "claude.ai Notion" });
     for (const bad of ["#/nope", "#/skills/a/b", "#/skills/%E0%A4%A", "#/skills/..%2Fx", "#/skills/%0Ax", "#/skills/" + "x".repeat(61), "#/finds", "#/finds/", "#/finds/Bad_Id", "#/finds/a/b", "#/finds/..%2Fx", "#/finds/" + "a".repeat(81)]) {
@@ -18,7 +20,7 @@ describe("routes", () => {
   });
 
   it("builds addresses that parse back to the same route", () => {
-    for (const hash of ["#/", "#/finds/some-find", "#/skills", "#/mcp/claude.ai%20Notion", "#/agents/code-reviewer"]) {
+    for (const hash of ["#/", "#/settings", "#/finds/some-find", "#/skills", "#/mcp/claude.ai%20Notion", "#/agents/code-reviewer"]) {
       assert.equal(hrefFor(parseRoute(hash)), hash);
     }
   });
