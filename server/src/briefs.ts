@@ -69,7 +69,10 @@ export function renderBrief(b: Brief): string {
 
 /** The brief as the owner's edit form sends it: the same fields, checked by the same rules. */
 export function checkBrief(input: Brief): Brief | null {
-  return parseBrief(renderBrief(input), input.id);
+  const parsed = parseBrief(renderBrief(input), input.id);
+  // A check that contains the separator would come back as two checks: refuse it instead of changing what the owner wrote.
+  const same = parsed !== null && parsed.cases.length === input.cases.length && parsed.cases.every((c, i) => c.assertions.length === input.cases[i]?.assertions.length);
+  return same ? parsed : null;
 }
 
 const FORMAT = `---

@@ -15,10 +15,11 @@ export function FindPage({ id, demo }: { id: string; demo: boolean }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (poll = false) => {
     if (demo) return;
     const got = await getFindings();
-    setFinds(got ? got.findings : null);
+    // A failed look-again must not blank the page (and the brief editor on it): keep what is shown.
+    if (got || !poll) setFinds(got ? got.findings : null);
     const made = await getBuilds();
     if (Array.isArray(made)) setBuilds(made);
   }, [demo]);
@@ -27,7 +28,7 @@ export function FindPage({ id, demo }: { id: string; demo: boolean }) {
     setFinds(undefined);
     void load();
     // A fit check, brief or build takes a minute: look again while the page is open.
-    const timer = setInterval(() => void load(), 15_000);
+    const timer = setInterval(() => void load(true), 15_000);
     return () => clearInterval(timer);
   }, [demo, load]);
 

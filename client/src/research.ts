@@ -121,7 +121,7 @@ async function send(path: string, body: unknown, fetchFn: FetchFn): Promise<Resu
     if (code === "not_adopted") return { ok: false, message: "Mark the find Adopt first." };
     if (code === "exists") return { ok: false, message: "A brief already exists for this find." };
     if (code === "invalid_input") return { ok: false, message: "The brief did not pass the checks: two or three cases, each with one to five checks of 5 to 200 characters, and one line per field." };
-    if (code === "evaluating") return { ok: false, message: "A fit check is already running. Wait for it to finish." };
+    if (code === "evaluating") return { ok: false, message: "Another research note (a fit check or a brief) is being written. Wait for it to finish." };
     if (code === "sweep_running") return { ok: false, message: "A sweep is already running." };
     if (code === "no_research_folder") return { ok: false, message: "There is no research folder yet. Set OFFICE_VAULT_DIR (or OFFICE_RESEARCH_DIR) in the .env file and restart the server." };
     if (code === "budget") return { ok: false, message: "The usage cap was reached." };

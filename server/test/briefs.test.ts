@@ -34,6 +34,10 @@ describe("briefs: the format", () => {
     assert.equal(checkBrief(brief({ goal: "bad‮text" })), null);
     assert.equal(checkBrief(brief({ goal: "x".repeat(301) })), null);
     assert.equal(checkBrief(brief({ goal: "two\nlines" })), null);
+    // The separator is a space, a bar and a space: a bar without spaces stays inside one check, and a check that holds the separator is refused.
+    const bar = brief({ cases: [{ prompt: "p one here", assertions: ["uses a|b notation", "second check here"] }, brief().cases[1]!] });
+    assert.deepEqual(parseBrief(renderBrief(bar), "tool-a")?.cases[0]?.assertions, ["uses a|b notation", "second check here"]);
+    assert.equal(checkBrief(brief({ cases: [{ prompt: "p one here", assertions: ["one | two checks in one"] }, brief().cases[1]!] })), null);
     assert.equal(parseBrief(ok.replace("date: 2026-11-09", "date: 2026-13-45"), "tool-a"), null);
   });
 
