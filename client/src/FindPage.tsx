@@ -24,6 +24,11 @@ export function FindPage({ id, demo }: { id: string; demo: boolean }) {
   }, [demo, load]);
 
   const f = finds?.find((x) => x.id === id);
+  // The tab title names the find (the app leaves it to this page).
+  const title = f?.title;
+  useEffect(() => {
+    document.title = `${title ?? "Research find"} - Agent Office`;
+  }, [title]);
   const kindPage = f ? pageForFind(f.kind) : null;
 
   const decide = async (status: Decision) => {
