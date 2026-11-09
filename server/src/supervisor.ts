@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { filesInsideFolder, namesOutsidePath, type AutoApprove, type AutoApproveStore } from "./autoApprove.ts";
@@ -615,6 +616,14 @@ export function createSupervisor(opts: SupervisorOptions) {
     finalize(m, "stopped"); // in case the stream never finished
   }
 
+  /** True when the folder is, or contains, the office's own data folder: a session there could read or rewrite the team, the task list and the settings. */
+  async function holdsData(folder: string): Promise<boolean> {
+    const data = opts.dataDir;
+    if (!data) return false;
+    const real = await realpath(data).catch(() => resolve(data));
+    return isInside(folder, real) || isInside(folder, resolve(data));
+  }
+
   /** Starts a session after all checks. A session with an owner must stay inside the owner's folder. */
   async function begin(req: StartMasterRequest, role: Managed["role"], owner: Managed | null): Promise<StartResult> {
     const refuse = (status: 400 | 403 | 409 | 429, code: Extract<StartResult, { ok: false }>["code"]): StartResult => {
@@ -636,6 +645,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     const folder = await resolveAllowedFolder(requested, roots);
     if (!folder.ok) return folder.reason === "outside_roots" ? refuse(403, "folder_not_allowed") : refuse(400, "invalid_folder");
     if (teamRoot !== null && !isInside(teamRoot, folder.path)) return refuse(403, "folder_not_allowed");
+    if (await holdsData(folder.path)) return refuse(403, "folder_not_allowed");
     // No await between these checks and adding the session, so two starts cannot both pass.
     if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
     if (owner && owner.state !== "running") return refuse(409, "master_stopped");
@@ -873,6 +883,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       try {
         const folder = await resolveAllowedFolder(from.cwd, roots);
         if (!folder.ok) return folder.reason === "outside_roots" ? refuse(403, "folder_not_allowed") : refuse(400, "invalid_folder");
+        if (await holdsData(folder.path)) return refuse(403, "folder_not_allowed");
         if (opts.projectsDir && (await transcriptActive(opts.projectsDir, id, now()))) return refuse(409, "transcript_active");
         if (live().length >= maxManaged) return refuse(429, "too_many");
         const m = newManaged({ cwd: folder.path, project: from.project, name: from.name, task: clean(prompt), expectedId: id, baseCost, createdAt: from.createdAt, ...(from.team ? { team: from.team } : {}) });
