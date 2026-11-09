@@ -13,7 +13,13 @@ const made: string[] = [];
 const supervisors: ReturnType<typeof createSupervisor>[] = [];
 after(async () => {
   await Promise.all(supervisors.map((s) => s.close()));
-  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  for (const dir of made) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Windows can still hold a folder for a moment (EPERM); a leftover temp folder must not fail the run
+    }
+  }
 });
 
 const dir = (prefix: string) => {

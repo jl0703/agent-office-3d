@@ -161,7 +161,8 @@ function App() {
   }, [agents, selected]);
   const needs = useMemo(() => attentionOf(agents, unseen, newFindings), [agents, unseen, newFindings]);
   useEffect(() => {
-    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : route.page === "find" ? "Research find - Agent Office" : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
+    if (route.page === "find") return; // the find's own page names itself
+    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
   }, [needs.length, demo.active, route]);
 
   // A new page announces itself: focus goes to its title (not on the first load).

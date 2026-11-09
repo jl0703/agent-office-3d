@@ -129,7 +129,8 @@ describe("watcher", () => {
   });
 
   it("goes idle on the backup sweep when nothing happens", async () => {
-    const r = rig({ idleMs: 80 });
+    // idleMs is longer than a slow machine needs to get from start() to the first check, so "working" is still true there
+    const r = rig({ idleMs: 400 });
     writeFileSync(r.file(), userLine());
     await r.start({ sweepMs: 40 });
     assert.equal(r.registry.get(SESSION)?.status, "working");
