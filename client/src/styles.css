@@ -1621,20 +1621,7 @@ textarea {
   gap: var(--space-2);
 }
 
-.confirm-box {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: var(--color-surface-2);
-  border: 1px solid var(--status-waiting);
-  border-radius: var(--radius-1);
-}
 
-.skill-manager textarea {
-  width: 100%;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 13px;
-}
 
 .menu-list {
   display: grid;
@@ -1901,4 +1888,88 @@ textarea {
 .catalog-section {
   margin-top: var(--space-2);
   font-size: 16px;
+}
+
+.section-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.section-row .catalog-section {
+  margin-top: 0;
+}
+
+.manager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 600;
+  border-color: var(--color-accent);
+}
+
+.manager-status {
+  flex-basis: 100%;
+  text-align: right;
+}
+
+.manager-status:empty {
+  display: none;
+}
+
+.modal {
+  width: min(92vw, 560px);
+  max-height: 90vh;
+  padding: 0;
+  overflow: auto;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2, 10px);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.modal-body {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.modal-head h2 {
+  font-size: 18px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.modal textarea {
+  width: 100%;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
 }

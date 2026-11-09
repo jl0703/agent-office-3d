@@ -181,13 +181,12 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
         </div>
       )}
 
-      {kind === "mcp" && ready?.canManageMcp && <McpManager demo={demo} onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
-
-      {kind === "skills" && ready?.canManage && <SkillManager demo={demo} off={false} onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
-
       {kind === "skills" && ready && (
         <>
-        <h2 className="catalog-section">Yours ({skills.length})</h2>
+        <div className="section-row">
+          <h2 className="catalog-section">Yours ({skills.length})</h2>
+          {ready.canManage && <SkillManager demo={demo} off={false} onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
+        </div>
         <div className="catalog-grid">
           {skills.map((s: Skill) => (
             <Card
@@ -199,7 +198,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               chips={[`Updated ${when(s.modified)}`]}
               href={hrefFor({ page: "item", kind, name: s.name })}
             >
-              {s.added && ready.canManage && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />}
+              {s.added && ready.canManage && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={false} />}
             </Card>
           ))}
           {skills.length === 0 && <p className="panel-note">{ready.skills.length === 0 ? "No skills found in your skills folder." : "No skill matches."}</p>}
@@ -209,7 +208,10 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
 
       {kind === "mcp" && ready && (
         <>
-        <h2 className="catalog-section">Yours ({servers.length})</h2>
+        <div className="section-row">
+          <h2 className="catalog-section">Yours ({servers.length})</h2>
+          {ready.canManageMcp && <McpManager demo={demo} onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
+        </div>
         <div className="catalog-grid">
           {servers.map((s: McpServer) => (
             <Card
@@ -221,7 +223,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               chips={[s.type === "stdio" ? "Local program" : s.type.toUpperCase(), ...(s.envCount > 0 ? [`${s.envCount} env value${s.envCount === 1 ? "" : "s"} set`] : []), ...(s.hasHeaders ? ["Headers set"] : [])]}
               href={hrefFor({ page: "item", kind, name: s.name })}
             >
-              {s.added && ready.canManageMcp && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />}
+              {s.added && ready.canManageMcp && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={false} />}
             </Card>
           ))}
           {servers.length === 0 && <p className="panel-note">{ready.mcp.length === 0 ? "No user-level MCP servers found." : "No server matches."}</p>}
@@ -229,11 +231,12 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
         </>
       )}
 
-      {kind === "agents" && ready?.canManageAgents && <SkillManager demo={demo} off={false} noun="agent" onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
-
       {kind === "agents" && ready && (
         <>
-        <h2 className="catalog-section">Yours ({agents.length})</h2>
+        <div className="section-row">
+          <h2 className="catalog-section">Yours ({agents.length})</h2>
+          {ready.canManageAgents && <SkillManager demo={demo} off={false} noun="agent" onChanged={reload} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />}
+        </div>
         <div className="catalog-grid">
           {agents.map((a: Agent) => (
             <Card
@@ -245,7 +248,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               chips={[...(a.model ? [`Model ${a.model}`] : []), ...(a.tools ? [`Tools ${a.tools}`] : []), `Updated ${when(a.modified)}`]}
               href={hrefFor({ page: "item", kind, name: a.name })}
             >
-              {a.added && ready.canManageAgents && <RemoveButton name={a.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />}
+              {a.added && ready.canManageAgents && <RemoveButton name={a.name} onAsk={setPendingRemove} disabled={false} />}
             </Card>
           ))}
           {agents.length === 0 && <p className="panel-note">{ready.agents.length === 0 ? "No agents found in your agents folder." : "No agent matches."}</p>}
@@ -330,7 +333,7 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
           </dl>
           {skill.added && ready?.canManage && (
             <>
-              <RemoveButton name={skill.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />
+              <RemoveButton name={skill.name} onAsk={setPendingRemove} disabled={false} />
               <SkillManager demo={demo} off={false} showAdd={false} onChanged={() => (reload(), onGone())} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
             </>
           )}
@@ -351,7 +354,7 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
           </dl>
           {agentItem.added && ready?.canManageAgents && (
             <>
-              <RemoveButton name={agentItem.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />
+              <RemoveButton name={agentItem.name} onAsk={setPendingRemove} disabled={false} />
               <SkillManager demo={demo} off={false} noun="agent" showAdd={false} onChanged={() => (reload(), onGone())} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
             </>
           )}
@@ -369,7 +372,7 @@ export function ItemPage({ kind, name, demo, onGone }: { kind: CatalogKind; name
           <p className="panel-note">Secret values and headers are never shown here.</p>
           {server.added && ready?.canManageMcp && (
             <>
-              <RemoveButton name={server.name} onAsk={setPendingRemove} disabled={pendingRemove !== null} />
+              <RemoveButton name={server.name} onAsk={setPendingRemove} disabled={false} />
               <McpManager demo={demo} showAdd={false} onChanged={() => (reload(), onGone())} pendingRemove={pendingRemove} onAskRemove={setPendingRemove} />
             </>
           )}
