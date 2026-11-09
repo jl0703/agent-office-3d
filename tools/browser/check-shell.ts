@@ -387,7 +387,7 @@ try {
       await demo(page, server.base);
       // The menu: links to the office and the three pages.
       const links = await page.evaluate<string>(`[...document.querySelectorAll(".rail a")].map((a) => a.textContent.trim() + "=" + a.getAttribute("href")).join(" | ")`);
-      expect(links === "Office=#/ | Skills=#/skills | MCP=#/mcp | Agents=#/agents | Tasks=#/tasks | Settings=#/settings", `sidebar(${scheme}): the rail has links to every page, Settings last (${links})`);
+      expect(links === "Office=#/ | Skills=#/skills | MCP=#/mcp | Agents=#/agents | Tasks=#/tasks | Team=#/team | Settings=#/settings", `sidebar(${scheme}): the rail has links to every page, Settings last (${links})`);
       const railBox = await page.evaluate<string>(`(() => { const r = document.querySelector(".rail").getBoundingClientRect(); return r.left === 0 && r.width < 100 && r.height > 600 ? "side" : r.bottom >= innerHeight - 1 && r.width > 300 ? "bottom" : "odd"; })()`);
       expect(railBox === (w > 600 ? "side" : "bottom"), `sidebar(${scheme}): the rail is a side bar, a bottom bar on a phone (${railBox})`);
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Skills"))?.click()`);
@@ -512,6 +512,26 @@ try {
       expect((await page.evaluate<string>(`location.hash`)).startsWith("#/finds/"), `sidebar(${scheme}): a task card opens its find`);
       await page.evaluate(`location.hash = "#/tasks"`);
       await page.wait(400);
+      // The Team page: people with a role and who they report to, as cards and as an org chart; adding opens a pop-up.
+      await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Team"))?.click()`);
+      await page.wait(500);
+      const teamCards = await page.evaluate<string>(`JSON.stringify({ hash: location.hash, title: document.title, cards: document.querySelectorAll(".person-card").length, line: [...document.querySelectorAll(".person-card")].find((c) => c.textContent.includes("Riley"))?.textContent ?? "" })`);
+      expect(teamCards.includes('"hash":"#/team"') && teamCards.includes("Team - Agent Office") && teamCards.includes('"cards":6') && teamCards.includes("Reports to Sam, then Alex"), `sidebar(${scheme}): the Team page shows six people and who each reports to (${teamCards.slice(0, 200)})`);
+      await page.evaluate(`[...document.querySelectorAll(".chips button")].find((b) => b.textContent === "Org chart")?.click()`);
+      await page.wait(300);
+      expect(await page.evaluate<boolean>(`document.querySelectorAll(".org-tree .org-node").length === 6 && Boolean(document.querySelector(".org-tree ul ul"))`), `sidebar(${scheme}): the org chart nests the people by who reports to whom`);
+      await page.wait(700);
+      await page.screenshot(join(out, `team-${scheme}.png`));
+      const teamViolations = await axe(page);
+      expect(teamViolations.length === 0, `sidebar(${scheme}): axe on Team: ${teamViolations.join(", ")}`);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".add-btn")].find((b) => b.textContent.includes("Add a person")))`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Reports to"), `sidebar(${scheme}): Add a person opens a pop-up with the form`);
+      const popViolations = await axe(page);
+      expect(popViolations.length === 0, `sidebar(${scheme}): axe with the person pop-up open: ${popViolations.join(", ")}`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
+      expect(await page.evaluate<boolean>(`!document.querySelector("dialog[open]") && document.activeElement?.textContent?.includes("Add a person")`), `sidebar(${scheme}): Escape closes the pop-up and focus returns to the button`);
       // The Settings page, reached from the end of the rail.
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Settings"))?.click()`);
       await page.wait(400);

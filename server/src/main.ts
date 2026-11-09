@@ -9,6 +9,7 @@ import { createDecisionStore, ensureResearchLayout } from "./findings.ts";
 import { PLANS_LOG_DIR } from "./planLog.ts";
 import { createGithub } from "./github.ts";
 import { createAutoApproveStore } from "./autoApprove.ts";
+import { createTeamStore } from "./team.ts";
 import { createScheduleStore, createScheduler } from "./schedule.ts";
 import { buildDigest } from "./digest.ts";
 import { claudeRunner, findClaude } from "./claudeCli.ts";
@@ -76,6 +77,7 @@ if (workshopTarget && isAbsolute(workshopTarget)) {
 const registry = createRegistry();
 const projectsDir = projectsRoot(process.env, homedir());
 const autoApprove = createAutoApproveStore(dataDir);
+const team = createTeamStore(dataDir);
 const supervisor = createSupervisor({
   registry,
   autoApprove,
@@ -113,6 +115,7 @@ const app = await startServer({
   registry,
   supervisor,
   autoApprove,
+  team,
   ...(researchDir ? { researchDir } : {}),
   ...(plansLogDir ? { plansLogDir } : {}),
   digest,
