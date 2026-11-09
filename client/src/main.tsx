@@ -15,6 +15,7 @@ import { HubPanel } from "./HubPanel.tsx";
 import { NeedsYou } from "./NeedsYou.tsx";
 import { demoFindings, getFindings } from "./research.ts";
 import { CatalogPage, ItemPage } from "./CatalogPage.tsx";
+import { FindPage } from "./FindPage.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { hrefFor, KIND_WORD } from "./route.ts";
 import { useRoute } from "./useRoute.ts";
@@ -160,7 +161,7 @@ function App() {
   }, [agents, selected]);
   const needs = useMemo(() => attentionOf(agents, unseen, newFindings), [agents, unseen, newFindings]);
   useEffect(() => {
-    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
+    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : route.page === "find" ? "Research find - Agent Office" : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
   }, [needs.length, demo.active, route]);
 
   // A new page announces itself: focus goes to its title (not on the first load).
@@ -556,6 +557,8 @@ function App() {
       </main>
       ) : route.page === "list" ? (
         <CatalogPage key={hrefFor(route)} kind={route.kind} demo={demo.active} />
+      ) : route.page === "find" ? (
+        <FindPage key={hrefFor(route)} id={route.id} demo={demo.active} />
       ) : (
         <ItemPage key={hrefFor(route)} kind={route.kind} name={route.name} demo={demo.active} onGone={() => (window.location.hash = hrefFor({ page: "list", kind: route.kind }))} />
       )}
