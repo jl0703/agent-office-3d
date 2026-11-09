@@ -512,6 +512,22 @@ try {
       expect((await page.evaluate<string>(`location.hash`)).startsWith("#/finds/"), `sidebar(${scheme}): a task card opens its find`);
       await page.evaluate(`location.hash = "#/tasks"`);
       await page.wait(400);
+      // The owner's tasks: an assignee picker on each, Start needs a person, and New task and Start open pop-ups.
+      const own = await page.evaluate<string>(`JSON.stringify({ selects: document.querySelectorAll(".task-card select").length, startOff: [...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Plan next month"))?.querySelector("button")?.disabled, riley: [...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Make the header sticky"))?.querySelector("select option:checked")?.textContent })`);
+      expect(own.includes('"selects":4') && own.includes('"startOff":true') && own.includes("Riley, Frontend Developer"), `sidebar(${scheme}): the owner's tasks show who they are given to, and Start waits for a person (${own})`);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".add-btn")].find((b) => b.textContent.includes("New task")))`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Assigned to"), `sidebar(${scheme}): New task opens a pop-up with an assignee`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Make the header sticky"))?.querySelector(".task-foot:last-child button"))`);
+      await page.wait(300);
+      const startText = await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`);
+      expect(startText.includes("Riley, Frontend Developer") && startText.includes("waits for your approval") && startText.includes("Folder"), `sidebar(${scheme}): Start asks for a folder and says the plan waits for approval (${startText.slice(0, 160)})`);
+      const startViolations = await axe(page);
+      expect(startViolations.length === 0, `sidebar(${scheme}): axe with the Start pop-up open: ${startViolations.join(", ")}`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
       // The Team page: people with a role and who they report to, as cards and as an org chart; adding opens a pop-up.
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Team"))?.click()`);
       await page.wait(500);

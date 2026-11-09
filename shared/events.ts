@@ -48,6 +48,11 @@ export type Agent = {
   phase?: "planning" | "executing";
   /** Masters only. The latest submitted plan, or null before the first one. */
   plan?: Plan | null;
+  /** The person (from the team) this session works as, and the task it was started for. Set by the server when a task is started. */
+  personId?: string;
+  taskId?: string;
+  /** A Workshop build's master: the build has its own card. */
+  workshop?: true;
 };
 
 /** One tool call in an agent's recent history. */

@@ -31,7 +31,7 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 /** A research team's master: the folder is optional and defaults to the research folder. */
-export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A research writer (Evaluator or Briefer): it may only create <dir>/<id>.md in the research folder. */ writeTo?: { dir: string; id: string }; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string; /** A skill-eval session: it has no tools at all, 3 turns and half a dollar, and just answers. */ toolless?: true };
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A research writer (Evaluator or Briefer): it may only create <dir>/<id>.md in the research folder. */ writeTo?: { dir: string; id: string }; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string; /** A skill-eval session: it has no tools at all, 3 turns and half a dollar, and just answers. */ toolless?: true; /** The team member this master works as and the task it was started for (set by the server from the owner's choice). */ personId?: string; taskId?: string };
 export type StartResult =
   | { ok: true; id: string }
   | {
@@ -148,6 +148,9 @@ type Managed = {
   toolless: boolean;
   /** The Workshop build this master works on, if any. */
   workshop: string | null;
+  /** The person from the team this session works as, and the owner-made task it was started for. */
+  personId: string | null;
+  taskId: string | null;
   /** The master that started this worker. Set by the server, never by a model. */
   owner: Managed | null;
   /** Final text of the last finished task, at most MAX_RESULT_CHARS. In memory only. */
@@ -173,7 +176,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null; workshop?: string | null; toolless?: boolean };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null; workshop?: string | null; toolless?: boolean; personId?: string | null; taskId?: string | null };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -252,6 +255,8 @@ export function createSupervisor(opts: SupervisorOptions) {
       ...(m.team ? { team: m.team } : {}),
       ...(m.owner?.id ? { ownerId: m.owner.id } : {}),
       ...(m.sweep ? { sweep: true as const } : {}),
+      ...(m.personId ? { personId: m.personId } : {}),
+      ...(m.taskId ? { taskId: m.taskId } : {}),
     };
   }
 
@@ -420,6 +425,9 @@ export function createSupervisor(opts: SupervisorOptions) {
             currentTask: m.task,
             usd: cents(sessionCost(m)),
             ...(m.role === "master" ? { phase: m.phase, plan: m.plan } : {}),
+            ...(m.personId ? { personId: m.personId } : {}),
+            ...(m.taskId ? { taskId: m.taskId } : {}),
+            ...(m.workshop ? { workshop: true as const } : {}),
           });
         }
         byId.set(id, m);
@@ -524,6 +532,8 @@ export function createSupervisor(opts: SupervisorOptions) {
       writeOnly: null,
       toolless: false,
       workshop: null,
+      personId: null,
+      taskId: null,
       owner: null,
       result: null,
       lastText: "",
@@ -669,6 +679,8 @@ export function createSupervisor(opts: SupervisorOptions) {
       // Every master plans first, except a research sweep's Lead, which starts executing.
       phase: role === "master" && !req.sweep ? "planning" : "executing",
       workshop: req.workshop ?? null,
+      personId: req.personId ?? null,
+      taskId: req.taskId ?? null,
       toolless: req.toolless === true,
       writeOnly: req.writeTo ? join(folder.path, req.writeTo.dir, `${req.writeTo.id}.md`) : null,
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
@@ -886,7 +898,7 @@ export function createSupervisor(opts: SupervisorOptions) {
         if (await holdsData(folder.path)) return refuse(403, "folder_not_allowed");
         if (opts.projectsDir && (await transcriptActive(opts.projectsDir, id, now()))) return refuse(409, "transcript_active");
         if (live().length >= maxManaged) return refuse(429, "too_many");
-        const m = newManaged({ cwd: folder.path, project: from.project, name: from.name, task: clean(prompt), expectedId: id, baseCost, createdAt: from.createdAt, ...(from.team ? { team: from.team } : {}) });
+        const m = newManaged({ cwd: folder.path, project: from.project, name: from.name, task: clean(prompt), expectedId: id, baseCost, createdAt: from.createdAt, ...(from.team ? { team: from.team } : {}), ...(from.personId ? { personId: from.personId } : {}), ...(from.taskId ? { taskId: from.taskId } : {}) });
         return (await launch(m, prompt)) ? { ok: true } : refuse(502, "start_failed");
       } finally {
         resuming.delete(id);
@@ -906,7 +918,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       const killed = await killLeftovers(everything, { inspect, kill: killTree });
       const stored = freshOnly(everything, now());
       for (const w of stored) {
-        registry.upsert(w.id, { kind: "session", origin: "managed", role: w.phase ? "master" : "worker", parentId: w.ownerId ?? null, ...(w.team ? { team: w.team } : {}), project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal), ...(w.phase ? { phase: w.phase, plan: w.plan ?? null } : {}) });
+        registry.upsert(w.id, { kind: "session", origin: "managed", role: w.phase ? "master" : "worker", parentId: w.ownerId ?? null, ...(w.team ? { team: w.team } : {}), project: w.project, name: w.name, currentTask: w.task, usd: cents(w.costUsdTotal), ...(w.phase ? { phase: w.phase, plan: w.plan ?? null } : {}), ...(w.personId ? { personId: w.personId } : {}), ...(w.taskId ? { taskId: w.taskId } : {}) });
         registry.setTerminal(w.id, "detached");
         registry.setNote(w.id, "Detached after a restart. Press Resume to continue the conversation.");
         detached.set(w.id, { ...w, pid: null, processName: null, pidStartedAt: null });

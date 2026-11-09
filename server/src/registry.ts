@@ -1,7 +1,7 @@
 import type { ActivityEntry, Agent, AgentStatus, Plan, ServerEvent } from "../../shared/events.ts";
 import type { Fact } from "./transcript.ts";
 
-type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team" | "usd" | "phase" | "plan">>;
+type Init = Pick<Agent, "kind" | "parentId" | "project" | "name" | "currentTask"> & Partial<Pick<Agent, "origin" | "role" | "team" | "usd" | "phase" | "plan" | "personId" | "taskId" | "workshop">>;
 type Entry = {
   agent: Agent;
   pending: Set<string>;
@@ -77,6 +77,9 @@ export function createRegistry(opts: { now?: () => number; idleMs?: number } = {
         updatedAt: new Date(now()).toISOString(),
         note: null,
         ...(init.team ? { team: init.team } : {}),
+        ...(init.personId ? { personId: init.personId } : {}),
+        ...(init.taskId ? { taskId: init.taskId } : {}),
+        ...(init.workshop ? { workshop: true as const } : {}),
         ...(init.usd === undefined ? {} : { usd: init.usd }),
         ...(init.phase ? { phase: init.phase, plan: init.plan ?? null } : {}),
       };

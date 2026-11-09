@@ -34,6 +34,9 @@ const Worker = z
     team: z.literal("research").optional(),
     ownerId: Id.nullable().optional(),
     sweep: z.literal(true).optional(),
+    // Older files lack both. They keep a worker's person and task after a restart.
+    personId: z.string().regex(/^[0-9a-f]{12}$/).optional(),
+    taskId: z.string().regex(/^[0-9a-f]{12}$/).optional(),
   })
   .strict();
 const Store = z.object({ version: z.literal(1), workers: z.array(Worker).max(MAX_STORED) }).strict();
