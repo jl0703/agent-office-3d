@@ -112,6 +112,12 @@ export function reportsLine(people: readonly Person[], id: string): string {
   return line.length === 0 ? "Top of the team" : `Reports to ${line.join(", then ")}`;
 }
 
+/** The person an agent works as, with the line of reporting above them, or null for an agent with no role (a session you started yourself). */
+export function roleOf(agent: { personId?: string }, people: readonly Person[]): { person: Person; reportsTo: string; managers: string[] } | null {
+  const person = agent.personId ? people.find((p) => p.id === agent.personId) : undefined;
+  return person ? { person, reportsTo: reportsLine(people, person.id), managers: chainOf(people, person.id).map((p) => p.name) } : null;
+}
+
 export function demoTeam(): Person[] {
   const id = (n: number) => n.toString(16).padStart(12, "0");
   return [

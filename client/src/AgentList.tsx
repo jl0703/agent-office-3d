@@ -2,10 +2,13 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import type { Agent } from "../../shared/events.ts";
 import type { TreeNode } from "./agents.ts";
 import { StatusChip } from "./StatusChip.tsx";
+import { roleOf, type Person } from "./team.ts";
 
 export type RoomGroup = { key: string; title: string; count: number; errors: number; nodes: TreeNode[] };
 
 type Controls = {
+  /** The team: an agent that works as a person shows that person's role. */
+  team?: readonly Person[];
   stopping: ReadonlySet<string>;
   onStop: (id: string) => void;
   /** Why Stop buttons are switched off, or null. */
@@ -58,6 +61,7 @@ function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
         <span className="project">{agent.project}</span>
         {agent.team === "research" && <span className="origin role-text">research</span>}
         {agent.role === "master" && <span className="origin role-text">master</span>}
+        {roleOf(agent, controls.team ?? [])?.person.role && <span className="origin role-text">{roleOf(agent, controls.team ?? [])?.person.role}</span>}
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </p>
       {agent.note && <p className="note">{agent.note}</p>}

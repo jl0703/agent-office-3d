@@ -5,6 +5,7 @@ import { getAgentEvents, getAgentResult, type Usage } from "./api.ts";
 import { canStop } from "./AgentList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { StatusChip } from "./StatusChip.tsx";
+import { roleOf, type Person } from "./team.ts";
 import { relativeTime, shortDuration, timelineOf, type Family } from "./timeline.ts";
 import { WorkerControls } from "./WorkerControls.tsx";
 
@@ -111,6 +112,8 @@ function ResultBox({ text }: { text: string }) {
 
 type PanelProps = {
   id: string;
+  /** The team: an agent that works as a person shows that person's role and who they report to. */
+  team?: readonly Person[];
   agent: Agent;
   parent: Agent | undefined;
   subagents: number;
@@ -132,7 +135,7 @@ type PanelProps = {
   onStop: (id: string) => void;
 };
 
-export function AgentPanel({ id, agent, parent, subagents, log, result, usage, family, notShown, stopOff, stopping, headingRef, narrow, onClose, onSelect, onStop }: PanelProps) {
+export function AgentPanel({ id, team = [], agent, parent, subagents, log, result, usage, family, notShown, stopOff, stopping, headingRef, narrow, onClose, onSelect, onStop }: PanelProps) {
   const [fullTask, setFullTask] = useState(false);
   useEffect(() => setFullTask(false), [agent.id]);
   const now = useNow();
@@ -166,6 +169,17 @@ export function AgentPanel({ id, agent, parent, subagents, log, result, usage, f
       {agent.role === "master" && agent.plan && <PlanCard agent={agent} plan={agent.plan} off={stopOff} />}
       {notShown && <p className="panel-note">Not shown in the office view: all desks are taken.</p>}
       <dl className="panel-facts">
+        {(() => {
+          const role = roleOf(agent, team);
+          return role ? (
+            <>
+              <dt>Role</dt>
+              <dd>{role.person.role}</dd>
+              <dt>Reports to</dt>
+              <dd>{role.managers.length > 0 ? role.managers.join(", then ") : "Top of the team"}</dd>
+            </>
+          ) : null;
+        })()}
         <dt>Project</dt>
         <dd>{agent.project}</dd>
         <dt>{parent ? "Parent" : "Subagents"}</dt>

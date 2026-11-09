@@ -728,6 +728,41 @@ textarea {
   border-radius: var(--radius-1);
 }
 
+.office-tag {
+  flex-direction: column;
+  gap: 0;
+  align-items: flex-start;
+}
+
+.tag-line {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.tag-role {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.tag-detail {
+  display: none;
+  gap: 1px;
+  max-width: 15rem;
+  margin-top: 2px;
+  font: 400 12px/1.35 var(--font-body, inherit);
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: normal;
+  color: var(--color-text);
+}
+
+.office-tag[data-state="hover"] .tag-detail,
+.office-tag[data-state="selected"] .tag-detail {
+  display: grid;
+}
+
 .office-tag[data-state="selected"] {
   border: 2px solid var(--color-selection);
 }
