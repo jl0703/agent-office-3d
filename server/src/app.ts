@@ -20,6 +20,7 @@ import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, read
 import { PlanBody } from "./plan.ts";
 import { listOutcomes } from "./planLog.ts";
 import { AutoApproveBody, type AutoApproveStore } from "./autoApprove.ts";
+import { PersonInput, PersonUpdate, type TeamStore } from "./team.ts";
 import { ModeBody, type Scheduler } from "./schedule.ts";
 import type { Registry } from "./registry.ts";
 import { sweepPromptFor } from "./sweep.ts";
@@ -58,6 +59,8 @@ type Options = {
   scheduler?: Scheduler;
   /** The auto-approve rule for plans. Share it with the supervisor. Without it the auto-approve routes answer 404. */
   autoApprove?: AutoApproveStore;
+  /** The team of people with roles. Without it the team routes answer 404. */
+  team?: TeamStore;
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /** Where the sidebar reads the owner's skills and user-level MCP servers from. Without it the lists are empty. */
@@ -104,6 +107,10 @@ function mcpAnswer(res: http.ServerResponse, result: { ok: true } | { ok: false;
   return json(res, MCP_STATUS[result.code], result.code === "exists" || result.code === "not_added" ? { reason: result.code } : { error: result.code });
 }
 const EvalBody = z.object({ confirm: z.literal(true) }).strict();
+const AddPersonBody = PersonInput.extend({ confirm: z.literal(true) }).strict();
+const UpdatePersonBody = PersonUpdate.extend({ confirm: z.literal(true) }).strict();
+const RemovePersonBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), confirm: z.literal(true) }).strict();
+const TEAM_STATUS = { unknown_person: 404 } as const;
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_BRIEF = /^\/api\/research\/findings\/([^/]{1,200})\/brief(\/save)?$/;
 const BriefEdit = z
@@ -320,6 +327,38 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       }
       if (url.pathname === "/api/workshop" || url.pathname.startsWith("/api/workshop/")) {
         if (workshopRoute(req, res, url.pathname, method)) return;
+      }
+      if (url.pathname === "/api/team" && method === "GET") {
+        const team = opts.team;
+        if (!team) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => json(res, 200, { people: await team.list() }));
+      }
+      if (method === "POST" && /^\/api\/team\/(people|people\/update|people\/remove|starter)$/.test(url.pathname)) {
+        const team = opts.team;
+        if (!team) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => {
+          const body = await readJson(req);
+          let done: Awaited<ReturnType<TeamStore["add"]>> | null = null;
+          if (url.pathname === "/api/team/people") {
+            const parsed = AddPersonBody.safeParse(body);
+            if (parsed.success) done = await team.add({ name: parsed.data.name, role: parsed.data.role, brief: parsed.data.brief, reportsTo: parsed.data.reportsTo });
+          } else if (url.pathname === "/api/team/people/update") {
+            const parsed = UpdatePersonBody.safeParse(body);
+            if (parsed.success) {
+              const { id, ...change } = parsed.data;
+              delete (change as { confirm?: true }).confirm;
+              done = await team.update(id, change);
+            }
+          } else if (url.pathname === "/api/team/people/remove") {
+            const parsed = RemovePersonBody.safeParse(body);
+            if (parsed.success) done = await team.remove(parsed.data.id);
+          } else if (EvalBody.safeParse(body).success) {
+            done = await team.starter();
+          }
+          if (!done) return json(res, 400, { error: "invalid_request" });
+          if (!done.ok) return json(res, done.code in TEAM_STATUS ? TEAM_STATUS[done.code as keyof typeof TEAM_STATUS] : 409, { reason: done.code });
+          json(res, 200, { people: done.people, ...(done.person ? { person: done.person } : {}) });
+        });
       }
       if (url.pathname === "/api/auto-approve" && (method === "GET" || method === "POST")) {
         const store = opts.autoApprove;
