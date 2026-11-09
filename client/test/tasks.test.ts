@@ -69,6 +69,18 @@ describe("the tasks board: the owner's own tasks", () => {
     assert.equal(own(linked, [w({ status: "working" })]).progress[0]?.running, true, "it cannot be started twice");
   });
 
+  it("shows a detached worker's task as needing the owner, and still shows a worker whose task is gone", () => {
+    const linked = mine({ agentId: "w1" });
+    const detached = agent({ id: "w1", taskId: "t1", status: "detached", role: "master", phase: "executing" });
+    const card = own(linked, [detached]).review[0];
+    assert.equal(card?.chip, "Detached");
+    assert.equal(card?.running, false, "Start stays available");
+    const orphan = agent({ id: "w9", taskId: "gone", status: "working" });
+    assert.deepEqual(ids(tasksOf([orphan], [], [], [], [])).progress, ["agent-w9"], "a worker with no task card keeps its own card");
+    const finishedOld = agent({ id: "old", taskId: "t1", status: "idle" });
+    assert.deepEqual(ids(own(mine({ agentId: "new" }), [finishedOld])).done, ["agent-old"], "an earlier worker of a restarted task keeps its card too");
+  });
+
   it("shows the worker once: its own card is hidden, and so is a Workshop master unless its plan waits for you", () => {
     const worker = agent({ id: "w1", taskId: "t1", status: "working" });
     assert.deepEqual(ids(own(mine({ agentId: "w1" }), [worker])).progress, ["own-t1"], "one card, not two");

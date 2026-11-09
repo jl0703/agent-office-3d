@@ -20,7 +20,7 @@ import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, read
 import { PlanBody } from "./plan.ts";
 import { listOutcomes } from "./planLog.ts";
 import { AutoApproveBody, type AutoApproveStore } from "./autoApprove.ts";
-import { TaskInput, TaskUpdate, taskGoal, type TasksStore } from "./tasks.ts";
+import { TaskInput, TaskUpdate, isWorking, taskGoal, type TasksStore } from "./tasks.ts";
 import { chainOf, PersonInput, PersonUpdate, type TeamStore } from "./team.ts";
 import { ModeBody, type Scheduler } from "./schedule.ts";
 import type { Registry } from "./registry.ts";
@@ -118,6 +118,7 @@ const AddTaskBody = TaskInput.extend({ confirm: z.literal(true) }).strict();
 const UpdateTaskBody = TaskUpdate.extend({ confirm: z.literal(true) }).strict();
 const RemoveTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), confirm: z.literal(true) }).strict();
 const StartTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), cwd: z.string().min(1).max(1000), confirm: z.literal(true) }).strict();
+const startingTasks = new Set<string>();
 const TASK_POSTS = new Set(["/api/tasks", "/api/tasks/update", "/api/tasks/remove", "/api/tasks/start"]);
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_BRIEF = /^\/api\/research\/findings\/([^/]{1,200})\/brief(\/save)?$/;
@@ -360,7 +361,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           } else if (url.pathname === "/api/team/people/remove") {
             const parsed = RemovePersonBody.safeParse(body);
             if (parsed.success) {
-              const busy = (id: string) => (opts.registry?.snapshot() ?? []).some((a) => a.personId === id && (a.status === "working" || a.status === "waiting"));
+              const busy = (id: string) => (opts.registry?.snapshot() ?? []).some((a) => a.personId === id && isWorking(a));
               done = await team.remove(parsed.data.id, busy);
               if (done.ok) await opts.tasks?.unassign(parsed.data.id);
             }
@@ -403,6 +404,8 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           if (url.pathname === "/api/tasks/remove") {
             const parsed = RemoveTaskBody.safeParse(body);
             if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            const old = await tasks.get(parsed.data.id);
+            if (old?.agentId && isWorking(opts.registry?.get(old.agentId))) return json(res, 409, { reason: "task_running" });
             const done = await tasks.remove(parsed.data.id);
             return done.ok ? json(res, 200, { tasks: done.tasks }) : json(res, 404, { reason: done.code });
           }
@@ -413,12 +416,21 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           const people = await team.list();
           const person = people.find((p) => p.id === task.assignee);
           if (!person) return json(res, 409, { reason: "no_assignee" });
-          const linked = task.agentId ? opts.registry?.get(task.agentId) : undefined;
-          if (linked && (linked.status === "working" || linked.status === "waiting" || (linked.phase === "planning" && linked.plan?.status === "pending"))) return json(res, 409, { reason: "task_running" });
-          const started = await opts.supervisor.startMaster({ cwd: parsed.data.cwd, prompt: taskGoal(person, chainOf(people, person.id), task), name: person.name, personId: person.id, taskId: task.id });
-          if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
-          await tasks.update(task.id, { agentId: started.id, done: false });
-          json(res, 202, { id: started.id, tasks: await tasks.list() });
+          if (isWorking(task.agentId ? opts.registry?.get(task.agentId) : undefined) || startingTasks.has(task.id)) return json(res, 409, { reason: "task_running" });
+          startingTasks.add(task.id); // two clicks at once cannot both pass the check above
+          try {
+            const started = await opts.supervisor.startMaster({ cwd: parsed.data.cwd, prompt: taskGoal(person, chainOf(people, person.id), task), name: person.name, personId: person.id, taskId: task.id });
+            if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
+            const linked = await tasks.update(task.id, { agentId: started.id, done: false }).catch(() => null);
+            if (!linked?.ok) {
+              // The card could not be linked (the task was removed meanwhile, or the file could not be written): never leave a worker that has no card.
+              await opts.supervisor.stop(started.id).catch(() => undefined);
+              return json(res, 409, { reason: "unknown_task" });
+            }
+            json(res, 202, { id: started.id, tasks: linked.tasks });
+          } finally {
+            startingTasks.delete(task.id);
+          }
         });
       }
       if (url.pathname === "/api/auto-approve" && (method === "GET" || method === "POST")) {
