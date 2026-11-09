@@ -20,6 +20,7 @@ export function SettingsPage({ demo, off, usage, onStartDemo, onStopDemo }: Prop
       <section className="settings-group" aria-labelledby="set-demo">
         <h2 id="set-demo">Demo mode</h2>
         <p className="panel-note">Shows made-up agents so you can look around without starting real work. Nothing in demo mode is real.</p>
+        {demo && <p className="panel-note">Demo is on. Open the Office to look around.</p>}
         <button type="button" onClick={demo ? onStopDemo : onStartDemo}>
           <FlaskConical size={20} strokeWidth={1.75} aria-hidden="true" /> {demo ? "Exit demo" : "Start the demo"}
         </button>
