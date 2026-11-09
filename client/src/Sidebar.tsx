@@ -1,5 +1,7 @@
 import { Bot, Boxes, Building2, Menu, Puzzle, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { pageForFind } from "./CatalogPage.tsx";
+import { demoFindings, getFindings } from "./research.ts";
 import { hrefFor, KIND_WORD, type CatalogKind, type Route } from "./route.ts";
 
 const ICONS = { skills: Puzzle, mcp: Boxes, agents: Bot } as const;
@@ -12,8 +14,24 @@ const kindOf = (r: Route) => (r.page === "list" || r.page === "item" ? r.kind : 
 const same = (a: Route, b: Route) => (a.page === "office" || b.page === "office" ? a.page === b.page : kindOf(a) !== null && kindOf(a) === kindOf(b));
 
 /** The hamburger button and the left menu. Each choice is a link to its own page. */
-export function Sidebar({ route }: { route: Route }) {
+export function Sidebar({ route: current, demo }: { route: Route; demo: boolean }) {
   const id = useId();
+  const [findKind, setFindKind] = useState<CatalogKind | null>(null);
+  const findId = current.page === "find" ? current.id : null;
+  useEffect(() => {
+    setFindKind(null);
+    if (!findId) return;
+    let live = true;
+    void (demo ? Promise.resolve({ findings: demoFindings() }) : getFindings()).then((r) => {
+      const f = r?.findings.find((x) => x.id === findId);
+      if (live && f) setFindKind(pageForFind(f.kind));
+    });
+    return () => {
+      live = false;
+    };
+  }, [findId, demo]);
+  // A find belongs to the page that lists it, so that entry stays marked.
+  const route: Route = current.page === "find" ? (findKind ? { page: "list", kind: findKind } : current) : current;
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement | null>(null);

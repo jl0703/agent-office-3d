@@ -464,6 +464,12 @@ try {
       await page.wait(400);
       expect((await page.evaluate<string>(`location.hash`)) === "#/finds/demo-skills-pack", `sidebar(${scheme}): a find card opens its own page`);
       await page.wait(200);
+      await page.evaluate(`document.querySelector("button[aria-label='Menu']")?.click()`);
+      await page.wait(300);
+      const marked = await page.evaluate<string>(`document.querySelector("nav[aria-label='Pages'] a[aria-current=page]")?.textContent ?? ""`);
+      await page.evaluate(`document.querySelector("button[aria-label='Close menu']")?.click()`);
+      await page.wait(300);
+      expect(marked.trim() === "Skills", `sidebar(${scheme}): a find keeps its list marked in the menu (${marked})`);
       expect((await page.evaluate<string>(`document.title`)).includes("Demo: a pack of documentation skills"), `sidebar(${scheme}): the tab title names the find`);
       const findText = await page.evaluate<string>(`document.querySelector("main")?.textContent ?? ""`);
       expect(findText.includes("Fit check: Fits") && findText.includes("Skills") && findText.includes("Open on GitHub"), `sidebar(${scheme}): the find page shows the fit check, its place in the breadcrumb and the source link (${findText.slice(0, 160)})`);
