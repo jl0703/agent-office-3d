@@ -156,4 +156,14 @@ describe("workshop: another round", () => {
     assert.equal(await shop.reopen(made.build.id), null, "three rounds is the limit");
     assert.ok(t);
   });
+
+  it("still reads a build saved before rounds existed, as round 1", async () => {
+    const { shop } = target();
+    const made = await shop.prepare("tool-a", "A");
+    assert.ok(made.ok);
+    const file = join(shop.dir, made.build.id, "meta.json");
+    const { round: _round, ...old } = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify(old));
+    assert.equal((await shop.list()).find((b) => b.id === made.build.id)?.round, 1);
+  });
 });

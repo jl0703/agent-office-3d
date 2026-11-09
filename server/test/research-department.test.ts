@@ -796,4 +796,15 @@ describe("the skill eval routes (plan 18, E2)", () => {
     const again = await r.post(`/api/workshop/${r.build}/revise`, { confirm: true });
     assert.equal(again.status, 409, "not ready while the second round runs");
   });
+
+  it("refuses a revision once three rounds are used", async () => {
+    const r = await readyBuild(true);
+    writeFileSync(join(r.buildDir, "b", "docs", "SKILL.md"), "---\nname: docs\ndescription: d\n---\nWrite short sentences.\nAlways add a checklist\n");
+    await r.post(`/api/agents/${r.id}/stop`);
+    for (let i = 0; i < 200 && ((json(await r.get("/api/workshop")) as { builds: { status: string }[] }).builds[0]?.status !== "ready"); i++) await new Promise((x) => setTimeout(x, 30));
+    const file = join(r.buildDir, "meta.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), round: 3 }));
+    const res = await r.post(`/api/workshop/${r.build}/revise`, { confirm: true });
+    assert.deepEqual([res.status, json(res)], [409, { reason: "rounds_used" }]);
+  });
 });
