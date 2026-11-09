@@ -16,6 +16,7 @@ import { NeedsYou } from "./NeedsYou.tsx";
 import { demoFindings, getFindings } from "./research.ts";
 import { CatalogPage, ItemPage } from "./CatalogPage.tsx";
 import { FindPage } from "./FindPage.tsx";
+import { SettingsPage } from "./SettingsPage.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { hrefFor, KIND_WORD } from "./route.ts";
 import { useRoute } from "./useRoute.ts";
@@ -162,7 +163,7 @@ function App() {
   const needs = useMemo(() => attentionOf(agents, unseen, newFindings), [agents, unseen, newFindings]);
   useEffect(() => {
     if (route.page === "find") return; // the find's own page names itself
-    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
+    document.title = route.page === "office" ? pageTitle(needs.length, demo.active) : route.page === "settings" ? "Settings - Agent Office" : `${KIND_WORD[route.kind]}${route.page === "item" ? `: ${route.name}` : ""} - Agent Office`;
   }, [needs.length, demo.active, route]);
 
   // A new page announces itself: focus goes to its title (not on the first load).
@@ -406,8 +407,8 @@ function App() {
 
   return (
     <div className="app" data-tab={tab}>
+      <Sidebar route={route} demo={demo.active} />
       <header className="app-head">
-        <Sidebar route={route} demo={demo.active} />
         {route.page === "office" ? (
           <h1 tabIndex={-1}>Agent Office</h1>
         ) : (
@@ -558,6 +559,8 @@ function App() {
       </main>
       ) : route.page === "list" ? (
         <CatalogPage key={hrefFor(route)} kind={route.kind} demo={demo.active} />
+      ) : route.page === "settings" ? (
+        <SettingsPage demo={demo.active} off={off} usage={usage} onStartDemo={() => demo.start(20)} onStopDemo={demo.stop} />
       ) : route.page === "find" ? (
         <FindPage key={hrefFor(route)} id={route.id} demo={demo.active} />
       ) : (
