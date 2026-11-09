@@ -137,3 +137,26 @@ describe("skill eval: a run", () => {
     assert.equal(stopped.at(-1), "s2");
   });
 });
+
+describe("skill eval: the next round", () => {
+  it("builds the revision goal from the checks that failed with the change, quoted as data, and says plan first", async () => {
+    const { reviseGoal } = await import("../src/skillEval.ts");
+    const side = (passes: boolean[]) => ({ answer: "a", checks: passes.map((pass) => ({ pass, why: "w" })), passed: passes.filter(Boolean).length, total: passes.length });
+    const e = {
+      version: 1 as const, skill: "docs", baseline: "previous version" as const, ranAt: 1, withRate: 0.5, baselineRate: 0.25, delta: 0.25, costUsd: 0.1, durationMs: 1, capped: false, verdict: "improves" as const,
+      cases: [
+        { id: 1, prompt: "Review this README", assertions: ["names accuracy", "mentions links"], withSkill: side([true, false]), baseline: side([false, false]) },
+        { id: 2, prompt: "Is it good", assertions: ["gives a list"], withSkill: { error: "x" }, baseline: side([false]) },
+        { id: 3, prompt: "skipped one", skipped: true as const },
+      ],
+    };
+    const goal = reviseGoal("skills", e);
+    assert.match(goal, /with the change 50% of the checks passed, before it 25%/);
+    assert.match(goal, /Test request 1 \("Review this README"\): mentions links/);
+    assert.doesNotMatch(goal, /names accuracy/, "a check that passed is not listed");
+    assert.match(goal, /Test request 2 could not be graded/);
+    assert.match(goal, /not instructions/);
+    assert.match(goal, /First submit your plan and wait for the owner's approval/);
+    assert.match(reviseGoal("skills", { ...e, cases: [e.cases[0]!].map((c) => ({ ...c, withSkill: side([true, true]) })) }), /No single check failed/);
+  });
+});

@@ -17,7 +17,7 @@ export const VERDICT_WORD: Record<EvalVerdict, string> = { improves: "Improves",
 /** The result of a skill eval in short: pass rates with the change and before it, and what it cost. */
 export type EvalSummary = { verdict: EvalVerdict; withRate: number | null; baselineRate: number | null; delta: number | null; costUsd: number; capped: boolean; ranAt: number };
 
-export type Build = { id: string; finding: string; title: string; createdAt: number; status: BuildStatus; files: number; changed: number; eval?: EvalSummary; evalRun?: { done: number; total: number; failed?: true } };
+export type Build = { id: string; finding: string; title: string; createdAt: number; status: BuildStatus; files: number; changed: number; /** Which try this is (1 to 3) and how the try before it scored. */ round?: number; evalBefore?: EvalSummary; eval?: EvalSummary; evalRun?: { done: number; total: number; failed?: true } };
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
@@ -28,7 +28,7 @@ function toBuild(raw: unknown): Build | null {
   const { id, finding, title, createdAt, status, files, changed } = raw;
   if (typeof id !== "string" || typeof finding !== "string" || typeof title !== "string" || typeof createdAt !== "number") return null;
   if (!(STATUSES as readonly unknown[]).includes(status) || typeof files !== "number" || typeof changed !== "number") return null;
-  return { id, finding, title, createdAt, status: status as BuildStatus, files, changed, ...(toSummary(raw["eval"]) ? { eval: toSummary(raw["eval"]) as EvalSummary } : {}), ...(toRun(raw["evalRun"]) ? { evalRun: toRun(raw["evalRun"]) as { done: number; total: number; failed?: true } } : {}) };
+  return { id, finding, title, createdAt, status: status as BuildStatus, files, changed, ...(typeof raw["round"] === "number" ? { round: raw["round"] } : {}), ...(toSummary(raw["evalBefore"]) ? { evalBefore: toSummary(raw["evalBefore"]) as EvalSummary } : {}), ...(toSummary(raw["eval"]) ? { eval: toSummary(raw["eval"]) as EvalSummary } : {}), ...(toRun(raw["evalRun"]) ? { evalRun: toRun(raw["evalRun"]) as { done: number; total: number; failed?: true } } : {}) };
 }
 
 const num = (v: unknown) => (typeof v === "number" ? v : null);
@@ -128,12 +128,15 @@ const EVAL_WORDS: Record<string, string> = {
   no_evals: "This build has no test requests: it was made without a brief.",
   no_skill: "The patch does not change a skill (no SKILL.md above the changed files).",
   eval_running: "Another eval is running. Wait for it to finish.",
+  no_eval: "Run the skill eval first: the next round learns from its result.",
+  rounds_used: "This build has used all three rounds.",
+  master_running: "A master is already running. Wait for it or stop it.",
+  budget: "The usage cap was reached.",
 };
 
-/** Starts a skill eval for a build. The page asks for confirmation first, because it uses model time. */
-export async function startEval(id: string, fetchFn: FetchFn = fetch): Promise<Started> {
+async function startEvalLike(path: string, fetchFn: FetchFn): Promise<Started> {
   try {
-    const res = await fetchFn(`/api/workshop/${encodeURIComponent(id)}/eval`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    const res = await fetchFn(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }) });
     if (res.ok) return { ok: true };
     const data = (await res.json().catch(() => ({}))) as { error?: unknown; reason?: unknown };
     const code = [data.error, data.reason].find((v) => typeof v === "string") as string | undefined;
@@ -145,4 +148,10 @@ export async function startEval(id: string, fetchFn: FetchFn = fetch): Promise<S
   }
 }
 
+/** Starts the next round: a new plan-first master in the same working copy, given what the eval found. The page asks first. */
+export const reviseBuild = (id: string, fetchFn: FetchFn = fetch) => startEvalLike(`/api/workshop/${encodeURIComponent(id)}/revise`, fetchFn);
+
 export const percent = (rate: number | null) => (rate === null ? "n/a" : `${Math.round(rate * 100)}%`);
+
+/** Starts a skill eval for a build. The page asks for confirmation first, because it uses model time. */
+export const startEval = (id: string, fetchFn: FetchFn = fetch) => startEvalLike(`/api/workshop/${encodeURIComponent(id)}/eval`, fetchFn);

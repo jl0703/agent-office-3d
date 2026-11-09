@@ -32,6 +32,8 @@ export function Modal({ open, onClose, title, role = "dialog", description, chil
         e.preventDefault(); // Escape: let the page decide, so state and dialog never disagree
         onClose();
       }}
+      // Escape belongs to the pop-up: the panel or page behind it must not also close.
+      onKeyDown={(e) => e.key === "Escape" && e.stopPropagation()}
       // A drag that starts inside (selecting text) and ends on the backdrop must not close it: the press has to start there too.
       onPointerDown={(e) => (pressedOn.current = e.target)}
       onClick={(e) => e.target === dialog.current && pressedOn.current === dialog.current && onClose()}

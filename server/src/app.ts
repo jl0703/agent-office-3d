@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { rm, stat } from "node:fs/promises";
+import { realpath, rm, stat } from "node:fs/promises";
 import http from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream";
@@ -8,13 +8,13 @@ import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { listAgents, listMcpServers, listSkills } from "./claudeSetup.ts";
-import { changedSkillDir, readCases, readEval, runEval, saveEval, scratchDir, skillTexts, supervisorSession } from "./skillEval.ts";
+import { changedSkillDir, readCases, readEval, readEvalRound, reviseGoal, runEval, saveEval, scratchDir, skillTexts, supervisorSession } from "./skillEval.ts";
 import { buildBriefPrompt, checkBrief, evalsJson, readBriefs, saveBrief, type Brief } from "./briefs.ts";
 import { addAgent, addedAgents, agentDirsFor, removeAgent } from "./agentsManage.ts";
 import type { ClaudeRunner } from "./claudeCli.ts";
 import { addedServers, addServer, buildArgs, previewLine, removeServer, type Failure as McpFailure, type McpInput } from "./mcpManage.ts";
 import { addedSkills, addSkill, dirsFor, removeSkill, SKILL_NAME, type Failure } from "./skillsManage.ts";
-import { buildWorkshopGoal, type Workshop } from "./workshop.ts";
+import { buildWorkshopGoal, MAX_ROUNDS, type Workshop } from "./workshop.ts";
 import { buildEvaluationPrompt, readEvaluations } from "./evaluations.ts";
 import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, readConfig, readFinding, readFindings, resolveResearch, SLUG, withDecisions, writeConfig } from "./findings.ts";
 import { PlanBody } from "./plan.ts";
@@ -411,20 +411,41 @@ export async function startServer(opts: Options): Promise<RunningServer> {
     const shop = opts.workshop;
     const patch = /^\/api\/workshop\/([0-9a-f]{12})\/patch$/.exec(pathname);
     const evalPath = /^\/api\/workshop\/([0-9a-f]{12})\/eval$/.exec(pathname);
+    const revisePath = /^\/api\/workshop\/([0-9a-f]{12})\/revise$/.exec(pathname);
     const known =
       (pathname === "/api/workshop" && method === "GET") ||
       (pathname === "/api/workshop/build" && method === "POST" && opts.supervisor) ||
       (patch && method === "GET") ||
-      (evalPath && (method === "GET" || (method === "POST" && opts.supervisor)));
+      (evalPath && (method === "GET" || (method === "POST" && opts.supervisor))) ||
+      (revisePath && method === "POST" && opts.supervisor);
     if (!known) return false;
     run(req, res, async () => {
       if (!shop) return json(res, 404, { error: "not_found" });
       if (pathname === "/api/workshop") {
         const builds = await Promise.all((await shop.list()).map(async (b) => {
           const e = await readEval(join(shop.dir, b.id));
-          return { ...b, ...(e ? { eval: { verdict: e.verdict, withRate: e.withRate, baselineRate: e.baselineRate, delta: e.delta, costUsd: e.costUsd, capped: e.capped, ranAt: e.ranAt } } : {}), ...(evalRuns.has(b.id) ? { evalRun: evalRuns.get(b.id) } : {}) };
+          const before = b.round > 1 ? await readEvalRound(join(shop.dir, b.id), b.round - 1) : null;
+          return { ...b, ...(before ? { evalBefore: { verdict: before.verdict, withRate: before.withRate, baselineRate: before.baselineRate, delta: before.delta, costUsd: before.costUsd, capped: before.capped, ranAt: before.ranAt } } : {}), ...(e ? { eval: { verdict: e.verdict, withRate: e.withRate, baselineRate: e.baselineRate, delta: e.delta, costUsd: e.costUsd, capped: e.capped, ranAt: e.ranAt } } : {}), ...(evalRuns.has(b.id) ? { evalRun: evalRuns.get(b.id) } : {}) };
         }));
         return json(res, 200, { builds, dir: shop.dir });
+      }
+      if (revisePath) {
+        const sup = opts.supervisor;
+        if (!sup || !EvalBody.safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
+        const id = revisePath[1] as string;
+        const build = (await shop.list()).find((b) => b.id === id);
+        if (!build) return json(res, 404, { error: "not_found" });
+        if (build.status !== "ready") return json(res, 409, { reason: "no_patch" });
+        if (build.round >= MAX_ROUNDS) return json(res, 409, { reason: "rounds_used" });
+        if (evalRuns.has(id)) return json(res, 409, { reason: "eval_running" });
+        const dir = join(shop.dir, id);
+        const evaluated = await readEval(dir);
+        if (!evaluated) return json(res, 409, { reason: "no_eval" });
+        // The master works in the same working copy as before; its plan waits for the owner like any other.
+        const started = await sup.startMaster({ cwd: join(await realpath(dir), "b"), prompt: reviseGoal(opts.workshopTargetName ?? "the workspace", evaluated), workshop: id });
+        if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
+        await shop.reopen(id);
+        return json(res, 202, { id: started.id, round: build.round + 1 });
       }
       if (evalPath && method === "GET") {
         const got = await readEval(join(shop.dir, evalPath[1] as string));
