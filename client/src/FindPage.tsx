@@ -1,17 +1,18 @@
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BriefPanel, Stepper } from "./BriefPanel.tsx";
+import { EvalPanel } from "./EvalPanel.tsx";
 import { Breadcrumb, pageForFind } from "./CatalogPage.tsx";
 import { nextStep, stagesOf } from "./pipeline.ts";
 import { DECISIONS, DECISION_WORD, demoFindings, evaluateFinding, generateBrief, getFindings, KIND_WORD as FIND_KIND_WORD, safeLink, setDecision, VERDICT_WORD, type Decision, type Finding } from "./research.ts";
 import { hrefFor } from "./route.ts";
-import { getBuilds, startBuild, type Build } from "./workshop.ts";
+import { demoBuilds, getBuilds, startBuild, type Build } from "./workshop.ts";
 
 /** One research find on its own page: the facts, the fit check, and what you can do with it. */
 export function FindPage({ id, demo }: { id: string; demo: boolean }) {
   // undefined while loading, null when the findings cannot be read
   const [finds, setFinds] = useState<Finding[] | null | undefined>(demo ? demoFindings() : undefined);
-  const [builds, setBuilds] = useState<Build[]>([]);
+  const [builds, setBuilds] = useState<Build[]>(demo ? demoBuilds() : []);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -184,6 +185,11 @@ export function FindPage({ id, demo }: { id: string; demo: boolean }) {
           )}
 
           <BriefPanel f={f} demo={demo} onSaved={() => void load()} />
+
+          {(() => {
+            const built = builds.find((x) => x.finding === f.id && x.status === "ready");
+            return built ? <EvalPanel build={built} demo={demo} onChanged={() => void load()} /> : null;
+          })()}
 
           <section className="item-body" aria-label="Actions">
             <h2 className="catalog-section">What to do with it</h2>

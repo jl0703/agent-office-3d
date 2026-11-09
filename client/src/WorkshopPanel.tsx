@@ -1,5 +1,6 @@
 import { Hammer, X } from "lucide-react";
 import { useCallback, useEffect, useState, type Ref } from "react";
+import { EvalPanel } from "./EvalPanel.tsx";
 import { getFindings, type Finding } from "./research.ts";
 import { DEMO_PATCH, demoBuilds, getBuilds, getPatch, lineKind, startBuild, STATUS_WORD, type Build } from "./workshop.ts";
 
@@ -142,6 +143,7 @@ export function WorkshopPanel({ id, demo, off, headingRef, onClose }: Props) {
                       <p className="panel-note">
                         To apply: run <code>{`git apply -p1 "${dir}/${b.id}/changes.patch"`}</code> inside your target folder, after reading the patch above.
                       </p>
+                      <EvalPanel build={b} demo={demo} onChanged={() => void load()} />
                     </>
                   )}
                   {b.status === "building" && <p className="panel-note">The master is still working or waiting for your approval. The patch appears when it finishes a turn.</p>}

@@ -348,6 +348,17 @@ try {
       await page.wait(400);
       const patch = await page.evaluate<string>(`document.querySelector(".patch")?.textContent ?? ""`);
       expect(patch.includes("+new line") && patch.includes("-old line"), `workshop(${scheme}): the patch is shown`);
+      // The skill eval of a ready build: verdict, details, and a cost question before running again.
+      const evalText = await page.evaluate<string>(`document.querySelector("[aria-label='Skill eval']")?.textContent ?? ""`);
+      expect(evalText.includes("Improves") && evalText.includes("100%") && evalText.includes("50%"), `workshop(${scheme}): the build shows the eval verdict and both pass rates (${evalText.slice(0, 140)})`);
+      await page.evaluate(`[...document.querySelectorAll("[aria-label='Skill eval'] button")].find((b) => b.textContent === "Show the details")?.click()`);
+      await page.wait(300);
+      expect((await page.evaluate<number>(`document.querySelectorAll(".eval-details .case-box").length`)) === 2, `workshop(${scheme}): the details list both test requests`);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll("[aria-label='Skill eval'] button")].find((b) => b.textContent === "Run again"))`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("about $1, and it stops at $2"), `workshop(${scheme}): running an eval asks first and names the cost`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
       await page.screenshot(join(out, `workshop-${scheme}.png`));
       await page.evaluate(source);
       const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact + " " + v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")))`);
@@ -456,7 +467,8 @@ try {
       expect(await page.evaluate<boolean>(`[...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Build in the Workshop"))`), `sidebar(${scheme}): adopting offers Build in the Workshop`);
       // The progress strip and the next step; adopting a find with no brief offers to write one.
       const strip = await page.evaluate<string>(`[...document.querySelectorAll(".stepper .step")].map((li) => li.className.replace("step step-", "")).join(",")`);
-      expect(strip === "done,done,current,todo", `sidebar(${scheme}): the strip shows found and fit done, the brief next (${strip})`);
+      expect(strip === "done,done,current,done,done", `sidebar(${scheme}): the strip shows the brief as the step still to do (${strip})`);
+      expect((await page.evaluate<string>(`document.querySelector("[aria-label='Skill eval']")?.textContent ?? ""`)).includes("Improves"), `sidebar(${scheme}): the find page shows the skill eval verdict`);
       expect(await page.evaluate<boolean>(`[...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Write the brief"))`), `sidebar(${scheme}): an adopted find without a brief offers Write the brief`);
       // A find that has a brief shows it, and the owner can open the editor.
       await page.evaluate(`location.hash = "#/finds/demo-memory-idea"`);
