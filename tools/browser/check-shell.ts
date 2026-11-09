@@ -387,7 +387,7 @@ try {
       await demo(page, server.base);
       // The menu: links to the office and the three pages.
       const links = await page.evaluate<string>(`[...document.querySelectorAll(".rail a")].map((a) => a.textContent.trim() + "=" + a.getAttribute("href")).join(" | ")`);
-      expect(links === "Office=#/ | Skills=#/skills | MCP=#/mcp | Agents=#/agents | Settings=#/settings", `sidebar(${scheme}): the rail has links to every page, Settings last (${links})`);
+      expect(links === "Office=#/ | Skills=#/skills | MCP=#/mcp | Agents=#/agents | Tasks=#/tasks | Settings=#/settings", `sidebar(${scheme}): the rail has links to every page, Settings last (${links})`);
       const railBox = await page.evaluate<string>(`(() => { const r = document.querySelector(".rail").getBoundingClientRect(); return r.left === 0 && r.width < 100 && r.height > 600 ? "side" : r.bottom >= innerHeight - 1 && r.width > 300 ? "bottom" : "odd"; })()`);
       expect(railBox === (w > 600 ? "side" : "bottom"), `sidebar(${scheme}): the rail is a side bar, a bottom bar on a phone (${railBox})`);
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Skills"))?.click()`);
@@ -496,6 +496,21 @@ try {
       const findViolations = await axe(page);
       expect(findViolations.length === 0, `sidebar(${scheme}): axe on the find page: ${findViolations.join(", ")}`);
       await page.evaluate(`history.back()`);
+      await page.wait(400);
+      // The Tasks board: four columns, with cards from the demo agents, builds and finds.
+      await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Tasks"))?.click()`);
+      await page.wait(500);
+      const board = await page.evaluate<string>(`JSON.stringify({ hash: location.hash, title: document.title, cols: [...document.querySelectorAll(".board-col h2")].map((h) => h.firstChild.textContent.trim()), cards: document.querySelectorAll(".task-card").length, marked: document.querySelector(".rail a[aria-current=page]")?.textContent.trim() })`);
+      const parsed = JSON.parse(board) as { hash: string; title: string; cols: string[]; cards: number; marked: string };
+      expect(parsed.hash === "#/tasks" && parsed.title === "Tasks - Agent Office" && parsed.marked === "Tasks" && parsed.cols.join(",") === "Active,In progress,Review,Done" && parsed.cards > 3, `sidebar(${scheme}): the Tasks board has four columns and cards (${board})`);
+      await page.wait(700);
+      await page.screenshot(join(out, `tasks-${scheme}.png`));
+      const taskViolations = await axe(page);
+      expect(taskViolations.length === 0, `sidebar(${scheme}): axe on Tasks: ${taskViolations.join(", ")}`);
+      await page.evaluate(`[...document.querySelectorAll(".task-card a.link-btn")].find((a) => a.href.includes("#/finds/"))?.click()`);
+      await page.wait(400);
+      expect((await page.evaluate<string>(`location.hash`)).startsWith("#/finds/"), `sidebar(${scheme}): a task card opens its find`);
+      await page.evaluate(`location.hash = "#/tasks"`);
       await page.wait(400);
       // The Settings page, reached from the end of the rail.
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Settings"))?.click()`);

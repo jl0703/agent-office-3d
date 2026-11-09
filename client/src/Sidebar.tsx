@@ -1,4 +1,4 @@
-import { Bot, Boxes, Building2, Puzzle, Settings } from "lucide-react";
+import { Bot, Boxes, Building2, ListChecks, Puzzle, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { pageForFind } from "./CatalogPage.tsx";
 import { demoFindings, getFindings } from "./research.ts";
@@ -11,10 +11,11 @@ const ENTRIES: Entry[] = [
   { label: "Office", title: "Office", route: { page: "office" }, icon: Building2 },
   ...(["skills", "mcp", "agents"] as CatalogKind[]).map((kind) => ({ label: SHORT[kind], title: KIND_WORD[kind], route: { page: "list", kind } as Route, icon: ICONS[kind] })),
 ];
+const TASKS: Entry = { label: "Tasks", title: "Tasks", route: { page: "tasks" }, icon: ListChecks };
 const SETTINGS: Entry = { label: "Settings", title: "Settings", route: { page: "settings" }, icon: Settings };
 
 const kindOf = (r: Route) => (r.page === "list" || r.page === "item" ? r.kind : null);
-const same = (a: Route, b: Route) => (a.page === "office" || b.page === "office" || a.page === "settings" || b.page === "settings" ? a.page === b.page : kindOf(a) !== null && kindOf(a) === kindOf(b));
+const same = (a: Route, b: Route) => (a.page === "office" || b.page === "office" || a.page === "settings" || b.page === "settings" || a.page === "tasks" || b.page === "tasks" ? a.page === b.page : kindOf(a) !== null && kindOf(a) === kindOf(b));
 
 /** The rail down the left side (a bar along the bottom on a phone). Each entry is a link to its own page. */
 export function Sidebar({ route: current, demo }: { route: Route; demo: boolean }) {
@@ -46,7 +47,7 @@ export function Sidebar({ route: current, demo }: { route: Route; demo: boolean 
 
   return (
     <nav className="rail" aria-label="Pages">
-      <ul>{[...ENTRIES, SETTINGS].map(link)}</ul>
+      <ul>{[...ENTRIES, TASKS, SETTINGS].map(link)}</ul>
     </nav>
   );
 }

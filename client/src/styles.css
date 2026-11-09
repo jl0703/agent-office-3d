@@ -1663,6 +1663,74 @@ textarea {
   padding-left: var(--rail-w);
 }
 
+.board-cols {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.board-col {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+}
+
+.board-col h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.board-col ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  overflow-wrap: anywhere;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+}
+
+.task-card h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.task-card p {
+  margin: 0;
+}
+
+.task-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+@media (max-width: 1100px) {
+  .board-cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .board-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-group {
   display: grid;
   justify-items: start;
