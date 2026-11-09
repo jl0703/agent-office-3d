@@ -34,6 +34,7 @@ export const canStop = (agent: Agent) => agent.origin === "managed" && (agent.st
 function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
   const { agent, children } = node;
   const selected = controls.selectedId === agent.id;
+  const role = roleOf(agent, controls.team ?? []);
   return (
     <li className={`agent chip-border-${agent.status}${selected ? " agent-selected" : ""}${controls.hoveredId === agent.id ? " agent-hover" : ""}`}>
       <div className="agent-head">
@@ -61,7 +62,7 @@ function Row({ node, controls }: { node: TreeNode; controls: Controls }) {
         <span className="project">{agent.project}</span>
         {agent.team === "research" && <span className="origin role-text">research</span>}
         {agent.role === "master" && <span className="origin role-text">master</span>}
-        {roleOf(agent, controls.team ?? [])?.person.role && <span className="origin role-text">{roleOf(agent, controls.team ?? [])?.person.role}</span>}
+        {role && <span className="origin role-text">{role.person.role}</span>}
         <span className="origin">{agent.origin === "managed" ? "started here" : "watched"}</span>
       </p>
       {agent.note && <p className="note">{agent.note}</p>}

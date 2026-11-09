@@ -192,7 +192,7 @@ function TagCard({ agent, team }: { agent: Agent; team: readonly Person[] }) {
   const task = shortText(agent.currentTask, 90);
   return (
     <>
-      {role && <span className="tag-role">{role.person.role}</span>}
+      {role && <span className="tag-role">{shortText(role.person.role, 24)}</span>}
       <span className="tag-detail">
         <span>{role ? role.reportsTo : "No role set"}</span>
         <span>{task ? `Task: ${task}` : "No task"}</span>
