@@ -1,7 +1,7 @@
 import { FlaskConical } from "lucide-react";
 import { useId, useState } from "react";
 import { Modal } from "./Modal.tsx";
-import { getEval, percent, startEval, VERDICT_WORD, type Build, type EvalFull, type EvalSide } from "./workshop.ts";
+import { getEval, percent, reviseBuild, startEval, VERDICT_WORD, type Build, type EvalFull, type EvalSide } from "./workshop.ts";
 
 const sideText = (s: EvalSide) => ("error" in s ? s.error : `${s.passed} of ${s.total} checks`);
 
@@ -9,6 +9,7 @@ const sideText = (s: EvalSide) => ("error" in s ? s.error : `${s.passed} of ${s.
 export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: boolean; onChanged: () => void }) {
   const id = useId();
   const [asking, setAsking] = useState(false);
+  const [revising, setRevising] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -29,6 +30,21 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
     onChanged();
   };
 
+  const revise = async () => {
+    if (demo) {
+      setRevising(false);
+      return setMessage("Demo mode: no revision is started.");
+    }
+    setBusy(true);
+    setError("");
+    const result = await reviseBuild(build.id);
+    setBusy(false);
+    if (!result.ok) return setError(result.message);
+    setRevising(false);
+    setMessage("A new master is planning the next round. Its plan waits for your approval (see Needs you).");
+    onChanged();
+  };
+
   const showDetails = async () => {
     setFull("loading");
     setFull(demo ? demoFull(build) : await getEval(build.id));
@@ -37,7 +53,7 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
   const summary = build.eval;
   return (
     <section className="eval-panel" aria-label="Skill eval">
-      <h3>Skill eval</h3>
+      <h3>Skill eval{(build.round ?? 1) > 1 ? `, round ${build.round} of 3` : ""}</h3>
       {build.evalRun?.failed && (
         <p className="form-message" role="alert">
           The last eval run failed before it finished. Nothing was saved. You can run it again.
@@ -55,6 +71,11 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
             {summary.delta !== null ? ` (${summary.delta >= 0 ? "+" : ""}${Math.round(summary.delta * 100)} points)` : ""}. Cost about ${summary.costUsd.toFixed(2)}
             {summary.capped ? ", stopped at the cost limit, so some test requests were skipped" : ""}.
           </p>
+          {build.evalBefore && (
+            <p className="panel-note">
+              The round before: {VERDICT_WORD[build.evalBefore.verdict]}, {percent(build.evalBefore.withRate)} with the change. Now {percent(summary.withRate)}.
+            </p>
+          )}
           <div className="modal-actions">
             <button type="button" aria-expanded={full !== null} aria-controls={`${id}-details`} onClick={() => void showDetails()}>
               Show the details
@@ -62,6 +83,11 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
             <button type="button" onClick={() => setAsking(true)}>
               Run again
             </button>
+            {(build.round ?? 1) < 3 && (
+              <button type="button" onClick={() => setRevising(true)}>
+                Revise with this feedback
+              </button>
+            )}
           </div>
         </>
       )}
@@ -107,11 +133,33 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
       </p>
 
       <Modal
+        open={revising}
+        onClose={() => !busy && setRevising(false)}
+        title="Start the next round?"
+        role="alertdialog"
+        description="A new master works in the same copy, given the test requests and checks that did not pass with the change. It writes a plan first and waits for your approval, like any build. When it finishes you can run the eval again and compare the rounds. Three rounds at most; nothing in your skills changes."
+      >
+        {error && (
+          <p className="form-message" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={busy} onClick={() => void revise()}>
+            {busy ? "Starting…" : "Start the next round"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setRevising(false)}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
         open={asking}
         onClose={() => !busy && setAsking(false)}
         title="Run the skill eval?"
         role="alertdialog"
-        description="Each test request is answered twice, with the change and before it, in separate sessions with no tools, and a different session grades each answer. It uses model time: about $1, and it stops starting new test requests once about $2 is spent. Nothing in your skills changes."
+        description="Each test request is answered twice, with the change and before it, in separate sessions with no tools, and a different session grades each answer. It uses model time: usually 10 to 30 cents for three test requests, and it stops starting new test requests once about $2 is spent. Nothing in your skills changes."
       >
         {error && (
           <p className="form-message" role="alert">

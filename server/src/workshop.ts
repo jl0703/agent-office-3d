@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { realOps, renameWithRetry } from "./managedStore.ts";
@@ -28,9 +28,12 @@ const Meta = z
     status: z.enum(["building", "ready", "no-changes", "too-large", "error"]),
     files: z.number().int().min(0).max(1_000_000),
     changed: z.number().int().min(0).max(1_000_000),
+    /** 1 for the first try; each revision with the eval's feedback adds one, up to MAX_ROUNDS. */
+    round: z.number().int().min(1).max(3).default(1),
   })
   .strict();
 export type Build = z.infer<typeof Meta>;
+export const MAX_ROUNDS = 3;
 
 type Counter = { files: number; bytes: number; maxFiles: number; maxBytes: number };
 
@@ -146,7 +149,7 @@ export function createWorkshop(opts: WorkshopOptions) {
         await rm(folder(id), { recursive: true, force: true });
         return { ok: false, code: "too_big" };
       }
-      const build: Build = { id, finding, title: title.replace(/[\r\n]+/g, " ").slice(0, 120), createdAt: now(), status: "building", files: counter.files, changed: 0 };
+      const build: Build = { id, finding, title: title.replace(/[\r\n]+/g, " ").slice(0, 120), createdAt: now(), status: "building", files: counter.files, changed: 0, round: 1 };
       await saveMeta(build);
       return { ok: true, build, work: await realpath(join(folder(id), "b")) };
     },
@@ -154,6 +157,18 @@ export function createWorkshop(opts: WorkshopOptions) {
     /** Saves the eval cases of the brief next to the copies (not inside them, so they never become part of the patch). */
     async writeEvals(id: string, text: string): Promise<void> {
       if (BUILD_ID.test(id)) await writeAtomic(join(folder(id), "evals.json"), text);
+    },
+
+    /** Starts another round on a ready build: the eval so far is kept as eval-round-<n>.json, and the build is "building" again. Null when it is not ready or the rounds are used up. */
+    async reopen(id: string): Promise<Build | null> {
+      const meta = await readMeta(id);
+      if (!meta || meta.status !== "ready" || meta.round >= MAX_ROUNDS) return null;
+      await rename(join(folder(id), "eval.json"), join(folder(id), `eval-round-${meta.round}.json`)).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== "ENOENT") throw e;
+      });
+      const next: Build = { ...meta, status: "building", round: meta.round + 1 };
+      await saveMeta(next);
+      return next;
     },
 
     /** Removes a build whose master never started. */

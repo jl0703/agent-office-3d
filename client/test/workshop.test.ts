@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { demoBuilds, getBuilds, getPatch, lineKind, startBuild } from "../src/workshop.ts";
+import { demoBuilds, getBuilds, getPatch, lineKind, reviseBuild, startBuild } from "../src/workshop.ts";
 
 const fake = (status: number, body: unknown) => {
   const calls: { path: string; init?: RequestInit }[] = [];
@@ -37,5 +37,22 @@ describe("workshop on the page", () => {
   it("sorts patch lines into header, added, removed and context, and has demo builds", () => {
     assert.deepEqual(["diff --git a b", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "+new", "-old", " same"].map(lineKind), ["head", "head", "head", "head", "add", "del", "ctx"]);
     assert.equal(demoBuilds().some((b) => b.status === "ready"), true);
+  });
+});
+
+describe("the next round on the page", () => {
+  it("posts to the revise route with confirm, explains each refusal, and reads round and the earlier result from a build", async () => {
+    const ok = fake(202, { id: "m", round: 2 });
+    assert.deepEqual(await reviseBuild("0123456789ab", ok.fn), { ok: true });
+    assert.equal(ok.calls[0]?.path, "/api/workshop/0123456789ab/revise");
+    assert.equal(ok.calls[0]?.init?.body, JSON.stringify({ confirm: true }));
+    for (const [status, body, word] of [[409, { reason: "no_eval" }, /Run the skill eval first/], [409, { reason: "rounds_used" }, /three rounds/], [409, { reason: "master_running" }, /master is already running/]] as const) {
+      const r = await reviseBuild("0123456789ab", fake(status, body).fn);
+      assert.equal(r.ok === false && word.test(r.message), true, JSON.stringify(body));
+    }
+    const summary = { verdict: "worse", withRate: 0.2, baselineRate: 0.5, delta: -0.3, costUsd: 0.1, capped: false, ranAt: 1 };
+    const got = await getBuilds(fake(200, { builds: [build({ round: 2, evalBefore: summary, eval: { ...summary, verdict: "improves" } })], dir: "/d" }).fn);
+    const b = got !== null && got !== "off" ? got.builds[0] : undefined;
+    assert.deepEqual([b?.round, b?.evalBefore?.verdict, b?.eval?.verdict], [2, "worse", "improves"]);
   });
 });

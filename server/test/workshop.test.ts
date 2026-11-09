@@ -135,3 +135,25 @@ describe("workshop: the goal", () => {
     assert.match(buildWorkshopGoal({ id: "a", title: "t", url: "u", why: "w" }, undefined, "skills"), /no fit report/);
   });
 });
+
+describe("workshop: another round", () => {
+  it("keeps the earlier eval, counts the round, and stops after three", async () => {
+    const { t, shop } = target();
+    const made = await shop.prepare("tool-a", "A");
+    assert.ok(made.ok);
+    assert.equal(made.build.round, 1);
+    assert.equal(await shop.reopen(made.build.id), null, "not ready yet");
+    writeFileSync(join(made.work, "x.md"), "x");
+    await shop.finish(made.build.id);
+    writeFileSync(join(shop.dir, made.build.id, "eval.json"), "{}");
+    const second = await shop.reopen(made.build.id);
+    assert.deepEqual([second?.status, second?.round], ["building", 2]);
+    assert.equal(existsSync(join(shop.dir, made.build.id, "eval-round-1.json")), true);
+    assert.equal(existsSync(join(shop.dir, made.build.id, "eval.json")), false);
+    await shop.finish(made.build.id);
+    assert.equal((await shop.reopen(made.build.id))?.round, 3);
+    await shop.finish(made.build.id);
+    assert.equal(await shop.reopen(made.build.id), null, "three rounds is the limit");
+    assert.ok(t);
+  });
+});
