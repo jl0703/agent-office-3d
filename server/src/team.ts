@@ -17,9 +17,9 @@ const Line = z
   .trim()
   .min(1)
   .max(60)
-  .regex(/^[^\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]+$/);
+  .regex(/^[^\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$/);
 // The role brief may span lines.
-const Brief = z.string().max(1500).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]*$/);
+const Brief = z.string().max(1500).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]*$/);
 /* eslint-enable no-control-regex */
 const Id = z.string().regex(/^[0-9a-f]{12}$/);
 
@@ -89,8 +89,10 @@ export function createTeamStore(dir: string, ops: WriteOps = realOps) {
       let text: string;
       try {
         text = await readFile(file, "utf8");
-      } catch {
-        return [];
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        current = undefined; // a read that failed for another reason must not look like an empty team, or the next save would overwrite a good file
+        throw error;
       }
       let raw: unknown;
       try {

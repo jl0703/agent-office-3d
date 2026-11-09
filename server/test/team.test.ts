@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { startServer, type RunningServer } from "../src/app.ts";
 import { createRegistry } from "../src/registry.ts";
+import { realOps } from "../src/managedStore.ts";
 import { chainOf, checkTeam, createTeamStore, MAX_PEOPLE, PersonInput, TEAM_FILE, type Person } from "../src/team.ts";
 import { loginTo, send } from "./helpers.ts";
 
@@ -83,10 +84,37 @@ describe("team: the store", () => {
     const ok = { name: " Alex ", role: "CEO", brief: "Line one\nLine two", reportsTo: null };
     const parsed = PersonInput.safeParse(ok);
     assert.ok(parsed.success && parsed.data.name === "Alex" && parsed.data.brief.includes('\n'), "names are trimmed and a brief keeps its line break");
-    for (const bad of ["a\nb", "a\u202eb", "", " ", "x".repeat(61)]) assert.equal(PersonInput.safeParse({ ...ok, name: bad }).success, false, JSON.stringify(bad));
+    for (const bad of ["a\nb", "a\u202eb", "a\u2067b", "a\u200eb", "a\u2028b", "", " ", "x".repeat(61)]) assert.equal(PersonInput.safeParse({ ...ok, name: bad }).success, false, JSON.stringify(bad));
     assert.equal(PersonInput.safeParse({ ...ok, brief: "x".repeat(1501) }).success, false);
     assert.equal(PersonInput.safeParse({ ...ok, brief: "a\u0000b" }).success, false);
     assert.equal(PersonInput.safeParse({ ...ok, reportsTo: "../x" }).success, false);
+  });
+});
+
+describe("team: the file", () => {
+  it("keeps the old team when a save fails, and does not mistake a read error for an empty team", async () => {
+    const dir = tmp();
+    let failNext = false;
+    const store = createTeamStore(dir, { writeFile: async (...a) => (failNext ? Promise.reject(new Error("disk")) : realOps.writeFile(...a)), rename: realOps.rename });
+    const top = await store.add({ name: "Alex", role: "CEO", brief: "", reportsTo: null });
+    assert.ok(top.ok && top.person);
+    failNext = true;
+    await assert.rejects(store.add({ name: "Sam", role: "Lead", brief: "", reportsTo: top.person.id }));
+    assert.deepEqual((await store.list()).map((p) => p.name), ["Alex"], "the failed add left no trace");
+    failNext = false;
+    const unreadable = tmp();
+    mkdirSync(join(unreadable, TEAM_FILE)); // a folder where the file should be: reading it fails with EISDIR, not ENOENT
+    await assert.rejects(createTeamStore(unreadable).list());
+    assert.equal(existsSync(join(unreadable, `${TEAM_FILE}.bad`)), false, "nothing was set aside");
+  });
+
+  it("runs calls one after another, so two adds at once both land", async () => {
+    const store = createTeamStore(tmp());
+    const top = await store.add({ name: "Alex", role: "CEO", brief: "", reportsTo: null });
+    assert.ok(top.ok && top.person);
+    const boss = top.person.id;
+    await Promise.all(["A", "B", "C", "D"].map((name) => store.add({ name, role: "Dev", brief: "", reportsTo: boss })));
+    assert.equal((await store.list()).length, 5);
   });
 });
 
