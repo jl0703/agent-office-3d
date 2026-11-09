@@ -452,6 +452,7 @@ try {
       await page.evaluate(`[...document.querySelectorAll("[aria-label='Your decision'] button")].find((b) => b.textContent === "Adopt")?.click()`);
       await page.wait(300);
       expect(await page.evaluate<boolean>(`[...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Build in the Workshop"))`), `sidebar(${scheme}): adopting offers Build in the Workshop`);
+      await page.wait(700); // the pressed chip fades its colour in; axe must not read it half way
       await page.screenshot(join(out, `find-${scheme}.png`));
       const findViolations = await axe(page);
       expect(findViolations.length === 0, `sidebar(${scheme}): axe on the find page: ${findViolations.join(", ")}`);
@@ -477,7 +478,7 @@ try {
       const mcpViolations = await axe(page);
       expect(mcpViolations.length === 0, `sidebar(${scheme}): axe on the MCP page with the form and confirm box open: ${mcpViolations.join(", ")}`);
       await page.evaluate(`[...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent === "Back")?.click()`);
-      await page.wait(200);
+      for (let i = 0; i < 20 && !(await page.evaluate<boolean>(`Boolean(document.querySelector("dialog[open] input[placeholder=my-server]"))`)); i++) await page.wait(100);
       expect(await page.evaluate<boolean>(`Boolean(document.querySelector("dialog[open] input[placeholder=my-server]"))`), `sidebar(${scheme}): Back returns to the form with the pop-up still open`);
       await page.evaluate(`[...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent === "Cancel")?.click()`);
       for (let i = 0; i < 20 && !(await page.evaluate<string>(`document.activeElement?.textContent ?? ""`)).includes("Add an MCP server"); i++) await page.wait(100);
