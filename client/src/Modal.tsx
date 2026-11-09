@@ -9,6 +9,7 @@ export function Modal({ open, onClose, title, role = "dialog", description, chil
   const id = useId();
   const dialog = useRef<HTMLDialogElement | null>(null);
   const heading = useRef<HTMLHeadingElement | null>(null);
+  const pressedOn = useRef<EventTarget | null>(null);
 
   useEffect(() => {
     const el = dialog.current;
@@ -31,7 +32,11 @@ export function Modal({ open, onClose, title, role = "dialog", description, chil
         e.preventDefault(); // Escape: let the page decide, so state and dialog never disagree
         onClose();
       }}
-      onClick={(e) => e.target === dialog.current && onClose()}
+      // A drag that starts inside (selecting text) and ends on the backdrop must not close it: the press has to start there too.
+      onPointerDown={(e) => (pressedOn.current = e.target)}
+      onClick={(e) => e.target === dialog.current && pressedOn.current === dialog.current && onClose()}
+      // If the browser closes it by itself, bring the page's state back in line.
+      onClose={() => open && onClose()}
     >
       {open && (
         <div className="modal-body">

@@ -123,7 +123,7 @@ export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChan
 
       <Modal
         open={step === "confirm"}
-        onClose={() => setStep("form")}
+        onClose={() => !busy && setStep("form")}
         title="Change your Claude setup?"
         role="alertdialog"
         description={`Create the ${noun} "${name}" in your ${noun}s folder${mode === "paste" ? ` from the pasted text (${new Blob([content]).size} bytes)` : ` by copying ${source.trim()}`}. Claude Code will load it in new sessions. Read it first if you did not write it.`}
@@ -150,7 +150,7 @@ export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChan
 
       <Modal
         open={pendingRemove !== null}
-        onClose={() => (setError(""), onAskRemove(null))}
+        onClose={() => !busy && (setError(""), onAskRemove(null))}
         title="Change your Claude setup?"
         role="alertdialog"
         description={`Move the ${noun} "${pendingRemove ?? ""}" from your ${noun}s folder to the trash folder. You can move it back by hand.`}

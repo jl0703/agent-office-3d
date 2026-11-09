@@ -56,6 +56,7 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
     setBusy(false);
     if (!result.ok) return setError(result.message);
     setStep("closed");
+    setPrepared(null);
     onAskRemove(null);
     setMessage(demo ? "Demo mode: nothing was changed." : remove ? `Removed ${target}.` : `Added ${target}. New Claude Code sessions will start it when they need it.`);
     if (!remove && !demo) {
@@ -72,6 +73,11 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
   const closeAdd = () => {
     setStep("closed");
     setError("");
+    setPrepared(null); // the prepared command holds environment values and headers: do not keep them
+  };
+  const back = () => {
+    setError("");
+    setStep("form");
   };
 
   return (
@@ -127,7 +133,7 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
 
       <Modal
         open={step === "confirm" && prepared !== null}
-        onClose={() => setStep("form")}
+        onClose={() => !busy && back()}
         title="Change your Claude setup?"
         role="alertdialog"
         description="This command will be run to save the server. Claude Code will start a local program with your permissions whenever a session needs it. The office never starts it."
@@ -144,7 +150,7 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
           <button type="button" disabled={busy} onClick={() => void run(false)}>
             {busy ? "Working…" : "Confirm"}
           </button>
-          <button type="button" disabled={busy} onClick={() => setStep("form")}>
+          <button type="button" disabled={busy} onClick={back}>
             Back
           </button>
         </div>
@@ -152,7 +158,7 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
 
       <Modal
         open={pendingRemove !== null}
-        onClose={() => (setError(""), onAskRemove(null))}
+        onClose={() => !busy && (setError(""), onAskRemove(null))}
         title="Change your Claude setup?"
         role="alertdialog"
         description={`Remove the MCP server "${pendingRemove ?? ""}" from your Claude settings. Its program or service is not touched.`}
