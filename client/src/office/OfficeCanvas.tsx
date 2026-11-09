@@ -5,6 +5,7 @@ import { Spherical, Vector3 } from "three";
 import type { Agent } from "../../../shared/events.ts";
 import { Office } from "./Office.tsx";
 import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, fitCamera, truncateTag } from "./layout.ts";
+import { roleOf, type Person } from "../team.ts";
 import type { Vault } from "../vault.ts";
 import { MAX_BUBBLES } from "./story.ts";
 import { overviewBounds, roomBounds, roomName, type Assignment, type Bounds } from "./rooms.ts";
@@ -180,8 +181,30 @@ function Stats({ out }: { out: MutableRefObject<HTMLPreElement | null> }) {
   return null;
 }
 
+const shortText = (text: string | null, max: number) => {
+  const chars = Array.from((text ?? "").replace(/\s+/g, " ").trim());
+  return chars.length <= max ? chars.join("") : chars.slice(0, max).join("") + "…";
+};
+
+/** The role under the name, and, when the tag is hovered or selected, who the agent reports to and its current task. */
+function TagCard({ agent, team }: { agent: Agent; team: readonly Person[] }) {
+  const role = roleOf(agent, team);
+  const task = shortText(agent.currentTask, 90);
+  return (
+    <>
+      {role && <span className="tag-role">{shortText(role.person.role, 24)}</span>}
+      <span className="tag-detail">
+        <span>{role ? role.reportsTo : "No role set"}</span>
+        <span>{task ? `Task: ${task}` : "No task"}</span>
+      </span>
+    </>
+  );
+}
+
 export type OfficeCanvasProps = {
   agents: readonly Agent[];
+  /** The team, for the role and the manager shown on a name tag. */
+  team?: readonly Person[];
   connection: "connecting" | "connected" | "disconnected";
   demo: boolean;
   assignment: Assignment;
@@ -197,7 +220,7 @@ export type OfficeCanvasProps = {
   onStartWorker: () => void;
 };
 
-export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubOpen, newFindings = 0, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
+export function OfficeCanvas({ agents, team = [], connection, demo, assignment, vault, hubOpen, newFindings = 0, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
   const scheme = useScheme();
   const reduced = useReducedMotion();
   const [supported] = useState(webglAvailable);
@@ -352,9 +375,12 @@ export function OfficeCanvas({ agents, connection, demo, assignment, vault, hubO
                 else tagRefs.current.delete(a.id);
               }}
             >
-              <span className="tag-family">{FAMILY_LETTERS[families.get(a.id) ?? 0]}</span>
-              <span className="tag-name">{truncateTag(a.name)}</span>
-              <span className="tag-status">{a.status}</span>
+              <span className="tag-line">
+                <span className="tag-family">{FAMILY_LETTERS[families.get(a.id) ?? 0]}</span>
+                <span className="tag-name">{truncateTag(a.name)}</span>
+                <span className="tag-status">{a.status}</span>
+              </span>
+              <TagCard agent={a} team={team} />
             </div>
           ))}
         </div>

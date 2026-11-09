@@ -20,6 +20,7 @@ import { SettingsPage } from "./SettingsPage.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { TasksPage } from "./TasksPage.tsx";
 import { TeamPage } from "./TeamPage.tsx";
+import { demoTeam, getTeam, type Person } from "./team.ts";
 import { hrefFor, KIND_WORD } from "./route.ts";
 import { useRoute } from "./useRoute.ts";
 import { ResearchBoard } from "./ResearchBoard.tsx";
@@ -74,6 +75,8 @@ function App() {
   const [researchOpen, setResearchOpen] = useState(false);
   const [workshopOpen, setWorkshopOpen] = useState(false);
   const [newFindings, setNewFindings] = useState(0);
+  // The team, for the role and the manager shown next to an agent: read now and every half minute.
+  const [team, setTeam] = useState<Person[]>([]);
   const [preset, setPreset] = useState<StartPreset | null>(null);
   const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
   const lastStatus = useRef(new Map<string, AgentStatus>());
@@ -119,6 +122,19 @@ function App() {
       clearInterval(timer);
     };
   }, [connection]);
+
+  useEffect(() => {
+    if (demo.active) return setTeam(demoTeam());
+    if (connection !== "connected") return;
+    let cancelled = false;
+    const load = () => void getTeam().then((p) => !cancelled && p && setTeam(p));
+    load();
+    const timer = setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [demo.active, connection]);
 
   // How many findings wait for a decision: shown on the Research button and in "Needs you".
   useEffect(() => {
@@ -503,6 +519,7 @@ function App() {
             <p className="note">Sessions marked "started here" can be stopped. Sessions started anywhere else are view-only.</p>
             <ListFilter filter={filter} onChange={setFilter} counts={statusCounts} shown={matchCount} total={listTotal} searchRef={searchRef} />
           <AgentList
+            team={team}
             emptyText={isFiltering(filter) ? "No sessions match. Clear the search or the status chips." : undefined}
               groups={shownGroups}
             focusedRoom={room}
@@ -519,7 +536,7 @@ function App() {
           </section>
 
           <section className="pane pane-office" id="pane-office" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-office" : undefined}>
-            <OfficeCanvas agents={agents} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} newFindings={newFindings} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
+            <OfficeCanvas agents={agents} team={team} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} newFindings={newFindings} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
             {current && !hubOpen && !researchOpen && !workshopOpen && narrow && !expanded && (
               <button type="button" className="peek" onClick={() => setExpanded(true)}>
                 <strong>{current.name}</strong> · {STATUS_WORD[current.status]} · Details
@@ -537,6 +554,7 @@ function App() {
           ) : panelOpen && current ? (
               <AgentPanel
                 id={PANEL_ID}
+                team={team}
                 agent={current}
                 parent={parent}
                 subagents={subagents}

@@ -44,6 +44,9 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/** The first demo sessions work as people of the demo team (see demoTeam), so the office card shows a role and a manager. */
+const DEMO_PEOPLE = ["000000000004", "000000000006", "000000000005"];
+
 export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): DemoWorld {
   const n = Math.max(1, Math.min(Math.floor(count) || 1, 200));
   const rng = mulberry32(seed);
@@ -78,6 +81,7 @@ export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): De
       desk: i,
       updatedAt: new Date(nowMs).toISOString(),
       note: null,
+      ...(isSession && DEMO_PEOPLE[i] ? { personId: DEMO_PEOPLE[i] } : {}),
       ...(isSession && i === 0
         ? { phase: "planning" as const, plan: { goal: "Add a settings page with tests", steps: ["Read the existing pages", "Add the route and form", "Write tests", "Run lint and tests"], files: ["src/settings"], workers: 2, costUsd: 1.2, risks: "Touches the shared layout.", undo: "Revert the branch.", status: "pending" as const } }
         : {}),

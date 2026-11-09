@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addPerson, belowOf, chainOf, demoTeam, getTeam, orgOf, removePerson, reportsLine, TEAM_FAILURES } from "../src/team.ts";
+import { addPerson, belowOf, chainOf, demoTeam, getTeam, orgOf, removePerson, reportsLine, roleOf, TEAM_FAILURES } from "../src/team.ts";
 
 const team = demoTeam();
 const named = (n: string) => team.find((p) => p.name === n)!;
@@ -46,5 +46,17 @@ describe("team: calls", () => {
     assert.deepEqual(refused, { ok: false, message: TEAM_FAILURES["is_top"] });
     const expired = await removePerson("x", reply(403, { error: "origin" }));
     assert.ok(!expired.ok && /session/.test(expired.message));
+  });
+});
+
+describe("team: the role of an agent", () => {
+  it("finds the person an agent works as, with the managers above them, and nothing for an agent with no role", () => {
+    const found = roleOf({ personId: named("Riley").id }, team);
+    assert.equal(found?.person.role, "Frontend Developer");
+    assert.deepEqual(found?.managers, ["Sam", "Alex"]);
+    assert.equal(found?.reportsTo, "Reports to Sam, then Alex");
+    assert.equal(roleOf({}, team), null, "a session you started yourself has no role");
+    assert.equal(roleOf({ personId: "000000000099" }, team), null, "a person who left the team");
+    assert.deepEqual(roleOf({ personId: named("Alex").id }, team)?.managers, []);
   });
 });

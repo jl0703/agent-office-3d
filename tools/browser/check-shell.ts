@@ -118,6 +118,15 @@ try {
       await page.wait(900);
       expect((await count(".room-head")) === groupsBefore, `rooms(${scheme}): Escape returns to the overview`);
       expect((await page.evaluate<string>(`document.querySelector(".hub-new")?.textContent ?? ""`)).includes("new finding"), `rooms(${scheme}): hub sign shows new findings`);
+      // An agent that works as a person: the name tag shows the role, and on selection who they report to and the task; the list and panel say the same in text.
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))(document.querySelector('[data-agent-id="demo-1"]'))`);
+      await page.wait(500);
+      const card = await page.evaluate<string>(`(() => { const t = document.querySelector('.office-tag[data-state="selected"]'); const d = t?.querySelector(".tag-detail"); return JSON.stringify({ role: t?.querySelector(".tag-role")?.textContent, detail: d?.textContent, shown: d ? getComputedStyle(d).display !== "none" : false, panel: [...document.querySelectorAll(".panel-facts")].map((f) => f.textContent).join(" "), row: document.querySelector('[data-agent-id="demo-1"]')?.closest("li")?.textContent ?? "" }); })()`);
+      expect(card.includes('"role":"Frontend Developer"') && card.includes("Reports to Sam, then Alex") && card.includes("Task:") && card.includes('"shown":true'), `rooms(${scheme}): the selected name tag shows the role, the reporting line and the task (${card.slice(0, 240)})`);
+      expect(card.includes("RoleFrontend Developer") && card.includes("Reports toSam, then Alex") && card.includes("Frontend Developer"), `rooms(${scheme}): the panel and the list say the role in text (${card.slice(0, 420)})`);
+      await page.screenshot(join(out, `card-${scheme}.png`));
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(400);
       await page.evaluate(`document.querySelector(".hub-sign").click()`);
       await page.wait(500);
       const hub = await page.evaluate<string>(`document.querySelector(".panel")?.textContent ?? ""`);
