@@ -162,7 +162,8 @@ describe("workshop: another round", () => {
     const made = await shop.prepare("tool-a", "A");
     assert.ok(made.ok);
     const file = join(shop.dir, made.build.id, "meta.json");
-    const { round: _round, ...old } = JSON.parse(readFileSync(file, "utf8"));
+    const old = JSON.parse(readFileSync(file, "utf8"));
+    delete old.round;
     writeFileSync(file, JSON.stringify(old));
     assert.equal((await shop.list()).find((b) => b.id === made.build.id)?.round, 1);
   });
