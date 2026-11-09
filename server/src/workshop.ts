@@ -163,7 +163,9 @@ export function createWorkshop(opts: WorkshopOptions) {
     async reopen(id: string): Promise<Build | null> {
       const meta = await readMeta(id);
       if (!meta || meta.status !== "ready" || meta.round >= MAX_ROUNDS) return null;
-      await rename(join(folder(id), "eval.json"), join(folder(id), `eval-round-${meta.round}.json`)).catch(() => undefined);
+      await rename(join(folder(id), "eval.json"), join(folder(id), `eval-round-${meta.round}.json`)).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== "ENOENT") throw e;
+      });
       const next: Build = { ...meta, status: "building", round: meta.round + 1 };
       await saveMeta(next);
       return next;

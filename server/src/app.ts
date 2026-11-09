@@ -437,14 +437,19 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         if (!build) return json(res, 404, { error: "not_found" });
         if (build.status !== "ready") return json(res, 409, { reason: "no_patch" });
         if (build.round >= MAX_ROUNDS) return json(res, 409, { reason: "rounds_used" });
-        if (evalRuns.has(id)) return json(res, 409, { reason: "eval_running" });
+        if (evalRuns.has(id) && !evalRuns.get(id)?.failed) return json(res, 409, { reason: "eval_running" });
         const dir = join(shop.dir, id);
         const evaluated = await readEval(dir);
         if (!evaluated) return json(res, 409, { reason: "no_eval" });
         // The master works in the same working copy as before; its plan waits for the owner like any other.
         const started = await sup.startMaster({ cwd: join(await realpath(dir), "b"), prompt: reviseGoal(opts.workshopTargetName ?? "the workspace", evaluated), workshop: id });
         if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
-        await shop.reopen(id);
+        // A master must never run on a build still shown as ready: if the build cannot be reopened, stop it again.
+        const reopened = await shop.reopen(id).catch(() => null);
+        if (!reopened) {
+          await sup.stop(started.id).catch(() => undefined);
+          return json(res, 409, { reason: "no_patch" });
+        }
         return json(res, 202, { id: started.id, round: build.round + 1 });
       }
       if (evalPath && method === "GET") {
