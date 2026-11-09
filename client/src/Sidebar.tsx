@@ -8,7 +8,8 @@ const ENTRIES: { label: string; route: Route; icon: typeof Puzzle }[] = [
   ...(["skills", "mcp", "agents"] as CatalogKind[]).map((kind) => ({ label: KIND_WORD[kind], route: { page: "list", kind } as Route, icon: ICONS[kind] })),
 ];
 
-const same = (a: Route, b: Route) => (a.page === "office" || b.page === "office" ? a.page === b.page : a.kind === b.kind);
+const kindOf = (r: Route) => (r.page === "list" || r.page === "item" ? r.kind : null);
+const same = (a: Route, b: Route) => (a.page === "office" || b.page === "office" ? a.page === b.page : kindOf(a) !== null && kindOf(a) === kindOf(b));
 
 /** The hamburger button and the left menu. Each choice is a link to its own page. */
 export function Sidebar({ route }: { route: Route }) {

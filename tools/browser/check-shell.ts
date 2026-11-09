@@ -442,6 +442,21 @@ try {
       expect((await page.evaluate<string>(`location.hash`)) === "#/" && (await page.evaluate<boolean>(`Boolean(document.querySelector(".board"))`)), `sidebar(${scheme}): Research from another page opens it in the office`);
       await page.evaluate(`location.hash = "#/skills"`);
       await page.wait(400);
+      // A research find has its own page, with the fit check and the actions.
+      await page.evaluate(`document.querySelector("[aria-label='View details for Demo: a pack of documentation skills']")?.click()`);
+      await page.wait(400);
+      expect((await page.evaluate<string>(`location.hash`)) === "#/finds/demo-skills-pack", `sidebar(${scheme}): a find card opens its own page`);
+      const findText = await page.evaluate<string>(`document.querySelector("main")?.textContent ?? ""`);
+      expect(findText.includes("Fit check: Fits") && findText.includes("Skills") && findText.includes("Open on GitHub"), `sidebar(${scheme}): the find page shows the fit check, its place in the breadcrumb and the source link (${findText.slice(0, 160)})`);
+      expect(await page.evaluate<boolean>(`![...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Build in the Workshop"))`), `sidebar(${scheme}): no Build button until the find is adopted`);
+      await page.evaluate(`[...document.querySelectorAll("[aria-label='Your decision'] button")].find((b) => b.textContent === "Adopt")?.click()`);
+      await page.wait(300);
+      expect(await page.evaluate<boolean>(`[...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Build in the Workshop"))`), `sidebar(${scheme}): adopting offers Build in the Workshop`);
+      await page.screenshot(join(out, `find-${scheme}.png`));
+      const findViolations = await axe(page);
+      expect(findViolations.length === 0, `sidebar(${scheme}): axe on the find page: ${findViolations.join(", ")}`);
+      await page.evaluate(`history.back()`);
+      await page.wait(400);
       // The MCP page, and the way back to the office.
       await page.evaluate(`location.hash = "#/mcp"`);
       await page.wait(400);

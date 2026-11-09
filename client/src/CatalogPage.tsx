@@ -23,6 +23,9 @@ const SORTS: { id: Sort; label: string }[] = [
 /** Which research findings belong on which page: skills and MCP servers by kind, and the repository finds on the agents page. */
 const FIND_KINDS: Record<CatalogKind, Kind[]> = { skills: ["skill"], mcp: ["mcp"], agents: ["repo"] };
 
+/** The page a research find belongs on, or null for an idea or technique. */
+export const pageForFind = (kind: Kind): CatalogKind | null => (Object.keys(FIND_KINDS) as CatalogKind[]).find((k) => FIND_KINDS[k].includes(kind)) ?? null;
+
 /** The research findings, read once when the page opens: undefined while loading, null when they cannot be read. */
 function useFinds(demo: boolean) {
   const [finds, setFinds] = useState<Finding[] | null | undefined>(demo ? demoFindings() : undefined);
@@ -54,7 +57,7 @@ function useSetup(demo: boolean) {
   return { setup, reload };
 }
 
-function Breadcrumb({ kind, name }: { kind?: CatalogKind; name?: string }) {
+export function Breadcrumb({ kind, name }: { kind?: CatalogKind; name?: string }) {
   return (
     <nav aria-label="Breadcrumb" className="breadcrumb">
       <ol>
@@ -69,7 +72,7 @@ function Breadcrumb({ kind, name }: { kind?: CatalogKind; name?: string }) {
             {name ? <a href={hrefFor({ page: "list", kind })}>{KIND_WORD[kind]}</a> : <span aria-current="page">{KIND_WORD[kind]}</span>}
           </li>
         )}
-        {kind && name && (
+        {name && (
           <li>
             <ChevronRight size={14} strokeWidth={1.75} aria-hidden="true" />
             <span aria-current="page">{name}</span>
@@ -96,16 +99,18 @@ function Card({ title, by, badge, description, chips, href, external, children }
       </ul>
       <footer>
         <span className="card-actions">{children}</span>
-        {href && (
-          <a href={href} className="card-open tip" aria-label={`View details for ${title}`} data-tip="View details">
-            <ArrowRight size={20} strokeWidth={1.75} aria-hidden="true" />
-          </a>
-        )}
-        {external && (
-          <a href={external} className="card-open tip" target="_blank" rel="noopener noreferrer" aria-label={`Open ${title} in a new tab`} data-tip="Open the source">
-            <ExternalLink size={20} strokeWidth={1.75} aria-hidden="true" />
-          </a>
-        )}
+        <span className="card-links">
+          {external && (
+            <a href={external} className="card-open tip" target="_blank" rel="noopener noreferrer" aria-label={`Open ${title} in a new tab`} data-tip="Open the source">
+              <ExternalLink size={20} strokeWidth={1.75} aria-hidden="true" />
+            </a>
+          )}
+          {href && (
+            <a href={href} className="card-open tip" aria-label={`View details for ${title}`} data-tip="View details">
+              <ArrowRight size={20} strokeWidth={1.75} aria-hidden="true" />
+            </a>
+          )}
+        </span>
       </footer>
     </article>
   );
@@ -281,6 +286,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
                   ...(f.fit ? [`Fit: ${VERDICT_WORD[f.fit.verdict]}`] : []),
                   ...(f.improves ? [`Improves ${f.improves}`] : []),
                 ]}
+                href={hrefFor({ page: "find", id: f.id })}
                 {...(safeLink(f.url) ? { external: f.url } : {})}
               />
             ))}
