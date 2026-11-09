@@ -108,7 +108,7 @@ describe("the fit check on the page", () => {
     assert.deepEqual(await evaluateFinding("a-b", ok.fn), { ok: true });
     assert.equal(ok.calls[0]?.path, "/api/research/findings/a-b/evaluate");
     const busy = await evaluateFinding("a-b", fake(409, { reason: "evaluating" }).fn);
-    assert.equal(busy.ok === false && /already running/.test(busy.message), true);
+    assert.equal(busy.ok === false && /being written/.test(busy.message), true);
   });
 });
 

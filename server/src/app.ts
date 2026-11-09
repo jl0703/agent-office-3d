@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { listAgents, listMcpServers, listSkills } from "./claudeSetup.ts";
+import { buildBriefPrompt, checkBrief, evalsJson, readBriefs, saveBrief, type Brief } from "./briefs.ts";
 import { addAgent, addedAgents, agentDirsFor, removeAgent } from "./agentsManage.ts";
 import type { ClaudeRunner } from "./claudeCli.ts";
 import { addedServers, addServer, buildArgs, previewLine, removeServer, type Failure as McpFailure, type McpInput } from "./mcpManage.ts";
@@ -102,6 +103,15 @@ function mcpAnswer(res: http.ServerResponse, result: { ok: true } | { ok: false;
   return json(res, MCP_STATUS[result.code], result.code === "exists" || result.code === "not_added" ? { reason: result.code } : { error: result.code });
 }
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
+const FINDING_BRIEF = /^\/api\/research\/findings\/([^/]{1,200})\/brief(\/save)?$/;
+const BriefEdit = z
+  .object({
+    goal: z.string().max(400),
+    files: z.string().max(400),
+    criteria: z.string().max(500),
+    cases: z.array(z.object({ prompt: z.string().max(500), assertions: z.array(z.string().max(300)).min(1).max(5) }).strict()).min(2).max(3),
+  })
+  .strict();
 const FINDING_EVALUATE = /^\/api\/research\/findings\/([^/]{1,200})\/evaluate$/;
 const AGENT_COMMAND = /^\/api\/agents\/([A-Za-z0-9_-]{1,100})\/(tasks|stop|resume|plan)$/;
 
@@ -413,9 +423,11 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if ((await decisions.all()).get(finding.id)?.status !== "adopt") return json(res, 409, { reason: "not_adopted" });
       const fit = (await readEvaluations(base)).get(finding.id);
       const prepared = await shop.prepare(finding.id, finding.title);
+      const brief = (await readBriefs(base)).get(finding.id);
       if (!prepared.ok) return json(res, prepared.code === "too_big" ? 413 : prepared.code === "too_many_builds" ? 429 : prepared.code === "copy_failed" ? 500 : 400, { error: prepared.code });
-      const started = await opts.supervisor?.startMaster({ cwd: prepared.work, prompt: buildWorkshopGoal(finding, fit, opts.workshopTargetName ?? "the workspace"), workshop: prepared.build.id });
+      const started = await opts.supervisor?.startMaster({ cwd: prepared.work, prompt: buildWorkshopGoal(finding, fit, opts.workshopTargetName ?? "the workspace", brief), workshop: prepared.build.id });
       if (!started?.ok) await shop.discard(prepared.build.id); // no master, so the copy is not kept
+      else if (brief) await shop.writeEvals(prepared.build.id, evalsJson(brief)).catch(() => log({ event: "workshop-evals-error", build: prepared.build.id }));
       if (!started) return json(res, 404, { error: "not_found" });
       if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
       return json(res, 202, { id: started.id, build: prepared.build.id });
@@ -427,13 +439,15 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   function researchRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, method: string): boolean {
     const decision = FINDING_DECISION.exec(pathname);
     const evaluate = FINDING_EVALUATE.exec(pathname);
+    const brief = FINDING_BRIEF.exec(pathname);
     const known =
       (pathname === "/api/research/findings" && method === "GET") ||
       (pathname === "/api/research/config" && (method === "GET" || method === "POST")) ||
       (pathname === "/api/research/sweep" && method === "POST" && opts.supervisor) ||
       (pathname === "/api/research/schedule" && (method === "GET" || method === "POST")) ||
       (decision && method === "POST") ||
-      (evaluate && method === "POST" && opts.supervisor);
+      (evaluate && method === "POST" && opts.supervisor) ||
+      (brief && method === "POST" && (brief[2] !== undefined || opts.supervisor));
     if (!known) return false;
     run(req, res, async () => {
       const base = decisions ? await resolveResearch(opts.researchDir) : null;
@@ -441,7 +455,36 @@ export async function startServer(opts: Options): Promise<RunningServer> {
       if (pathname === "/api/research/findings") {
         const { findings, invalid } = await readFindings(base);
         const fits = await readEvaluations(base);
-        return json(res, 200, { findings: withDecisions(findings, await decisions.all()).map((f) => ({ ...f, ...(fits.has(f.id) ? { fit: fits.get(f.id) } : {}) })), invalid });
+        const briefs = await readBriefs(base);
+        return json(res, 200, { findings: withDecisions(findings, await decisions.all()).map((f) => ({ ...f, ...(fits.has(f.id) ? { fit: fits.get(f.id) } : {}), ...(briefs.has(f.id) ? { brief: briefs.get(f.id) } : {}) })), invalid });
+      }
+      if (brief) {
+        const id = brief[1] as string;
+        if (!SLUG.test(id)) return json(res, 400, { error: "invalid_request" });
+        const finding = await readFinding(base, id);
+        if (!finding) return json(res, 404, { error: "not_found" });
+        const existing = (await readBriefs(base)).get(id);
+        if (brief[2] !== undefined) {
+          // The owner's edit: checked by the same rules as a model's brief, then written by the server.
+          const parsed = BriefEdit.safeParse(await readJson(req));
+          if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+          if (!existing) return json(res, 404, { error: "not_found" });
+          const edited: Brief = { id, goal: parsed.data.goal.trim(), files: parsed.data.files.trim(), criteria: parsed.data.criteria.trim(), date: new Date().toISOString().slice(0, 10), written_by: "owner", cases: parsed.data.cases.map((c) => ({ prompt: c.prompt.trim(), assertions: c.assertions.map((a) => a.trim()) })) };
+          const checked = checkBrief(edited);
+          if (!checked) return json(res, 400, { error: "invalid_input" });
+          await saveBrief(base, checked);
+          return json(res, 200, { brief: checked });
+        }
+        if (Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined) {
+          if (!z.object({}).strict().safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
+        } else req.resume();
+        if ((await decisions.all()).get(id)?.status !== "adopt") return json(res, 409, { reason: "not_adopted" });
+        if (existing) return json(res, 409, { reason: "exists" });
+        const fit = (await readEvaluations(base)).get(id);
+        const result = await opts.supervisor?.startBrief(id, buildBriefPrompt(finding, fit, new Date().toISOString().slice(0, 10)));
+        if (!result) return json(res, 404, { error: "not_found" });
+        if (!result.ok) return json(res, result.status, result.status === 409 ? { reason: result.code } : { error: result.code });
+        return json(res, 202, { id: result.id });
       }
       if (evaluate) {
         const id = evaluate[1] as string;

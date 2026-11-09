@@ -454,6 +454,24 @@ try {
       await page.evaluate(`[...document.querySelectorAll("[aria-label='Your decision'] button")].find((b) => b.textContent === "Adopt")?.click()`);
       await page.wait(300);
       expect(await page.evaluate<boolean>(`[...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Build in the Workshop"))`), `sidebar(${scheme}): adopting offers Build in the Workshop`);
+      // The progress strip and the next step; adopting a find with no brief offers to write one.
+      const strip = await page.evaluate<string>(`[...document.querySelectorAll(".stepper .step")].map((li) => li.className.replace("step step-", "")).join(",")`);
+      expect(strip === "done,done,current,todo", `sidebar(${scheme}): the strip shows found and fit done, the brief next (${strip})`);
+      expect(await page.evaluate<boolean>(`[...document.querySelectorAll("main button")].some((b) => b.textContent.includes("Write the brief"))`), `sidebar(${scheme}): an adopted find without a brief offers Write the brief`);
+      // A find that has a brief shows it, and the owner can open the editor.
+      await page.evaluate(`location.hash = "#/finds/demo-memory-idea"`);
+      await page.wait(500);
+      const briefText = await page.evaluate<string>(`document.querySelector("[aria-label='Brief for the implementor']")?.textContent ?? ""`);
+      expect(briefText.includes("Test request 1") && briefText.includes("mentions the earlier result"), `sidebar(${scheme}): the brief and its test requests are shown (${briefText.slice(0, 120)})`);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll("main button")].find((b) => b.textContent.includes("Edit the brief")))`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Checks the answer must pass"), `sidebar(${scheme}): Edit the brief opens the editor pop-up`);
+      const briefViolations = await axe(page);
+      expect(briefViolations.length === 0, `sidebar(${scheme}): axe with the brief editor open: ${briefViolations.join(", ")}`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
+      await page.evaluate(`history.back()`);
+      await page.wait(400);
       await page.wait(700); // the pressed chip fades its colour in; axe must not read it half way
       await page.screenshot(join(out, `find-${scheme}.png`));
       const findViolations = await axe(page);
