@@ -356,7 +356,7 @@ try {
       expect((await page.evaluate<number>(`document.querySelectorAll(".eval-details .case-box").length`)) === 2, `workshop(${scheme}): the details list both test requests`);
       await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll("[aria-label='Skill eval'] button")].find((b) => b.textContent === "Run again"))`);
       await page.wait(300);
-      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("about $1, and it stops at $2"), `workshop(${scheme}): running an eval asks first and names the cost`);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("about $1, and it stops starting new test requests once about $2"), `workshop(${scheme}): running an eval asks first and names the cost`);
       await page.key("Escape", { keyCode: 27 });
       await page.wait(300);
       await page.screenshot(join(out, `workshop-${scheme}.png`));

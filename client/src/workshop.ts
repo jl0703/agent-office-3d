@@ -17,7 +17,7 @@ export const VERDICT_WORD: Record<EvalVerdict, string> = { improves: "Improves",
 /** The result of a skill eval in short: pass rates with the change and before it, and what it cost. */
 export type EvalSummary = { verdict: EvalVerdict; withRate: number | null; baselineRate: number | null; delta: number | null; costUsd: number; capped: boolean; ranAt: number };
 
-export type Build = { id: string; finding: string; title: string; createdAt: number; status: BuildStatus; files: number; changed: number; eval?: EvalSummary; evalRun?: { done: number; total: number } };
+export type Build = { id: string; finding: string; title: string; createdAt: number; status: BuildStatus; files: number; changed: number; eval?: EvalSummary; evalRun?: { done: number; total: number; failed?: true } };
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
@@ -28,7 +28,7 @@ function toBuild(raw: unknown): Build | null {
   const { id, finding, title, createdAt, status, files, changed } = raw;
   if (typeof id !== "string" || typeof finding !== "string" || typeof title !== "string" || typeof createdAt !== "number") return null;
   if (!(STATUSES as readonly unknown[]).includes(status) || typeof files !== "number" || typeof changed !== "number") return null;
-  return { id, finding, title, createdAt, status: status as BuildStatus, files, changed, ...(toSummary(raw["eval"]) ? { eval: toSummary(raw["eval"]) as EvalSummary } : {}), ...(toRun(raw["evalRun"]) ? { evalRun: toRun(raw["evalRun"]) as { done: number; total: number } } : {}) };
+  return { id, finding, title, createdAt, status: status as BuildStatus, files, changed, ...(toSummary(raw["eval"]) ? { eval: toSummary(raw["eval"]) as EvalSummary } : {}), ...(toRun(raw["evalRun"]) ? { evalRun: toRun(raw["evalRun"]) as { done: number; total: number; failed?: true } } : {}) };
 }
 
 const num = (v: unknown) => (typeof v === "number" ? v : null);
@@ -38,8 +38,8 @@ function toSummary(raw: unknown): EvalSummary | undefined {
   return { verdict: raw["verdict"] as EvalVerdict, withRate: num(raw["withRate"]), baselineRate: num(raw["baselineRate"]), delta: num(raw["delta"]), costUsd: raw["costUsd"], capped: raw["capped"] === true, ranAt: raw["ranAt"] };
 }
 
-function toRun(raw: unknown): { done: number; total: number } | undefined {
-  return isRecord(raw) && typeof raw["done"] === "number" && typeof raw["total"] === "number" ? { done: raw["done"], total: raw["total"] } : undefined;
+function toRun(raw: unknown): { done: number; total: number; failed?: true } | undefined {
+  return isRecord(raw) && typeof raw["done"] === "number" && typeof raw["total"] === "number" ? { done: raw["done"], total: raw["total"], ...(raw["failed"] === true ? { failed: true as const } : {}) } : undefined;
 }
 
 /** The builds, newest first, and the folder they live in; "off" when the Workshop is not set up (404); null when the server cannot be reached or answers oddly. */

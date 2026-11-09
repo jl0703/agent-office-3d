@@ -1,5 +1,5 @@
 import { FlaskConical } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Modal } from "./Modal.tsx";
 import { getEval, percent, startEval, VERDICT_WORD, type Build, type EvalFull, type EvalSide } from "./workshop.ts";
 
@@ -7,6 +7,7 @@ const sideText = (s: EvalSide) => ("error" in s ? s.error : `${s.passed} of ${s.
 
 /** The skill eval of one build: run it (after a cost question), watch it, and read what it found. */
 export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: boolean; onChanged: () => void }) {
+  const id = useId();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -37,12 +38,17 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
   return (
     <section className="eval-panel" aria-label="Skill eval">
       <h3>Skill eval</h3>
-      {build.evalRun && (
+      {build.evalRun?.failed && (
+        <p className="form-message" role="alert">
+          The last eval run failed before it finished. Nothing was saved. You can run it again.
+        </p>
+      )}
+      {build.evalRun && !build.evalRun.failed && (
         <p className="panel-note" role="status" aria-live="polite">
           Eval running: {build.evalRun.done} of {build.evalRun.total} test requests done. This takes a few minutes.
         </p>
       )}
-      {summary && !build.evalRun && (
+      {summary && !(build.evalRun && !build.evalRun.failed) && (
         <>
           <p className={`verdict verdict-${summary.verdict}`}>
             <strong>{VERDICT_WORD[summary.verdict]}</strong>: with the change {percent(summary.withRate)} of checks passed, before it {percent(summary.baselineRate)}
@@ -50,7 +56,7 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
             {summary.capped ? ", stopped at the cost limit, so some test requests were skipped" : ""}.
           </p>
           <div className="modal-actions">
-            <button type="button" onClick={() => void showDetails()}>
+            <button type="button" aria-expanded={full !== null} aria-controls={`${id}-details`} onClick={() => void showDetails()}>
               Show the details
             </button>
             <button type="button" onClick={() => setAsking(true)}>
@@ -59,14 +65,14 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
           </div>
         </>
       )}
-      {!summary && !build.evalRun && build.status === "ready" && (
+      {!summary && !(build.evalRun && !build.evalRun.failed) && build.status === "ready" && (
         <button type="button" className="add-btn" onClick={() => setAsking(true)}>
           <FlaskConical size={16} strokeWidth={1.75} aria-hidden="true" /> Run the skill eval
         </button>
       )}
       {full === "loading" && <p className="panel-note">Loading the details…</p>}
       {full && full !== "loading" && (
-        <div className="eval-details">
+        <div className="eval-details" id={`${id}-details`}>
           <p className="panel-note">
             Skill {full.skill}. Baseline: {full.baseline}. Each answer was written in its own session with no tools and graded by a different one.
           </p>
@@ -105,7 +111,7 @@ export function EvalPanel({ build, demo, onChanged }: { build: Build; demo: bool
         onClose={() => !busy && setAsking(false)}
         title="Run the skill eval?"
         role="alertdialog"
-        description="Each test request is answered twice, with the change and before it, in separate sessions with no tools, and a different session grades each answer. It uses model time: about $1, and it stops at $2. Nothing in your skills changes."
+        description="Each test request is answered twice, with the change and before it, in separate sessions with no tools, and a different session grades each answer. It uses model time: about $1, and it stops starting new test requests once about $2 is spent. Nothing in your skills changes."
       >
         {error && (
           <p className="form-message" role="alert">

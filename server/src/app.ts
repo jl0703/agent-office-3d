@@ -174,7 +174,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   const allowedHosts = new Set<string>();
   const vault = createVault(opts.vaultDir);
   // Skill evals running now, by build id: one at a time, and the page watches the progress.
-  const evalRuns = new Map<string, { done: number; total: number }>();
+  const evalRuns = new Map<string, { done: number; total: number; failed?: true }>();
   const decisions = opts.researchDir && opts.dataDir ? (opts.decisions ?? createDecisionStore(opts.dataDir)) : undefined;
 
   const deny = (res: http.ServerResponse, status: number, reason: string, req: http.IncomingMessage) => {
@@ -444,7 +444,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
         const skillDir = shown ? await changedSkillDir(dir, shown.patch) : null;
         const texts = skillDir === null ? null : await skillTexts(dir, skillDir);
         if (skillDir === null || !texts) return json(res, 409, { reason: "no_skill" });
-        if (evalRuns.size > 0) return json(res, 409, { reason: "eval_running" });
+        if ([...evalRuns.values()].some((r) => !r.failed)) return json(res, 409, { reason: "eval_running" });
         evalRuns.set(id, { done: 0, total: cases.length });
         // The run takes minutes: answer now, and the page watches the build list.
         void (async () => {
@@ -456,8 +456,11 @@ export async function startServer(opts: Options): Promise<RunningServer> {
             log({ event: "skill-eval-end", build: id, verdict: result.verdict, costUsd: result.costUsd });
           } catch (error) {
             log({ event: "skill-eval-error", build: id, message: error instanceof Error ? error.message : String(error) });
+            // The page shows that the run failed for a minute, instead of the run just vanishing.
+            evalRuns.set(id, { done: 0, total: cases.length, failed: true });
+            setTimeout(() => evalRuns.delete(id), 60_000).unref();
           } finally {
-            evalRuns.delete(id);
+            if (!evalRuns.get(id)?.failed) evalRuns.delete(id);
             await rm(join(dir, "eval-scratch"), { recursive: true, force: true }).catch(() => undefined);
           }
         })();
