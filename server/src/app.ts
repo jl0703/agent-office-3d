@@ -20,7 +20,8 @@ import { ConfigBody, createDecisionStore, type DecisionStore, DecisionBody, read
 import { PlanBody } from "./plan.ts";
 import { listOutcomes } from "./planLog.ts";
 import { AutoApproveBody, type AutoApproveStore } from "./autoApprove.ts";
-import { PersonInput, PersonUpdate, type TeamStore } from "./team.ts";
+import { TaskInput, TaskUpdate, taskGoal, type TasksStore } from "./tasks.ts";
+import { chainOf, PersonInput, PersonUpdate, type TeamStore } from "./team.ts";
 import { ModeBody, type Scheduler } from "./schedule.ts";
 import type { Registry } from "./registry.ts";
 import { sweepPromptFor } from "./sweep.ts";
@@ -61,6 +62,8 @@ type Options = {
   autoApprove?: AutoApproveStore;
   /** The team of people with roles. Without it the team routes answer 404. */
   team?: TeamStore;
+  /** The owner's task list. Without it (or without the team) the task routes answer 404. */
+  tasks?: TasksStore;
   /** Share the decision store with the supervisor (one cache). Without it the app makes its own. */
   decisions?: DecisionStore;
   /** Where the sidebar reads the owner's skills and user-level MCP servers from. Without it the lists are empty. */
@@ -111,6 +114,11 @@ const AddPersonBody = PersonInput.extend({ confirm: z.literal(true) }).strict();
 const UpdatePersonBody = PersonUpdate.extend({ confirm: z.literal(true) }).strict();
 const RemovePersonBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), confirm: z.literal(true) }).strict();
 const TEAM_STATUS = { unknown_person: 404 } as const;
+const AddTaskBody = TaskInput.extend({ confirm: z.literal(true) }).strict();
+const UpdateTaskBody = TaskUpdate.extend({ confirm: z.literal(true) }).strict();
+const RemoveTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), confirm: z.literal(true) }).strict();
+const StartTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), cwd: z.string().min(1).max(1000), confirm: z.literal(true) }).strict();
+const TASK_POSTS = new Set(["/api/tasks", "/api/tasks/update", "/api/tasks/remove", "/api/tasks/start"]);
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_BRIEF = /^\/api\/research\/findings\/([^/]{1,200})\/brief(\/save)?$/;
 const BriefEdit = z
@@ -351,13 +359,66 @@ export async function startServer(opts: Options): Promise<RunningServer> {
             }
           } else if (url.pathname === "/api/team/people/remove") {
             const parsed = RemovePersonBody.safeParse(body);
-            if (parsed.success) done = await team.remove(parsed.data.id);
+            if (parsed.success) {
+              const busy = (id: string) => (opts.registry?.snapshot() ?? []).some((a) => a.personId === id && (a.status === "working" || a.status === "waiting"));
+              done = await team.remove(parsed.data.id, busy);
+              if (done.ok) await opts.tasks?.unassign(parsed.data.id);
+            }
           } else if (EvalBody.safeParse(body).success) {
             done = await team.starter();
           }
           if (!done) return json(res, 400, { error: "invalid_request" });
           if (!done.ok) return json(res, done.code in TEAM_STATUS ? TEAM_STATUS[done.code as keyof typeof TEAM_STATUS] : 409, { reason: done.code });
           json(res, 200, { people: done.people, ...(done.person ? { person: done.person } : {}) });
+        });
+      }
+      if (url.pathname === "/api/tasks" && method === "GET") {
+        const tasks = opts.tasks;
+        if (!tasks) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => json(res, 200, { tasks: await tasks.list() }));
+      }
+      if (method === "POST" && TASK_POSTS.has(url.pathname)) {
+        const { tasks, team } = opts;
+        if (!tasks || !team) return json(res, 404, { error: "not_found" });
+        return run(req, res, async () => {
+          const body = await readJson(req);
+          const known = async (person: string | null | undefined) => person == null || (await team.list()).some((p) => p.id === person);
+          if (url.pathname === "/api/tasks") {
+            const parsed = AddTaskBody.safeParse(body);
+            if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            if (!(await known(parsed.data.assignee))) return json(res, 409, { reason: "unknown_person" });
+            const { title, details, assignee } = parsed.data;
+            const done = await tasks.add({ title, details, assignee });
+            return done.ok ? json(res, 200, { tasks: done.tasks, task: done.task }) : json(res, 409, { reason: done.code });
+          }
+          if (url.pathname === "/api/tasks/update") {
+            const parsed = UpdateTaskBody.safeParse(body);
+            if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            if (!(await known(parsed.data.assignee))) return json(res, 409, { reason: "unknown_person" });
+            const { id, confirm: _c, ...change } = parsed.data;
+            void _c;
+            const done = await tasks.update(id, change);
+            return done.ok ? json(res, 200, { tasks: done.tasks, task: done.task }) : json(res, 404, { reason: done.code });
+          }
+          if (url.pathname === "/api/tasks/remove") {
+            const parsed = RemoveTaskBody.safeParse(body);
+            if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            const done = await tasks.remove(parsed.data.id);
+            return done.ok ? json(res, 200, { tasks: done.tasks }) : json(res, 404, { reason: done.code });
+          }
+          const parsed = StartTaskBody.safeParse(body);
+          if (!parsed.success || !opts.supervisor) return json(res, parsed.success ? 404 : 400, parsed.success ? { error: "not_found" } : { error: "invalid_request" });
+          const task = await tasks.get(parsed.data.id);
+          if (!task) return json(res, 404, { reason: "unknown_task" });
+          const people = await team.list();
+          const person = people.find((p) => p.id === task.assignee);
+          if (!person) return json(res, 409, { reason: "no_assignee" });
+          const linked = task.agentId ? opts.registry?.get(task.agentId) : undefined;
+          if (linked && (linked.status === "working" || linked.status === "waiting" || (linked.phase === "planning" && linked.plan?.status === "pending"))) return json(res, 409, { reason: "task_running" });
+          const started = await opts.supervisor.startMaster({ cwd: parsed.data.cwd, prompt: taskGoal(person, chainOf(people, person.id), task), name: person.name, personId: person.id, taskId: task.id });
+          if (!started.ok) return json(res, started.status, started.status === 409 ? { reason: started.code } : { error: started.code });
+          await tasks.update(task.id, { agentId: started.id, done: false });
+          json(res, 202, { id: started.id, tasks: await tasks.list() });
         });
       }
       if (url.pathname === "/api/auto-approve" && (method === "GET" || method === "POST")) {

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "../../shared/events.ts";
 import type { Finding } from "../src/research.ts";
+import type { OwnTask } from "../src/ownTasks.ts";
 import { DONE_LIMIT, tasksOf } from "../src/tasks.ts";
+import type { Person } from "../src/team.ts";
 import type { Build } from "../src/workshop.ts";
 
 const agent = (over: Partial<Agent>): Agent => ({ id: "a1", kind: "session", origin: "managed", role: "worker", parentId: null, name: "Worker", project: "p", status: "working", currentTask: "Fix things", tool: null, activity: null, desk: 1, updatedAt: "2026-11-09T10:00:00Z", note: null, ...over });
@@ -43,5 +45,36 @@ describe("the tasks board", () => {
     const done = tasksOf(many, [], []).done;
     assert.equal(done.length, DONE_LIMIT);
     assert.equal(done[0]?.id, `agent-d${DONE_LIMIT + 4}`);
+  });
+});
+
+const person = (id: string, name: string, role: string): Person => ({ id, name, role, brief: "", reportsTo: null });
+const mine = (over: Partial<OwnTask> = {}): OwnTask => ({ id: "t1", title: "Fix the header", details: "Make it sticky", assignee: "p1", done: false, agentId: null, createdAt: 5000, ...over });
+const people = [person("p1", "Riley", "Frontend Developer")];
+const own = (t: OwnTask, agents: Agent[] = []) => tasksOf(agents, [], [], [t], people);
+
+describe("the tasks board: the owner's own tasks", () => {
+  it("puts a task where its worker is: nobody on it is Active, planning or working is In progress, the owner's turn is Review, marked done is Done", () => {
+    assert.deepEqual(ids(own(mine())), { active: ["own-t1"], progress: [], review: [], done: [] });
+    assert.equal(own(mine()).active[0]?.assignee, "Riley, Frontend Developer");
+    assert.equal(own(mine({ assignee: null })).active[0]?.chip, "Not given out");
+    const w = (over: Partial<Agent>) => agent({ id: "w1", taskId: "t1", personId: "p1", role: "master", ...over });
+    const linked = mine({ agentId: "w1" });
+    assert.deepEqual(ids(own(linked, [w({ phase: "planning", plan: null, status: "idle" })])).progress, ["own-t1"], "a master that has not planned yet");
+    assert.deepEqual(ids(own(linked, [w({ status: "working", phase: "executing" })])).progress, ["own-t1"]);
+    assert.equal(own(linked, [w({ phase: "planning", plan: { status: "pending", goal: "Do it" } as Agent["plan"] })]).review[0]?.text, "Plan to approve: Do it");
+    assert.deepEqual(ids(own(linked, [w({ status: "error" })])).review, ["own-t1"]);
+    assert.equal(own(linked, [w({ status: "idle", phase: "executing" })]).review[0]?.chip, "Finished", "finished work waits for the owner to mark it done");
+    assert.deepEqual(ids(own(mine({ done: true, agentId: "w1" }), [w({ status: "idle", phase: "executing" })])).done, ["own-t1"]);
+    assert.equal(own(linked, [w({ status: "working" })]).progress[0]?.running, true, "it cannot be started twice");
+  });
+
+  it("shows the worker once: its own card is hidden, and so is a Workshop master unless its plan waits for you", () => {
+    const worker = agent({ id: "w1", taskId: "t1", status: "working" });
+    assert.deepEqual(ids(own(mine({ agentId: "w1" }), [worker])).progress, ["own-t1"], "one card, not two");
+    const shop = agent({ id: "m1", role: "master", workshop: true, status: "working", phase: "executing" });
+    assert.deepEqual(ids(tasksOf([shop], [], [], [], [])), { active: [], progress: [], review: [], done: [] });
+    const waiting = agent({ id: "m2", role: "master", workshop: true, phase: "planning", plan: { status: "pending", goal: "Build it" } as Agent["plan"] });
+    assert.deepEqual(ids(tasksOf([waiting], [], [], [], [])).review, ["agent-m2"], "a plan waiting for you still needs a card");
   });
 });

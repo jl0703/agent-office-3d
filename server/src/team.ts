@@ -12,16 +12,19 @@ export const MAX_DEPTH = 6;
 
 // One line of plain text: no control characters and no text-direction tricks.
 /* eslint-disable no-control-regex */
-const Line = z
+const oneLine = (max: number) =>
+  z
   .string()
   .trim()
   .min(1)
-  .max(60)
+  .max(max)
   .regex(/^[^\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$/);
+export const Line = oneLine(60);
+export const Title = oneLine(100);
 // The role brief may span lines.
-const Brief = z.string().max(1500).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]*$/);
+export const Brief = z.string().max(1500).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]*$/);
 /* eslint-enable no-control-regex */
-const Id = z.string().regex(/^[0-9a-f]{12}$/);
+export const Id = z.string().regex(/^[0-9a-f]{12}$/);
 
 const Fields = { name: Line, role: Line, brief: Brief, reportsTo: Id.nullable() };
 const Person = z.object({ id: Id, ...Fields }).strict();
