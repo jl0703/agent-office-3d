@@ -3,7 +3,7 @@
 
 export const KINDS = ["skills", "mcp", "agents"] as const;
 export type CatalogKind = (typeof KINDS)[number];
-export type Route = { page: "office" } | { page: "list"; kind: CatalogKind } | { page: "item"; kind: CatalogKind; name: string } | { page: "find"; id: string } | { page: "settings" };
+export type Route = { page: "office" } | { page: "list"; kind: CatalogKind } | { page: "item"; kind: CatalogKind; name: string } | { page: "find"; id: string } | { page: "settings" } | { page: "tasks" };
 
 const ITEM_NAME = /^[\w][\w .:@-]{0,59}$/;
 
@@ -11,7 +11,7 @@ export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   // One research find: "#/finds/<id>", with the same id rules as a finding's file name.
   if (parts[0] === "finds") return parts.length === 2 && /^[a-z0-9][a-z0-9-]{0,79}$/.test(parts[1] ?? "") ? { page: "find", id: parts[1] as string } : { page: "office" };
-  if (parts[0] === "settings") return parts.length === 1 ? { page: "settings" } : { page: "office" };
+  if (parts[0] === "settings" || parts[0] === "tasks") return parts.length === 1 ? { page: parts[0] } : { page: "office" };
   const kind = KINDS.find((k) => k === parts[0]);
   if (!kind || parts.length > 2) return { page: "office" };
   if (parts.length === 1) return { page: "list", kind };
@@ -25,6 +25,6 @@ export function parseRoute(hash: string): Route {
 }
 
 export const hrefFor = (route: Route) =>
-  route.page === "office" ? "#/" : route.page === "settings" ? "#/settings" : route.page === "list" ? `#/${route.kind}` : route.page === "find" ? `#/finds/${route.id}` : `#/${route.kind}/${encodeURIComponent(route.name)}`;
+  route.page === "office" ? "#/" : route.page === "settings" || route.page === "tasks" ? `#/${route.page}` : route.page === "list" ? `#/${route.kind}` : route.page === "find" ? `#/finds/${route.id}` : `#/${route.kind}/${encodeURIComponent(route.name)}`;
 
 export const KIND_WORD: Record<CatalogKind, string> = { skills: "Skills", mcp: "MCP servers", agents: "AI Agents" };
