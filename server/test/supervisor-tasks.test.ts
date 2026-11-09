@@ -367,6 +367,18 @@ describe("resuming", () => {
     assert.equal(r.registry.get("outside")?.status, "detached");
   });
 
+  it("refuses a folder that holds the office's data folder, so no worker can read or rewrite the team, tasks or settings", async () => {
+    const r = rig();
+    mkdirSync(join(r.root, "data", "workshop", "b1"), { recursive: true });
+    assert.deepEqual(await r.supervisor.start({ cwd: r.root, prompt: "x" }), { ok: false, status: 403, code: "folder_not_allowed" }, "a folder above the data folder");
+    assert.deepEqual(await r.supervisor.start({ cwd: join(r.root, "data"), prompt: "x" }), { ok: false, status: 403, code: "folder_not_allowed" }, "the data folder itself");
+    assert.equal(r.calls.length, 0);
+    assert.equal((await r.supervisor.start({ cwd: join(r.root, "data", "workshop", "b1"), prompt: "x" })).ok, true, "a folder inside it is fine, such as a Workshop copy");
+    assert.equal((await r.supervisor.start({ cwd: r.work, prompt: "x" })).ok, true, "a sibling folder is fine");
+    await r.restartWith(r.stored("above", { cwd: r.root }));
+    assert.deepEqual(await r.supervisor.resume("above"), { ok: false, status: 403, code: "folder_not_allowed" }, "a stored worker in such a folder is not resumed");
+  });
+
   it("refuses while the transcript was written to in the last 10 seconds, and goes ahead when it is quiet", async () => {
     const r = rig({ sessionId: () => "busy-one" });
     await r.restartWith(r.stored("busy-one"));

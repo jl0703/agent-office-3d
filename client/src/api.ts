@@ -13,7 +13,7 @@ export function describeFailure(status: number, code: string | undefined): strin
     case "invalid_folder":
       return "That folder does not exist or is not a folder. Check the path (a full path is needed).";
     case "folder_not_allowed":
-      return "That folder is not allowed (or is no longer allowed). Add it to OFFICE_ALLOWED_ROOTS and restart the server.";
+      return "That folder is not allowed. It must be inside OFFICE_ALLOWED_ROOTS, and it must not contain the office's own data folder (OFFICE_DATA_DIR). Pick a folder inside your project instead.";
     case "too_many":
       return "The limit of running workers is reached. Stop one first.";
     case "start_failed":

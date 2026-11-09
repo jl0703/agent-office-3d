@@ -65,6 +65,8 @@ npm run build
 
 The server listens on 127.0.0.1 only, rejects any request whose `Host` is not localhost, rejects POSTs whose `Origin` is not its own, and needs the session cookie for `/events` and `/api/*`. Pre-load requests (prefetch, prerender, anything that is not a page navigation) never use the token up. `npm run dev` generates a random secret per run and gives it to the server only (never to Vite, never logged or written to disk); the token is then derived from it and sessions are signed cookies, so the link can be reopened and sessions survive restarts until you stop `npm run dev`. That is weaker than the one-time token and is meant for development only; `npm start` never sets it. `OFFICE_SESSION_SECRET` (32+ characters) can enable the same mode by hand; a shorter value stops the server at startup.
 
+Workers cannot be started in a folder that holds the data folder (`data/` or `OFFICE_DATA_DIR`), so no worker can read or rewrite the team, the tasks or the settings; a folder inside it, such as a Workshop copy, is fine.
+
 Settings: `OFFICE_PORT` (default 4777), `OFFICE_PUBLIC_PORT` (browser port when a dev server proxies to this one), `OFFICE_ALLOWED_ROOTS`, `MAX_MANAGED` (default 8), `MAX_MASTERS` (default 1), `MAX_WORKERS_PER_MASTER` (default 5), `OFFICE_SESSION_BUDGET_USD`, `OFFICE_TOTAL_BUDGET_USD`, `OFFICE_SWEEP_BUDGET_USD` (default 3), `OFFICE_DATA_DIR`, `OFFICE_STALE_MINUTES` (default 15), `CLAUDE_CONFIG_DIR` (where Claude Code keeps its logs).
 
 ## Obsidian vault
