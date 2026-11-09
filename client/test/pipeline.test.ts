@@ -12,17 +12,18 @@ const states = (f: Finding, builds: Build[] = []) => stagesOf(f, builds).map((s)
 
 describe("pipeline stages", () => {
   it("walks from found to built, and marks the first stage not done as current", () => {
-    assert.equal(states(find()), "done,current,todo,todo");
-    assert.equal(states(find({ fit })), "done,done,current,todo");
-    assert.equal(states(find({ fit, brief })), "done,done,done,current");
-    assert.equal(states(find({ fit, brief }), [build()]), "done,done,done,done");
+    assert.equal(states(find()), "done,current,todo,todo,todo");
+    assert.equal(states(find({ fit })), "done,done,current,todo,todo");
+    assert.equal(states(find({ fit, brief })), "done,done,done,current,todo");
+    assert.equal(states(find({ fit, brief }), [build()]), "done,done,done,done,current");
+    assert.equal(states(find({ fit, brief }), [build({ eval: { verdict: "improves", withRate: 1, baselineRate: 0, delta: 1, costUsd: 0.5, capped: false, ranAt: 1 } })]), "done,done,done,done,done");
   });
 
   it("counts a finished build of this find only, and a build still running is not done", () => {
-    assert.equal(states(find({ fit, brief }), [build({ finding: "other" })]), "done,done,done,current");
-    assert.equal(states(find({ fit, brief }), [build({ status: "building" })]), "done,done,done,current");
-    assert.equal(states(find({ fit, brief }), [build({ status: "no-changes" })]), "done,done,done,done");
-    assert.equal(states(find({ brief })), "done,current,done,todo", "a brief written without a fit check leaves the fit stage current");
+    assert.equal(states(find({ fit, brief }), [build({ finding: "other" })]), "done,done,done,current,todo");
+    assert.equal(states(find({ fit, brief }), [build({ status: "building" })]), "done,done,done,current,todo");
+    assert.equal(states(find({ fit, brief }), [build({ status: "no-changes" })]), "done,done,done,done,current");
+    assert.equal(states(find({ brief })), "done,current,done,todo,todo", "a brief written without a fit check leaves the fit stage current");
   });
 
   it("says what to do next", () => {
@@ -31,6 +32,7 @@ describe("pipeline stages", () => {
     assert.match(nextStep(find({ fit, status: "looking" })), /Adopt/);
     assert.match(nextStep(find({ fit, status: "adopt" })), /Write the brief/);
     assert.match(nextStep(find({ fit, brief, status: "adopt" })), /Build in the Workshop/);
-    assert.match(nextStep(find({ fit, brief, status: "adopt" }), [build()]), /apply it yourself/);
+    assert.match(nextStep(find({ fit, brief, status: "adopt" }), [build()]), /Run the skill eval/);
+    assert.match(nextStep(find({ fit, brief, status: "adopt" }), [build({ eval: { verdict: "worse", withRate: 0, baselineRate: 1, delta: -1, costUsd: 0.4, capped: false, ranAt: 1 } })]), /apply it yourself/);
   });
 });

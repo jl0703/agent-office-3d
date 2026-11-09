@@ -30,7 +30,7 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 /** A research team's master: the folder is optional and defaults to the research folder. */
-export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A research writer (Evaluator or Briefer): it may only create <dir>/<id>.md in the research folder. */ writeTo?: { dir: string; id: string }; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string };
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A research writer (Evaluator or Briefer): it may only create <dir>/<id>.md in the research folder. */ writeTo?: { dir: string; id: string }; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string; /** A skill-eval session: it has no tools at all, 3 turns and half a dollar, and just answers. */ toolless?: true };
 export type StartResult =
   | { ok: true; id: string }
   | {
@@ -143,6 +143,8 @@ type Managed = {
   sweep: Sweep | null;
   /** An Evaluator's one allowed file (real path); other sessions have none. */
   writeOnly: string | null;
+  /** A skill-eval session: no tools. */
+  toolless: boolean;
   /** The Workshop build this master works on, if any. */
   workshop: string | null;
   /** The master that started this worker. Set by the server, never by a model. */
@@ -170,7 +172,7 @@ type Managed = {
   idReady: Promise<string>;
 };
 
-type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null; workshop?: string | null };
+type NewManaged = Pick<Managed, "cwd" | "project" | "name" | "task" | "expectedId" | "baseCost"> & { goal?: string; createdAt?: number; role?: Managed["role"]; phase?: Managed["phase"]; owner?: Managed | null; team?: Managed["team"]; sweep?: Sweep | null; writeOnly?: string | null; workshop?: string | null; toolless?: boolean };
 
 export function createSupervisor(opts: SupervisorOptions) {
   const { registry, roots, env } = opts;
@@ -519,6 +521,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       team: null,
       sweep: null,
       writeOnly: null,
+      toolless: false,
       workshop: null,
       owner: null,
       result: null,
@@ -550,6 +553,7 @@ export function createSupervisor(opts: SupervisorOptions) {
         prompt: m.input.iterable,
         options: {
           ...lockdownOptions(extra),
+          ...(m.toolless ? { tools: [], allowedTools: [], maxTurns: 3, maxBudgetUsd: 0.5 } : {}),
           ...(m.role === "master"
             ? {
                 // In-process tools only; strictMcpConfig (from the lockdown) keeps every other MCP server out.
@@ -655,6 +659,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       // Every master plans first, except a research sweep's Lead, which starts executing.
       phase: role === "master" && !req.sweep ? "planning" : "executing",
       workshop: req.workshop ?? null,
+      toolless: req.toolless === true,
       writeOnly: req.writeTo ? join(folder.path, req.writeTo.dir, `${req.writeTo.id}.md`) : null,
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
@@ -830,6 +835,9 @@ export function createSupervisor(opts: SupervisorOptions) {
 
     /** Starts a master: a session with the office tools. Only the page does this, never a model. */
     startMaster: (req: StartMasterRequest) => begin(req, "master", null),
+
+    /** Starts one skill-eval session (executor or grader): a worker with no tools that answers a prompt. */
+    startEval: (req: StartRequest): Promise<StartResult> => begin({ ...req, toolless: true }, "worker", null),
 
     /** Starts one read-only Evaluator for a finding (a research-team worker). One at a time. */
     startEvaluation: (findingId: string, prompt: string): Promise<StartResult> => begin({ prompt, team: "research", name: `${EVALUATOR_NAME} ${findingId}`, writeTo: { dir: "evaluations", id: findingId } }, "worker", null),

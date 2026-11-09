@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import http from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ServerEvent } from "../../shared/events.ts";
 import { HttpError, readJson } from "./body.ts";
 import { listAgents, listMcpServers, listSkills } from "./claudeSetup.ts";
+import { changedSkillDir, readCases, readEval, runEval, saveEval, scratchDir, skillTexts, supervisorSession } from "./skillEval.ts";
 import { buildBriefPrompt, checkBrief, evalsJson, readBriefs, saveBrief, type Brief } from "./briefs.ts";
 import { addAgent, addedAgents, agentDirsFor, removeAgent } from "./agentsManage.ts";
 import type { ClaudeRunner } from "./claudeCli.ts";
@@ -102,6 +103,7 @@ function mcpAnswer(res: http.ServerResponse, result: { ok: true } | { ok: false;
   if (result.ok) return json(res, okStatus, {});
   return json(res, MCP_STATUS[result.code], result.code === "exists" || result.code === "not_added" ? { reason: result.code } : { error: result.code });
 }
+const EvalBody = z.object({ confirm: z.literal(true) }).strict();
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_BRIEF = /^\/api\/research\/findings\/([^/]{1,200})\/brief(\/save)?$/;
 const BriefEdit = z
@@ -171,6 +173,8 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   const streams = new Set<http.ServerResponse>();
   const allowedHosts = new Set<string>();
   const vault = createVault(opts.vaultDir);
+  // Skill evals running now, by build id: one at a time, and the page watches the progress.
+  const evalRuns = new Map<string, { done: number; total: number; failed?: true }>();
   const decisions = opts.researchDir && opts.dataDir ? (opts.decisions ?? createDecisionStore(opts.dataDir)) : undefined;
 
   const deny = (res: http.ServerResponse, status: number, reason: string, req: http.IncomingMessage) => {
@@ -406,11 +410,62 @@ export async function startServer(opts: Options): Promise<RunningServer> {
   function workshopRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, method: string): boolean {
     const shop = opts.workshop;
     const patch = /^\/api\/workshop\/([0-9a-f]{12})\/patch$/.exec(pathname);
-    const known = (pathname === "/api/workshop" && method === "GET") || (pathname === "/api/workshop/build" && method === "POST" && opts.supervisor) || (patch && method === "GET");
+    const evalPath = /^\/api\/workshop\/([0-9a-f]{12})\/eval$/.exec(pathname);
+    const known =
+      (pathname === "/api/workshop" && method === "GET") ||
+      (pathname === "/api/workshop/build" && method === "POST" && opts.supervisor) ||
+      (patch && method === "GET") ||
+      (evalPath && (method === "GET" || (method === "POST" && opts.supervisor)));
     if (!known) return false;
     run(req, res, async () => {
       if (!shop) return json(res, 404, { error: "not_found" });
-      if (pathname === "/api/workshop") return json(res, 200, { builds: await shop.list(), dir: shop.dir });
+      if (pathname === "/api/workshop") {
+        const builds = await Promise.all((await shop.list()).map(async (b) => {
+          const e = await readEval(join(shop.dir, b.id));
+          return { ...b, ...(e ? { eval: { verdict: e.verdict, withRate: e.withRate, baselineRate: e.baselineRate, delta: e.delta, costUsd: e.costUsd, capped: e.capped, ranAt: e.ranAt } } : {}), ...(evalRuns.has(b.id) ? { evalRun: evalRuns.get(b.id) } : {}) };
+        }));
+        return json(res, 200, { builds, dir: shop.dir });
+      }
+      if (evalPath && method === "GET") {
+        const got = await readEval(join(shop.dir, evalPath[1] as string));
+        return got ? json(res, 200, got) : json(res, 404, { error: "not_found" });
+      }
+      if (evalPath) {
+        const sup = opts.supervisor;
+        if (!sup || !EvalBody.safeParse(await readJson(req)).success) return json(res, 400, { error: "invalid_request" });
+        const id = evalPath[1] as string;
+        const build = (await shop.list()).find((b) => b.id === id);
+        if (!build) return json(res, 404, { error: "not_found" });
+        if (build.status !== "ready") return json(res, 409, { reason: "no_patch" });
+        const dir = join(shop.dir, id);
+        const cases = await readCases(dir);
+        if (!cases) return json(res, 409, { reason: "no_evals" });
+        const shown = await shop.patch(id);
+        const skillDir = shown ? await changedSkillDir(dir, shown.patch) : null;
+        const texts = skillDir === null ? null : await skillTexts(dir, skillDir);
+        if (skillDir === null || !texts) return json(res, 409, { reason: "no_skill" });
+        if ([...evalRuns.values()].some((r) => !r.failed)) return json(res, 409, { reason: "eval_running" });
+        evalRuns.set(id, { done: 0, total: cases.length });
+        // The run takes minutes: answer now, and the page watches the build list.
+        void (async () => {
+          try {
+            const scratch = await scratchDir(dir);
+            const session = supervisorSession(sup, (agent) => opts.registry?.get(agent)?.usd ?? 0, scratch);
+            const result = await runEval({ cases, skill: texts, skillName: skillDir === "" ? build.title : (skillDir.split("/").pop() ?? skillDir), session, progress: (done, total) => evalRuns.set(id, { done, total }) });
+            await saveEval(dir, result);
+            log({ event: "skill-eval-end", build: id, verdict: result.verdict, costUsd: result.costUsd });
+          } catch (error) {
+            log({ event: "skill-eval-error", build: id, message: error instanceof Error ? error.message : String(error) });
+            // The page shows that the run failed for a minute, instead of the run just vanishing.
+            evalRuns.set(id, { done: 0, total: cases.length, failed: true });
+            setTimeout(() => evalRuns.delete(id), 60_000).unref();
+          } finally {
+            if (!evalRuns.get(id)?.failed) evalRuns.delete(id);
+            await rm(join(dir, "eval-scratch"), { recursive: true, force: true }).catch(() => undefined);
+          }
+        })();
+        return json(res, 202, {});
+      }
       if (patch) {
         const got = await shop.patch(patch[1] as string);
         return got ? json(res, 200, got) : json(res, 404, { error: "not_found" });

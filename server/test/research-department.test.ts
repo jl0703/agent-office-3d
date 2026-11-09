@@ -689,3 +689,84 @@ describe("the implementation brief (plan 18, E1)", () => {
     assert.equal(existsSync(join(realpathSync(workshop.dir), buildId, "b", "evals.json")), false, "not inside the working copy");
   });
 });
+
+describe("the skill eval routes (plan 18, E2)", () => {
+  const brief = (id: string) =>
+    `---\nid: ${id}\ngoal: Add a checklist\nfiles: docs/SKILL.md\ncriteria: The skill lists the checks\ndate: 2026-11-09\nwritten_by: briefer\neval1_prompt: Review this README\neval1_expect: names accuracy | mentions links\neval2_prompt: Is my doc good\neval2_expect: gives a checklist\n---\nbody\n`;
+
+  async function readyBuild(withBrief: boolean) {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "evalrig-")));
+    dirs.push(root);
+    const target = join(root, "skills");
+    mkdirSync(join(target, "docs"), { recursive: true });
+    writeFileSync(join(target, "docs", "SKILL.md"), "---\nname: docs\ndescription: d\n---\nWrite short sentences.\n");
+    const workshop = createWorkshop({ dir: join(root, "shop"), target });
+    const r = await rig({ workshop, supervisor: { maxManaged: 12 } });
+    r.write("tool-a", { title: "Tool A" });
+    if (withBrief) {
+      mkdirSync(join(r.research, "briefs"), { recursive: true });
+      writeFileSync(join(r.research, "briefs", "tool-a.md"), brief("tool-a"));
+    }
+    await r.post("/api/research/findings/tool-a/decision", { status: "adopt" });
+    const res = await r.post("/api/workshop/build", { findingId: "tool-a" });
+    const { id, build } = json(res) as { id: string; build: string };
+    const buildDir = join(realpathSync(workshop.dir), build);
+    for (let i = 0; i < 100 && !existsSync(join(buildDir, "evals.json")) && withBrief; i++) await new Promise((x) => setTimeout(x, 20));
+    return { ...r, id, build, buildDir, workshop };
+  }
+
+  /** Answers every eval session the fake query has started: graders pass every check on a GOOD answer, executors answer GOOD when the skill is in the prompt. */
+  async function answerSessions(r: Awaited<ReturnType<typeof readyBuild>>, until: () => Promise<boolean>) {
+    const done = new Set<number>([0]);
+    for (let n = 0; n < 600 && !(await until()); n++) {
+      for (let i = 1; i < r.sessions.length; i++) {
+        const prompt = String((r.sessions[i]?.prompts[0]?.message as { content: unknown } | undefined)?.content ?? "");
+        if (done.has(i) || prompt === "") continue;
+        done.add(i);
+        const checks = (prompt.match(/^\d+\. /gm) ?? []).length;
+        const text = prompt.startsWith("You grade")
+          ? JSON.stringify({ results: Array.from({ length: checks }, (_, k) => ({ check: k + 1, pass: prompt.includes("GOOD"), why: "judged" })) })
+          : prompt.includes("Write short sentences.\nAlways add a checklist") ? "GOOD answer" : "plain answer";
+        r.sessions[i]?.out.push({ type: "result", subtype: "success", result: text, total_cost_usd: 0.01, session_id: "x" } as never);
+      }
+      await new Promise((x) => setTimeout(x, 20));
+    }
+  }
+
+  it("refuses until the build has a patch, the eval cases and a changed skill, and needs confirm", async () => {
+    const r = await readyBuild(false);
+    assert.equal((await r.post(`/api/workshop/${r.build}/eval`, {})).status, 400, "no confirm");
+    const early = await r.post(`/api/workshop/${r.build}/eval`, { confirm: true });
+    assert.deepEqual([early.status, json(early)], [409, { reason: "no_patch" }]);
+    writeFileSync(join(r.buildDir, "b", "docs", "SKILL.md"), "---\nname: docs\ndescription: d\n---\nWrite short sentences.\nAlways add a checklist\n");
+    await r.post(`/api/agents/${r.id}/stop`);
+    for (let i = 0; i < 200 && ((json(await r.get("/api/workshop")) as { builds: { status: string }[] }).builds[0]?.status !== "ready"); i++) await new Promise((x) => setTimeout(x, 30));
+    const noEvals = await r.post(`/api/workshop/${r.build}/eval`, { confirm: true });
+    assert.deepEqual([noEvals.status, json(noEvals)], [409, { reason: "no_evals" }], "this build was made without a brief");
+    assert.equal((await r.post("/api/workshop/aaaaaaaaaaaa/eval", { confirm: true })).status, 404);
+    assert.equal((await r.get(`/api/workshop/${r.build}/eval`)).status, 404, "no result yet");
+  });
+
+  it("runs the eval in tool-less sessions, one at a time, saves the result with the build and shows it in the list", async () => {
+    const r = await readyBuild(true);
+    writeFileSync(join(r.buildDir, "b", "docs", "SKILL.md"), "---\nname: docs\ndescription: d\n---\nWrite short sentences.\nAlways add a checklist\n");
+    await r.post(`/api/agents/${r.id}/stop`);
+    for (let i = 0; i < 200 && ((json(await r.get("/api/workshop")) as { builds: { status: string }[] }).builds[0]?.status !== "ready"); i++) await new Promise((x) => setTimeout(x, 30));
+    const started = await r.post(`/api/workshop/${r.build}/eval`, { confirm: true });
+    assert.equal(started.status, 202);
+    const again = await r.post(`/api/workshop/${r.build}/eval`, { confirm: true });
+    assert.deepEqual([again.status, json(again)], [409, { reason: "eval_running" }]);
+    const verdictShown = async () => ((json(await r.get("/api/workshop")) as { builds: { eval?: { verdict: string } }[] }).builds[0]?.eval?.verdict ?? "") !== "";
+    await answerSessions(r, verdictShown);
+    const list = json(await r.get("/api/workshop")) as { builds: { eval?: { verdict: string; delta: number; withRate: number; baselineRate: number }; evalRun?: unknown }[] };
+    assert.deepEqual([list.builds[0]?.eval?.verdict, list.builds[0]?.eval?.withRate, list.builds[0]?.eval?.baselineRate, list.builds[0]?.eval?.delta], ["improves", 1, 0, 1]);
+    assert.equal(list.builds[0]?.evalRun, undefined, "no longer running");
+    const full = json(await r.get(`/api/workshop/${r.build}/eval`)) as { cases: { prompt: string }[]; baseline: string };
+    assert.deepEqual([full.cases.length, full.baseline], [2, "previous version"]);
+    // 1 master + 2 cases x (2 answers + 2 graders) = 9 sessions, and every eval session has no tools and few turns
+    assert.equal(r.calls.length, 9);
+    for (const call of r.calls.slice(1)) assert.deepEqual([call.tools, call.maxTurns], [[], 3]);
+    assert.equal(existsSync(join(r.buildDir, "eval-scratch")), false, "the scratch folder is removed");
+    assert.equal(existsSync(join(r.buildDir, "a", "docs", "SKILL.md")), true);
+  });
+});
