@@ -1,12 +1,17 @@
 import { Plus } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { Modal } from "./Modal.tsx";
 import { addMcp, parseEnv, parseLines, previewMcp, removeMcp, type McpInput } from "./setup.ts";
 
-type Pending = { kind: "add"; input: McpInput; command: string } | { kind: "remove"; name: string };
+type Step = "closed" | "form" | "confirm";
 
-/** Add and remove MCP servers. The page shows the exact command first and nothing runs until Confirm. */
+/**
+ * Add and remove MCP servers. The add form, the exact command and the remove question each open in a pop-up window, and
+ * nothing runs until Confirm. Put this next to the list's heading: the "Add" button is what it shows on the page.
+ */
 export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onAskRemove }: { demo: boolean; showAdd?: boolean; onChanged: () => void; pendingRemove: string | null; onAskRemove: (name: string | null) => void }) {
   const id = useId();
+  const [step, setStep] = useState<Step>("closed");
   const [remote, setRemote] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
@@ -14,77 +19,76 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
   const [env, setEnv] = useState("");
   const [url, setUrl] = useState("");
   const [headers, setHeaders] = useState("");
-  const [pending, setPending] = useState<Pending | null>(null);
+  const [prepared, setPrepared] = useState<{ input: McpInput; command: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const heading = useRef<HTMLElement | null>(null);
-  const status = useRef<HTMLParagraphElement | null>(null);
-  const reviewButton = useRef<HTMLButtonElement | null>(null);
-  const asking = pending !== null || pendingRemove !== null;
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (pendingRemove) setPending(null);
+    if (pendingRemove) setStep("closed");
   }, [pendingRemove]);
-  useEffect(() => {
-    if (asking) heading.current?.focus();
-  }, [asking]);
 
   const ready = name.trim() !== "" && (remote ? url.trim() !== "" : command.trim() !== "");
 
   const review = async () => {
     const parsedEnv = parseEnv(env);
-    if (!remote && parsedEnv === null) return setMessage("Each environment line must look like KEY=value.");
+    if (!remote && parsedEnv === null) return setError("Each environment line must look like KEY=value.");
     const input: McpInput = remote
       ? { name: name.trim(), transport: "http", url: url.trim(), ...(parseLines(headers).length > 0 ? { headers: parseLines(headers) } : {}) }
       : { name: name.trim(), transport: "stdio", command: command.trim(), ...(parseLines(args).length > 0 ? { args: parseLines(args) } : {}), ...(parsedEnv && Object.keys(parsedEnv).length > 0 ? { env: parsedEnv } : {}) };
     setBusy(true);
-    setMessage("");
+    setError("");
     const result = demo ? ({ ok: true, command: `claude mcp add --scope user --transport ${input.transport} ${input.name} …` } as const) : await previewMcp(input);
     setBusy(false);
-    if (result.ok && result.command) setPending({ kind: "add", input, command: result.command });
-    else setMessage(result.ok ? "The preview was empty." : result.message);
-  };
-
-  const cancel = (p: Pending) => {
-    setPending(null);
-    onAskRemove(null);
-    requestAnimationFrame(() => (p.kind === "add" ? reviewButton.current : document.querySelector<HTMLElement>(`[aria-label="Remove ${p.name}"]`))?.focus());
-  };
-
-  const run = async (p: Pending) => {
-    setBusy(true);
-    const result = demo ? ({ ok: true } as const) : p.kind === "remove" ? await removeMcp(p.name) : await addMcp(p.input);
-    setBusy(false);
-    setPending(null);
-    onAskRemove(null);
-    requestAnimationFrame(() => status.current?.focus());
-    if (result.ok) {
-      const label = p.kind === "add" ? p.input.name : p.name;
-      setMessage(demo ? "Demo mode: nothing was changed." : p.kind === "add" ? `Added ${label}. New Claude Code sessions will start it when they need it.` : `Removed ${label}.`);
-      if (p.kind === "add" && !demo) {
-        setName("");
-        setCommand("");
-        setArgs("");
-        setEnv("");
-        setUrl("");
-        setHeaders("");
-      }
-      onChanged();
+    if (result.ok && result.command) {
+      setPrepared({ input, command: result.command });
+      setStep("confirm");
     } else {
-      setMessage(result.message);
+      setError(result.ok ? "The preview was empty." : result.message);
     }
   };
 
-  const active: Pending | null = pending ?? (pendingRemove ? { kind: "remove", name: pendingRemove } : null);
+  const run = async (remove: boolean) => {
+    setBusy(true);
+    setError("");
+    const target = remove ? (pendingRemove ?? "") : (prepared?.input.name ?? "");
+    const result = demo ? ({ ok: true } as const) : remove ? await removeMcp(target) : prepared ? await addMcp(prepared.input) : ({ ok: false, message: "Nothing to add." } as const);
+    setBusy(false);
+    if (!result.ok) return setError(result.message);
+    setStep("closed");
+    setPrepared(null);
+    onAskRemove(null);
+    setMessage(demo ? "Demo mode: nothing was changed." : remove ? `Removed ${target}.` : `Added ${target}. New Claude Code sessions will start it when they need it.`);
+    if (!remove && !demo) {
+      setName("");
+      setCommand("");
+      setArgs("");
+      setEnv("");
+      setUrl("");
+      setHeaders("");
+    }
+    onChanged();
+  };
+
+  const closeAdd = () => {
+    setStep("closed");
+    setError("");
+    setPrepared(null); // the prepared command holds environment values and headers: do not keep them
+  };
+  const back = () => {
+    setError("");
+    setStep("form");
+  };
 
   return (
-    <div className="skill-manager">
+    <div className="manager">
       {showAdd && (
-      <details>
-        <summary>
+        <button type="button" className="add-btn" onClick={() => setStep("form")}>
           <Plus size={16} strokeWidth={1.75} aria-hidden="true" /> Add an MCP server
-        </summary>
-        <p className="panel-note">A local program runs on this computer with your permissions. Only add one you trust. You will see the exact command before anything is saved.</p>
+        </button>
+      )}
+
+      <Modal open={step === "form"} onClose={closeAdd} title="Add an MCP server" description="A local program runs on this computer with your permissions. Only add one you trust. You will see the exact command before anything is saved.">
         <div className="chips" role="group" aria-label="Kind of server">
           <button type="button" className="chip-filter" aria-pressed={!remote} onClick={() => setRemote(false)}>
             Local program
@@ -112,38 +116,69 @@ export function McpManager({ demo, showAdd = true, onChanged, pendingRemove, onA
             <textarea id={`${id}-env`} rows={3} value={env} onChange={(e) => setEnv(e.target.value)} />
           </>
         )}
-        <button type="button" ref={reviewButton} disabled={!ready || busy} onClick={() => void review()}>
-          {busy ? "Checking…" : "Review the command"}
-        </button>
-      </details>
-      )}
-
-      {active && (
-        <div className="confirm-box" role="alertdialog" aria-labelledby={`${id}-confirm`} aria-describedby={`${id}-confirm-text`}>
-          <strong id={`${id}-confirm`} ref={heading} tabIndex={-1}>
-            Change your Claude setup?
-          </strong>
-          <p id={`${id}-confirm-text`} className="panel-note">
-            {active.kind === "remove"
-              ? `Remove the MCP server "${active.name}" from your Claude settings. Its program or service is not touched.`
-              : "This command will be run to save the server. Claude Code will start a local program with your permissions whenever a session needs it. The office never starts it."}
+        {error && (
+          <p className="form-message" role="alert">
+            {error}
           </p>
-          {active.kind === "add" && (
-            <pre className="command-preview" tabIndex={0} aria-label="The exact command">
-              {active.command}
-            </pre>
-          )}
-          <div className="board-actions">
-            <button type="button" disabled={busy} onClick={() => void run(active)}>
-              {busy ? "Working…" : "Confirm"}
-            </button>
-            <button type="button" disabled={busy} onClick={() => cancel(active)}>
-              Cancel
-            </button>
-          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={!ready || busy} onClick={() => void review()}>
+            {busy ? "Checking…" : "Review the command"}
+          </button>
+          <button type="button" onClick={closeAdd}>
+            Cancel
+          </button>
         </div>
-      )}
-      <p role="status" aria-live="polite" className="form-message" ref={status} tabIndex={-1}>
+      </Modal>
+
+      <Modal
+        open={step === "confirm" && prepared !== null}
+        onClose={() => !busy && back()}
+        title="Change your Claude setup?"
+        role="alertdialog"
+        description="This command will be run to save the server. Claude Code will start a local program with your permissions whenever a session needs it. The office never starts it."
+      >
+        <pre className="command-preview" tabIndex={0} aria-label="The exact command">
+          {prepared?.command}
+        </pre>
+        {error && (
+          <p className="form-message" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={busy} onClick={() => void run(false)}>
+            {busy ? "Working…" : "Confirm"}
+          </button>
+          <button type="button" disabled={busy} onClick={back}>
+            Back
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={pendingRemove !== null}
+        onClose={() => !busy && (setError(""), onAskRemove(null))}
+        title="Change your Claude setup?"
+        role="alertdialog"
+        description={`Remove the MCP server "${pendingRemove ?? ""}" from your Claude settings. Its program or service is not touched.`}
+      >
+        {error && (
+          <p className="form-message" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={busy} onClick={() => void run(true)}>
+            {busy ? "Working…" : "Confirm"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => (setError(""), onAskRemove(null))}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
+
+      <p role="status" aria-live="polite" className="form-message manager-status">
         {message}
       </p>
     </div>

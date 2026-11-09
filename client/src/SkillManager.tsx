@@ -1,9 +1,10 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { Modal } from "./Modal.tsx";
 import { addAgent, addSkill, removeAgent, removeSkill, SKILL_NAME } from "./setup.ts";
 
 type Mode = "paste" | "folder";
-type Pending = { kind: "add"; name: string; content?: string; source?: string } | { kind: "remove"; name: string };
+type Step = "closed" | "form" | "confirm";
 
 const TEMPLATE = (name: string) => `---\nname: ${name || "my-skill"}\ndescription: One line saying when to use it\n---\n\nWhat the skill tells Claude to do.\n`;
 const AGENT_TEMPLATE = (name: string) => `---\nname: ${name || "my-agent"}\ndescription: One line saying when to use it\ntools: Read, Grep\nmodel: sonnet\n---\n\nWhat the agent does and how.\n`;
@@ -17,7 +18,10 @@ function headerValue(text: string, key: string): string {
   return found.at(-1)?.slice(key.length + 1).trim().slice(0, 120) ?? "";
 }
 
-/** Add and remove skills or agents. Every change shows what will happen and waits for a click on Confirm. */
+/**
+ * Add and remove skills or agents. The add form and every confirmation open in a pop-up window, and nothing changes
+ * until Confirm is pressed. Put this next to the list's heading: the "Add" button is what it shows on the page.
+ */
 export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChanged, pendingRemove, onAskRemove }: {
   demo: boolean;
   off: boolean;
@@ -33,127 +37,140 @@ export function SkillManager({ demo, off, noun = "skill", showAdd = true, onChan
   const agent = noun === "agent";
   const add = agent ? addAgent : addSkill;
   const take = agent ? removeAgent : removeSkill;
+  const [step, setStep] = useState<Step>("closed");
   const [mode, setMode] = useState<Mode>("paste");
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [source, setSource] = useState("");
-  const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const heading = useRef<HTMLElement | null>(null);
-  const status = useRef<HTMLParagraphElement | null>(null);
-  const reviewButton = useRef<HTMLButtonElement | null>(null);
-  const asking = pending !== null || pendingRemove !== null;
+  const [error, setError] = useState("");
 
-  // Asking to remove closes an add review, and a confirm box that opens takes focus so keyboard users land in it.
+  // Asking to remove something closes the add window.
   useEffect(() => {
-    if (pendingRemove) setPending(null);
+    if (pendingRemove) setStep("closed");
   }, [pendingRemove]);
-  useEffect(() => {
-    if (asking) heading.current?.focus();
-  }, [asking]);
-
-  const cancel = (p: Pending) => {
-    setPending(null);
-    onAskRemove(null);
-    // Back to the button that asked: Review, or the row's remove button.
-    requestAnimationFrame(() => (p.kind === "add" ? reviewButton.current : document.querySelector<HTMLElement>(`[aria-label="Remove ${p.name}"]`))?.focus());
-  };
 
   const nameOk = SKILL_NAME.test(name);
   const ready = nameOk && (mode === "paste" ? content.trim() !== "" : source.trim() !== "");
+  const input = mode === "paste" ? { name, content } : { name, source: source.trim() };
 
-  const review = () => {
-    setMessage("");
-    setPending({ kind: "add", name, ...(mode === "paste" ? { content } : { source: source.trim() }) });
-  };
-
-  const run = async (p: Pending) => {
+  const run = async (remove: boolean) => {
     setBusy(true);
-    const result = demo ? ({ ok: true } as const) : p.kind === "remove" ? await take(p.name) : await add(p.content !== undefined ? { name: p.name, content: p.content } : { name: p.name, source: p.source ?? "" });
+    setError("");
+    const target = pendingRemove ?? name;
+    const result = demo ? ({ ok: true } as const) : remove ? await take(target) : await add(input);
     setBusy(false);
-    setPending(null);
+    if (!result.ok) return setError(result.message); // the window stays open, with the reason in it
+    setStep("closed");
     onAskRemove(null);
-    // The confirm box and, after a removal, the row are gone: the status line says what happened.
-    requestAnimationFrame(() => status.current?.focus());
-    if (result.ok) {
-      setMessage(demo ? "Demo mode: nothing was changed." : p.kind === "add" ? `Added ${p.name}. New Claude Code sessions will see it.` : `Moved ${p.name} to the trash folder.`);
-      if (p.kind === "add" && !demo) {
-        setName("");
-        setContent("");
-        setSource("");
-      }
-      onChanged();
-    } else {
-      setMessage(result.message);
+    setMessage(demo ? "Demo mode: nothing was changed." : remove ? `Moved ${target} to the trash folder.` : `Added ${target}. New Claude Code sessions will see it.`);
+    if (!remove && !demo) {
+      setName("");
+      setContent("");
+      setSource("");
     }
+    onChanged();
   };
 
-  const active: Pending | null = pending ?? (pendingRemove ? { kind: "remove", name: pendingRemove } : null);
+  const closeAdd = () => {
+    setStep("closed");
+    setError("");
+  };
 
   return (
-    <div className="skill-manager">
+    <div className="manager">
       {showAdd && (
-        <details>
-          <summary>
-            <Plus size={16} strokeWidth={1.75} aria-hidden="true" /> {agent ? "Add an agent" : "Add a skill"}
-          </summary>
-          <div className="chips" role="group" aria-label="How to add it">
-            <button type="button" className="chip-filter" aria-pressed={mode === "paste"} onClick={() => setMode("paste")}>
-              {agent ? "Paste the agent file" : "Paste SKILL.md"}
-            </button>
-            <button type="button" className="chip-filter" aria-pressed={mode === "folder"} onClick={() => setMode("folder")}>
-              {agent ? "Copy a file" : "Copy a folder"}
-            </button>
-          </div>
-          <label htmlFor={`${id}-name`}>{agent ? "Agent name" : "Skill name"}</label>
-          <input id={`${id}-name`} value={name} maxLength={60} aria-invalid={name !== "" && !nameOk} aria-describedby={`${id}-name-hint`} onChange={(e) => setName(e.target.value)} placeholder={agent ? "my-agent" : "my-skill"} />
-          <p id={`${id}-name-hint`} className="panel-note">
-            Lowercase letters, digits and hyphens. An existing {noun} is never replaced.
-          </p>
-          {mode === "paste" ? (
-            <>
-              <label htmlFor={`${id}-content`}>{agent ? "Agent file text" : "SKILL.md text"}</label>
-              <textarea id={`${id}-content`} rows={8} maxLength={100_000} value={content} onChange={(e) => setContent(e.target.value)} placeholder={agent ? AGENT_TEMPLATE(name) : TEMPLATE(name)} />
-            </>
-          ) : (
-            <>
-              <label htmlFor={`${id}-source`}>{agent ? "File to copy (full path of a .md file)" : "Folder to copy (full path, with a SKILL.md inside)"}</label>
-              <input id={`${id}-source`} value={source} maxLength={1000} onChange={(e) => setSource(e.target.value)} placeholder={agent ? "C:/path/to/agent.md" : "C:/path/to/skill"} />
-            </>
-          )}
-          <button type="button" disabled={!ready || off || busy} title={off ? "Not available right now" : undefined} ref={reviewButton} onClick={review}>
-            Review
-          </button>
-        </details>
+        <button type="button" className="add-btn" disabled={off} title={off ? "Not available right now" : undefined} onClick={() => setStep("form")}>
+          <Plus size={16} strokeWidth={1.75} aria-hidden="true" /> {agent ? "Add an agent" : "Add a skill"}
+        </button>
       )}
 
-      {active && (
-        <div className="confirm-box" role="alertdialog" aria-labelledby={`${id}-confirm`} aria-describedby={`${id}-confirm-text`}>
-          <strong id={`${id}-confirm`} ref={heading} tabIndex={-1}>
-            Change your Claude setup?
-          </strong>
-          <p id={`${id}-confirm-text`} className="panel-note">
-            {active.kind === "remove"
-              ? `Move the ${noun} "${active.name}" from your ${noun}s folder to the trash folder. You can move it back by hand.`
-              : `Create the ${noun} "${active.name}" in your ${noun}s folder${active.content !== undefined ? ` from the pasted text (${new Blob([active.content]).size} bytes)` : ` by copying ${active.source}`}. Claude Code will load it in new sessions. Read it first if you did not write it.`}
-          </p>
-          {active.kind === "add" && agent && active.content !== undefined && (
-            <p className="panel-note">
-              Tools: {headerValue(active.content, "tools") || "not set, which means it can use every tool"}. Model: {headerValue(active.content, "model") || "not set (your default)"}.
-            </p>
-          )}
-          <div className="board-actions">
-            <button type="button" disabled={busy} onClick={() => void run(active)}>
-              {busy ? "Working…" : "Confirm"}
-            </button>
-            <button type="button" disabled={busy} onClick={() => cancel(active)}>
-              Cancel
-            </button>
-          </div>
+      <Modal open={step === "form"} onClose={closeAdd} title={agent ? "Add an agent" : "Add a skill"}>
+        <div className="chips" role="group" aria-label="How to add it">
+          <button type="button" className="chip-filter" aria-pressed={mode === "paste"} onClick={() => setMode("paste")}>
+            {agent ? "Paste the agent file" : "Paste SKILL.md"}
+          </button>
+          <button type="button" className="chip-filter" aria-pressed={mode === "folder"} onClick={() => setMode("folder")}>
+            {agent ? "Copy a file" : "Copy a folder"}
+          </button>
         </div>
-      )}
-      <p role="status" aria-live="polite" className="form-message" ref={status} tabIndex={-1}>
+        <label htmlFor={`${id}-name`}>{agent ? "Agent name" : "Skill name"}</label>
+        <input id={`${id}-name`} value={name} maxLength={60} aria-invalid={name !== "" && !nameOk} aria-describedby={`${id}-name-hint`} onChange={(e) => setName(e.target.value)} placeholder={agent ? "my-agent" : "my-skill"} />
+        <p id={`${id}-name-hint`} className="panel-note">
+          Lowercase letters, digits and hyphens. An existing {noun} is never replaced.
+        </p>
+        {mode === "paste" ? (
+          <>
+            <label htmlFor={`${id}-content`}>{agent ? "Agent file text" : "SKILL.md text"}</label>
+            <textarea id={`${id}-content`} rows={8} maxLength={100_000} value={content} onChange={(e) => setContent(e.target.value)} placeholder={agent ? AGENT_TEMPLATE(name) : TEMPLATE(name)} />
+          </>
+        ) : (
+          <>
+            <label htmlFor={`${id}-source`}>{agent ? "File to copy (full path of a .md file)" : "Folder to copy (full path, with a SKILL.md inside)"}</label>
+            <input id={`${id}-source`} value={source} maxLength={1000} onChange={(e) => setSource(e.target.value)} placeholder={agent ? "C:/path/to/agent.md" : "C:/path/to/skill"} />
+          </>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={!ready} onClick={() => (setError(""), setStep("confirm"))}>
+            Review
+          </button>
+          <button type="button" onClick={closeAdd}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={step === "confirm"}
+        onClose={() => !busy && setStep("form")}
+        title="Change your Claude setup?"
+        role="alertdialog"
+        description={`Create the ${noun} "${name}" in your ${noun}s folder${mode === "paste" ? ` from the pasted text (${new Blob([content]).size} bytes)` : ` by copying ${source.trim()}`}. Claude Code will load it in new sessions. Read it first if you did not write it.`}
+      >
+        {agent && mode === "paste" && (
+          <p className="panel-note">
+            Tools: {headerValue(content, "tools") || "not set, which means it can use every tool"}. Model: {headerValue(content, "model") || "not set (your default)"}.
+          </p>
+        )}
+        {error && (
+          <p className="form-message" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={busy} onClick={() => void run(false)}>
+            {busy ? "Working…" : "Confirm"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setStep("form")}>
+            Back
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={pendingRemove !== null}
+        onClose={() => !busy && (setError(""), onAskRemove(null))}
+        title="Change your Claude setup?"
+        role="alertdialog"
+        description={`Move the ${noun} "${pendingRemove ?? ""}" from your ${noun}s folder to the trash folder. You can move it back by hand.`}
+      >
+        {error && (
+          <p className="form-message" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" disabled={busy} onClick={() => void run(true)}>
+            {busy ? "Working…" : "Confirm"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => (setError(""), onAskRemove(null))}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
+
+      <p role="status" aria-live="polite" className="form-message manager-status">
         {message}
       </p>
     </div>
