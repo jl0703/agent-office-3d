@@ -30,7 +30,7 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 
 export type StartRequest = { cwd: string; prompt: string; name?: string };
 /** A research team's master: the folder is optional and defaults to the research folder. */
-export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A finding id: an Evaluator, which may only create evaluations/<id>.md. */ evaluator?: string; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string };
+export type StartMasterRequest = Omit<StartRequest, "cwd"> & { cwd?: string; team?: "research"; sweep?: true; /** A research writer (Evaluator or Briefer): it may only create <dir>/<id>.md in the research folder. */ writeTo?: { dir: string; id: string }; /** A Workshop build id: never auto-approved, and the patch is written when the master ends. */ workshop?: string };
 export type StartResult =
   | { ok: true; id: string }
   | {
@@ -49,6 +49,7 @@ export type CommandResult =
     };
 
 export const EVALUATOR_NAME = "Evaluator";
+export const BRIEFER_NAME = "Briefer";
 
 /** What the owner reads on the Lead after a sweep: its own final report, one line, so a sweep that filed nothing is visible. */
 export const sweepEndNote = (result: string | null) => {
@@ -635,7 +636,7 @@ export function createSupervisor(opts: SupervisorOptions) {
     if (owner && !isInside(owner.cwd, folder.path)) return refuse(403, "folder_not_allowed");
     if (owner && owner.state !== "running") return refuse(409, "master_stopped");
     if (owner?.phase === "planning") return refuse(409, "plan_not_approved");
-    if (req.evaluator && live().some((x) => x.writeOnly !== null)) return refuse(409, "evaluating");
+    if (req.writeTo && live().some((x) => x.writeOnly !== null)) return refuse(409, "evaluating"); // one research writer at a time
     if (req.sweep && live().some((x) => x.role === "master" && x.team === "research")) return refuse(409, "sweep_running");
     if (role === "master" && live().filter((x) => x.role === "master").length >= maxMasters) return refuse(409, "master_running");
     if (owner && ownedBy(owner).filter((w) => w.state !== "ended").length >= maxWorkersPerMaster) return refuse(429, "worker_limit");
@@ -654,7 +655,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       // Every master plans first, except a research sweep's Lead, which starts executing.
       phase: role === "master" && !req.sweep ? "planning" : "executing",
       workshop: req.workshop ?? null,
-      writeOnly: req.evaluator ? join(folder.path, "evaluations", `${req.evaluator}.md`) : null,
+      writeOnly: req.writeTo ? join(folder.path, req.writeTo.dir, `${req.writeTo.id}.md`) : null,
       sweep: owner?.sweep ?? (req.sweep ? { spent: 0, capUsd: sweepBudgetUsd, lead: null } : null),
     });
     if (m.sweep && !owner) m.sweep.lead = m;
@@ -831,7 +832,10 @@ export function createSupervisor(opts: SupervisorOptions) {
     startMaster: (req: StartMasterRequest) => begin(req, "master", null),
 
     /** Starts one read-only Evaluator for a finding (a research-team worker). One at a time. */
-    startEvaluation: (findingId: string, prompt: string): Promise<StartResult> => begin({ prompt, team: "research", name: `${EVALUATOR_NAME} ${findingId}`, evaluator: findingId }, "worker", null),
+    startEvaluation: (findingId: string, prompt: string): Promise<StartResult> => begin({ prompt, team: "research", name: `${EVALUATOR_NAME} ${findingId}`, writeTo: { dir: "evaluations", id: findingId } }, "worker", null),
+
+    /** Starts one read-only Briefer for an adopted finding. Shares the one-at-a-time slot with the Evaluator. */
+    startBrief: (findingId: string, prompt: string): Promise<StartResult> => begin({ prompt, team: "research", name: `${BRIEFER_NAME} ${findingId}`, writeTo: { dir: "briefs", id: findingId } }, "worker", null),
 
     /** Starts the research Lead on a sweep prompt. One at a time; its team's cost is capped together. */
     startSweep: (prompt: string) => begin({ prompt, team: "research", name: "Research Lead", sweep: true }, "master", null),

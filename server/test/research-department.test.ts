@@ -602,3 +602,90 @@ describe("the workshop (plan 15, R3)", () => {
     assert.equal((await r.get("/api/workshop")).status, 404);
   });
 });
+
+describe("the implementation brief (plan 18, E1)", () => {
+  const brief = (id: string) =>
+    `---\nid: ${id}\ngoal: Add a checklist\nfiles: docs/SKILL.md\ncriteria: The skill lists the checks\ndate: 2026-11-09\nwritten_by: briefer\neval1_prompt: Review this README\neval1_expect: names accuracy | mentions links\neval2_prompt: Is my doc good\neval2_expect: gives a checklist\n---\nbody\n`;
+  const putBrief = (r: Rig, id: string, text: string) => {
+    mkdirSync(join(r.research, "briefs"), { recursive: true });
+    writeFileSync(join(r.research, "briefs", `${id}.md`), text);
+  };
+
+  it("starts a Briefer only for an adopted finding, with the one-file guard, and refuses a second brief or a second writer", async () => {
+    const r = await rig({ supervisor: { maxManaged: 5 } });
+    r.write("tool-a", { title: "Tool A" });
+    r.write("tool-b");
+    const early = await r.post("/api/research/findings/tool-a/brief");
+    assert.deepEqual([early.status, json(early)], [409, { reason: "not_adopted" }]);
+    assert.equal((await r.post("/api/research/findings/nope/brief")).status, 404);
+    await r.post("/api/research/findings/tool-a/decision", { status: "adopt" });
+    await r.post("/api/research/findings/tool-b/decision", { status: "adopt" });
+    const res = await r.post("/api/research/findings/tool-a/brief");
+    assert.equal(res.status, 202);
+    const agent = r.registry.get(json(res)["id"] as string);
+    assert.deepEqual([agent?.role, agent?.team, agent?.name], ["worker", "research", "Briefer tool-a"]);
+    assert.equal(r.calls[0]?.cwd, realpathSync(r.research));
+    const prompt = promptOf(r);
+    for (const part of ["findings/tool-a.md", "briefs/tool-a.md", "eval1_prompt", "never install", "untrusted"]) assert.ok(prompt.toLowerCase().includes(part.toLowerCase()), part);
+    assert.equal(prompt.includes(SECRET), false);
+    const hook = r.calls[0]?.hooks?.PreToolUse?.[0]?.hooks[0];
+    assert.ok(hook);
+    const allowed = async (file: string) => {
+      const out = (await hook({ hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: file }, tool_use_id: "t" } as never, "t", { signal: new AbortController().signal })) as { hookSpecificOutput?: unknown };
+      return out.hookSpecificOutput === undefined;
+    };
+    assert.equal(await allowed(join(realpathSync(r.research), "briefs", "tool-a.md")), true);
+    assert.equal(await allowed(join(realpathSync(r.research), "findings", "tool-a.md")), false);
+    assert.equal(await allowed(join(realpathSync(r.research), "briefs", "tool-b.md")), false);
+    const busy = await r.post("/api/research/findings/tool-b/brief");
+    assert.deepEqual([busy.status, json(busy)], [409, { reason: "evaluating" }], "one research writer at a time, shared with the fit check");
+    putBrief(r, "tool-a", brief("tool-a"));
+    const again = await r.post("/api/research/findings/tool-a/brief");
+    assert.deepEqual([again.status, json(again)], [409, { reason: "exists" }]);
+  });
+
+  it("shows a valid brief on its finding, ignores a broken one, and lets the owner save an edit that is checked again", async () => {
+    const r = await rig();
+    r.write("tool-a");
+    r.write("tool-b");
+    putBrief(r, "tool-a", brief("tool-a"));
+    putBrief(r, "tool-b", brief("tool-b").replace("eval2_prompt: Is my doc good\neval2_expect: gives a checklist\n", ""));
+    const list = json(await r.get("/api/research/findings")) as { findings: { id: string; brief?: { goal: string; cases: unknown[] } }[] };
+    const byId = Object.fromEntries(list.findings.map((f) => [f.id, f.brief]));
+    assert.deepEqual([byId["tool-a"]?.goal, byId["tool-a"]?.cases.length, byId["tool-b"]], ["Add a checklist", 2, undefined]);
+    const edit = { goal: "Add a better checklist", files: "docs/SKILL.md", criteria: "It lists the checks", cases: [{ prompt: "Review this", assertions: ["names accuracy"] }, { prompt: "Is this good", assertions: ["gives a list"] }] };
+    const saved = await r.post("/api/research/findings/tool-a/brief/save", edit);
+    assert.equal(saved.status, 200);
+    const again = json(await r.get("/api/research/findings")) as typeof list;
+    assert.equal(again.findings.find((f) => f.id === "tool-a")?.brief?.goal, "Add a better checklist");
+    assert.match(readFileSync(join(r.research, "briefs", "tool-a.md"), "utf8"), /written_by: owner/);
+    assert.equal((await r.post("/api/research/findings/tool-a/brief/save", { ...edit, cases: [edit.cases[0]] })).status, 400, "one case is not enough");
+    assert.equal((await r.post("/api/research/findings/tool-a/brief/save", { ...edit, goal: "two\nlines" })).status, 400);
+    assert.equal((await r.post("/api/research/findings/tool-a/brief/save", { ...edit, extra: 1 })).status, 400);
+    r.write("no-brief");
+    assert.equal((await r.post("/api/research/findings/no-brief/brief/save", edit)).status, 404);
+  });
+
+  it("gives the Workshop master the brief and keeps the eval cases next to the copies, out of the patch", async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "briefshop-")));
+    dirs.push(root);
+    const target = join(root, "skills");
+    mkdirSync(join(target, "docs"), { recursive: true });
+    writeFileSync(join(target, "docs", "SKILL.md"), "base\n");
+    const workshop = createWorkshop({ dir: join(root, "shop"), target });
+    const r = await rig({ workshop });
+    r.write("tool-a", { title: "Tool A" });
+    putBrief(r, "tool-a", brief("tool-a"));
+    await r.post("/api/research/findings/tool-a/decision", { status: "adopt" });
+    const res = await r.post("/api/workshop/build", { findingId: "tool-a" });
+    assert.equal(res.status, 202);
+    const buildId = json(res)["build"] as string;
+    const prompt = promptOf(r);
+    assert.ok(prompt.includes("Brief from the research team") && prompt.includes("Add a checklist") && prompt.includes("Review this README"));
+    const file = join(realpathSync(workshop.dir), buildId, "evals.json");
+    for (let i = 0; i < 100 && !existsSync(file); i++) await new Promise((res2) => setTimeout(res2, 20));
+    const evals = JSON.parse(readFileSync(file, "utf8")) as { evals: { assertions: string[] }[] };
+    assert.deepEqual(evals.evals[0]?.assertions, ["names accuracy", "mentions links"]);
+    assert.equal(existsSync(join(realpathSync(workshop.dir), buildId, "b", "evals.json")), false, "not inside the working copy");
+  });
+});

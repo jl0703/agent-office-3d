@@ -15,6 +15,12 @@ export const VERDICT_WORD: Record<Verdict, string> = { fits: "Fits", "needs-work
 /** The Evaluator's report on whether a finding fits this workspace. */
 export type Fit = { verdict: Verdict; how: string; conflicts: string; security: string; effort: string; rollback: string; date: string };
 
+/** One eval case of a brief: a request and the checks its answer must pass. */
+export type EvalCase = { prompt: string; assertions: string[] };
+
+/** What the Briefer hands to the implementor once a find is adopted. */
+export type Brief = { goal: string; files: string; criteria: string; date: string; written_by: string; cases: EvalCase[] };
+
 export type Finding = {
   id: string;
   kind: Kind;
@@ -32,6 +38,7 @@ export type Finding = {
   language?: string;
   forks?: number;
   fit?: Fit;
+  brief?: Brief;
   status: Decision;
   note?: string;
 };
@@ -51,6 +58,14 @@ function toFit(raw: unknown): Fit | undefined {
   const text = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string) : null);
   const [how, conflicts, security, effort, rollback, date] = ["how", "conflicts", "security", "effort", "rollback", "date"].map(text);
   return how && conflicts && security && effort && rollback && date ? { verdict: raw["verdict"], how, conflicts, security, effort, rollback, date } : undefined;
+}
+
+function toBrief(raw: unknown): Brief | undefined {
+  if (!isRecord(raw) || !Array.isArray(raw["cases"])) return undefined;
+  const text = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string) : null);
+  const [goal, files, criteria, date, written_by] = ["goal", "files", "criteria", "date", "written_by"].map(text);
+  const cases = raw["cases"].filter((c): c is Record<string, unknown> => isRecord(c) && typeof c["prompt"] === "string" && Array.isArray(c["assertions"])).map((c) => ({ prompt: c["prompt"] as string, assertions: (c["assertions"] as unknown[]).filter((a): a is string => typeof a === "string") }));
+  return goal && files && criteria && date && written_by && cases.length >= 2 ? { goal, files, criteria, date, written_by, cases } : undefined;
 }
 
 function toFinding(raw: unknown): Finding | null {
@@ -78,6 +93,7 @@ function toFinding(raw: unknown): Finding | null {
     ...(typeof raw["language"] === "string" ? { language: raw["language"] } : {}),
     ...(typeof raw["forks"] === "number" ? { forks: raw["forks"] } : {}),
     ...(toFit(raw["fit"]) ? { fit: toFit(raw["fit"]) as Fit } : {}),
+    ...(toBrief(raw["brief"]) ? { brief: toBrief(raw["brief"]) as Brief } : {}),
   };
 }
 
@@ -102,6 +118,9 @@ async function send(path: string, body: unknown, fetchFn: FetchFn): Promise<Resu
     if (res.ok) return { ok: true };
     const data = (await res.json().catch(() => ({}))) as { error?: unknown; reason?: unknown };
     const code = [data.error, data.reason].find((v) => typeof v === "string") as string | undefined;
+    if (code === "not_adopted") return { ok: false, message: "Mark the find Adopt first." };
+    if (code === "exists") return { ok: false, message: "A brief already exists for this find." };
+    if (code === "invalid_input") return { ok: false, message: "The brief did not pass the checks: two or three cases, each with one to five checks of 5 to 200 characters, and one line per field." };
     if (code === "evaluating") return { ok: false, message: "A fit check is already running. Wait for it to finish." };
     if (code === "sweep_running") return { ok: false, message: "A sweep is already running." };
     if (code === "no_research_folder") return { ok: false, message: "There is no research folder yet. Set OFFICE_VAULT_DIR (or OFFICE_RESEARCH_DIR) in the .env file and restart the server." };
@@ -118,6 +137,12 @@ export const setDecision = (id: string, status: Decision, note: string | undefin
   send(`/api/research/findings/${encodeURIComponent(id)}/decision`, { status, ...(note ? { note } : {}) }, fetchFn);
 
 export const evaluateFinding = (id: string, fetchFn: FetchFn = fetch) => send(`/api/research/findings/${encodeURIComponent(id)}/evaluate`, {}, fetchFn);
+
+/** Asks a Briefer to write the brief for an adopted find. */
+export const generateBrief = (id: string, fetchFn: FetchFn = fetch) => send(`/api/research/findings/${encodeURIComponent(id)}/brief`, {}, fetchFn);
+
+/** Saves the owner's edit of a brief. The server checks it again. */
+export const saveBriefEdit = (id: string, edit: { goal: string; files: string; criteria: string; cases: EvalCase[] }, fetchFn: FetchFn = fetch) => send(`/api/research/findings/${encodeURIComponent(id)}/brief/save`, edit, fetchFn);
 
 export const startSweep = (fetchFn: FetchFn = fetch) => send("/api/research/sweep", {}, fetchFn);
 
@@ -157,7 +182,7 @@ export function demoFindings(): Finding[] {
   return [
     { ...base, id: "demo-review-mcp", kind: "mcp", title: "Demo: a code review MCP server", url: "https://example.com/demo/review-mcp", relevance: 5, effort: "low", risk: "low", why: "Would give masters a safe read-only review tool.", improves: "code-reviewer skill", status: "new", stars: 4200, forks: 310, language: "TypeScript", license: "MIT" },
     { ...base, id: "demo-skills-pack", kind: "skill", title: "Demo: a pack of documentation skills", url: "https://example.com/demo/skills", relevance: 4, effort: "low", risk: "low", why: "Reusable skills for writing and checking docs.", status: "looking", stars: 880, forks: 64, language: "Shell", license: "Apache-2.0", note: "Try on the docs folder first", fit: { verdict: "fits", how: "Copy the skills into the skills folder and list them in the docs rule", conflicts: "none", security: "Text files only; Apache-2.0", effort: "low", rollback: "Delete the copied folder", date: "2026-11-06" } },
-    { ...base, id: "demo-memory-idea", kind: "idea", title: "Demo: share findings between agents through notes", url: "https://example.com/demo/memory", relevance: 3, effort: "medium", risk: "low", why: "Agents would reuse earlier answers instead of searching again.", status: "later" },
+    { ...base, id: "demo-memory-idea", kind: "idea", title: "Demo: share findings between agents through notes", url: "https://example.com/demo/memory", relevance: 3, effort: "medium", risk: "low", why: "Agents would reuse earlier answers instead of searching again.", status: "later", brief: { goal: "Add a notes folder the agents read before searching", files: "research/notes/", criteria: "A second search for the same topic reuses the earlier answer", date: "2026-11-06", written_by: "demo-briefer", cases: [{ prompt: "Find tools for code review again", assertions: ["mentions the earlier result", "does not repeat the whole search"] }, { prompt: "What did we learn about memory last week?", assertions: ["cites a saved note"] }] } },
     { ...base, id: "demo-risky-tool", kind: "repo", title: "Demo: an unmaintained shell wrapper", url: "https://example.com/demo/shell", relevance: 2, effort: "high", risk: "high", why: "Needs shell access, which workers must not have.", status: "reject", stars: 120, forks: 9, language: "Shell", license: "GPL-3.0" },
   ];
 }
