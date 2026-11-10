@@ -4,17 +4,22 @@ import { join } from "node:path";
 import { z } from "zod";
 import { realOps, renameWithRetry, type WriteOps } from "./managedStore.ts";
 import type { Agent } from "../../shared/events.ts";
-import { Brief, Id, Title, type Person } from "./team.ts";
+import { Brief, Id, Line, Title, type Person } from "./team.ts";
 
 // The owner's task list: what to do, who it is given to, and which worker is doing it. One file in the data folder.
 // The owner writes the titles and details; workers have no route to the file (a worker folder may not hold the data folder).
 
 export const TASKS_FILE = "tasks.json";
 export const MAX_TASKS = 200;
+/** Suggestions waiting for the owner, in all: past this a master is told to wait. */
+export const MAX_WAITING_SUGGESTIONS = 10;
+/** Suggestions one master may make in one run. */
+export const MAX_SUGGESTIONS_PER_MASTER = 3;
 
 const AgentId = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
 const Fields = { title: Title, details: Brief, assignee: Id.nullable() };
-const Task = z.object({ id: Id, ...Fields, done: z.boolean(), agentId: AgentId.nullable(), createdAt: z.number().int().min(0).max(8.64e15) }).strict();
+/** `suggestedBy` is set only for a task an agent proposed and the owner has not accepted yet. */
+const Task = z.object({ id: Id, ...Fields, done: z.boolean(), agentId: AgentId.nullable(), createdAt: z.number().int().min(0).max(8.64e15), suggestedBy: Line.optional() }).strict();
 const TasksFile = z.object({ version: z.literal(1), tasks: z.array(Task).max(MAX_TASKS) }).strict();
 
 export type Task = z.infer<typeof Task>;
@@ -22,7 +27,7 @@ export const TaskInput = z.object(Fields).strict();
 export type TaskInput = z.infer<typeof TaskInput>;
 export const TaskUpdate = z.object({ id: Id, ...Fields, done: z.boolean() }).partial({ title: true, details: true, assignee: true, done: true }).strict();
 
-export type TaskError = "too_many" | "unknown_task";
+export type TaskError = "too_many" | "unknown_task" | "too_many_suggestions" | "not_suggested";
 
 const newId = () => randomBytes(6).toString("hex");
 
@@ -134,6 +139,28 @@ export function createTasksStore(dir: string, ops: WriteOps = realOps) {
         await commit(tasks.filter((t) => t.id !== id));
         return { ok: true, tasks: [...(await load())] };
       }),
+    /** An agent's proposal: unassigned, marked with who suggested it, and never started by anything but the owner after they accept it. */
+    suggest: (input: Pick<TaskInput, "title" | "details">, by: string, now = Date.now()) =>
+      enqueue(async (): Promise<Done> => {
+        const tasks = await load();
+        if (tasks.length >= MAX_TASKS) return { ok: false, code: "too_many" };
+        if (tasks.filter((t) => t.suggestedBy !== undefined).length >= MAX_WAITING_SUGGESTIONS) return { ok: false, code: "too_many_suggestions" };
+        const task: Task = { id: newId(), title: input.title, details: input.details, assignee: null, done: false, agentId: null, createdAt: now, suggestedBy: by };
+        await commit([...tasks, task]);
+        return { ok: true, tasks: [...(await load())], task };
+      }),
+    /** The owner accepts a suggestion: it becomes an ordinary task. */
+    accept: (id: string) =>
+      enqueue(async (): Promise<Done> => {
+        const tasks = await load();
+        const old = tasks.find((t) => t.id === id);
+        if (!old) return { ok: false, code: "unknown_task" };
+        if (old.suggestedBy === undefined) return { ok: false, code: "not_suggested" };
+        const { suggestedBy: _by, ...task } = old;
+        void _by;
+        await commit(tasks.map((t) => (t.id === id ? task : t)));
+        return { ok: true, tasks: [...(await load())], task };
+      }),
     /** A person left the team: their tasks become unassigned. */
     unassign: (person: string) =>
       enqueue(async () => {
@@ -144,3 +171,15 @@ export function createTasksStore(dir: string, ops: WriteOps = realOps) {
   };
 }
 export type TasksStore = ReturnType<typeof createTasksStore>;
+
+/** What a master's `suggest_task` tool calls: the same text rules as any task, written by the server, never started. */
+export function suggestVia(store: TasksStore) {
+  return async (by: string, title: string, details: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const parsed = TaskInput.safeParse({ title, details, assignee: null });
+    const name = Line.safeParse(by);
+    if (!parsed.success) return { ok: false, error: "A suggestion needs a title of one line (up to 100 characters) and details up to 1500 characters, with no control characters." };
+    const done = await store.suggest({ title: parsed.data.title, details: parsed.data.details }, name.success ? name.data : "Master");
+    if (done.ok) return { ok: true };
+    return { ok: false, error: done.code === "too_many_suggestions" ? `${MAX_WAITING_SUGGESTIONS} suggestions are already waiting for the owner. Do not suggest more until they decide.` : "The task list is full." };
+  };
+}

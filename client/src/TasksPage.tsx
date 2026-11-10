@@ -1,13 +1,14 @@
 import { Plus } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import type { Agent } from "../../shared/events.ts";
+import { AvatarImage } from "./Avatar.tsx";
 import { Modal } from "./Modal.tsx";
-import { addTask, demoOwnTasks, getOwnTasks, removeTask, startTask, updateTask, type OwnTask, type TasksResult } from "./ownTasks.ts";
+import { acceptTask, addTask, demoOwnTasks, getOwnTasks, removeTask, startTask, updateTask, type OwnTask, type TasksResult } from "./ownTasks.ts";
 import { loadRecent, remember } from "./recent.ts";
 import { demoFindings, getFindings, type Finding } from "./research.ts";
 import { hrefFor } from "./route.ts";
 import { COLUMNS, COLUMN_EMPTY, COLUMN_WORD, tasksOf, type Task } from "./tasks.ts";
-import { demoTeam, getTeam, type Person } from "./team.ts";
+import { avatarOf, demoTeam, getTeam, type Person } from "./team.ts";
 import { demoBuilds, getBuilds, type Build } from "./workshop.ts";
 
 const POLL_MS = 15_000;
@@ -61,10 +62,9 @@ function Card({ task, team, demo, onOpenAgent, onChange, onAsk }: { task: Task; 
     <li className="task-card">
       <h3>{task.title}</h3>
       {own ? (
-        <>
-          <label className="task-assign" htmlFor={`${id}-who`}>
-            Assigned to
-          </label>
+        <div className="task-assignee">
+          {task.person && <AvatarImage avatar={avatarOf(task.person)} size={28} />}
+          <label htmlFor={`${id}-who`}>Assigned to</label>
           <select id={`${id}-who`} value={own.assignee ?? ""} disabled={own.done} onChange={(e) => void act(() => updateTask(own.id, { assignee: e.target.value === "" ? null : e.target.value }))}>
             <option value="">Nobody yet</option>
             {team.map((p) => (
@@ -73,9 +73,13 @@ function Card({ task, team, demo, onOpenAgent, onChange, onAsk }: { task: Task; 
               </option>
             ))}
           </select>
-        </>
+        </div>
       ) : (
-        <p className="panel-note">{task.who}</p>
+        <div className="task-assignee">
+          {task.person && <AvatarImage avatar={avatarOf(task.person)} size={28} />}
+          <span>{task.person ? `${task.person.name}, ${task.person.role}` : "Not assigned"}</span>
+          <span className="panel-note">{task.who}</span>
+        </div>
       )}
       {task.text && <p>{task.text}</p>}
       {error && (
@@ -89,18 +93,31 @@ function Card({ task, team, demo, onOpenAgent, onChange, onAsk }: { task: Task; 
       </div>
       {own && (
         <div className="task-foot">
-          {!own.done && (
-            <button type="button" disabled={own.assignee === null || task.running === true} onClick={() => onAsk({ kind: "start", task })}>
-              Start<span className="sr-only"> {task.title}</span>
-            </button>
+          {own.suggestedBy !== undefined ? (
+            <>
+              <button type="button" onClick={() => void act(() => acceptTask(own.id))}>
+                Accept<span className="sr-only"> {task.title}</span>
+              </button>
+              <button type="button" onClick={() => onAsk({ kind: "remove", task })}>
+                Dismiss<span className="sr-only"> {task.title}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {!own.done && (
+                <button type="button" disabled={own.assignee === null || task.running === true} onClick={() => onAsk({ kind: "start", task })}>
+                  Start<span className="sr-only"> {task.title}</span>
+                </button>
+              )}
+              <button type="button" onClick={() => void act(() => updateTask(own.id, { done: !own.done }))}>
+                {own.done ? "Reopen" : "Mark done"}
+                <span className="sr-only"> {task.title}</span>
+              </button>
+              <button type="button" onClick={() => onAsk({ kind: "remove", task })}>
+                Remove<span className="sr-only"> {task.title}</span>
+              </button>
+            </>
           )}
-          <button type="button" onClick={() => void act(() => updateTask(own.id, { done: !own.done }))}>
-            {own.done ? "Reopen" : "Mark done"}
-            <span className="sr-only"> {task.title}</span>
-          </button>
-          <button type="button" onClick={() => onAsk({ kind: "remove", task })}>
-            Remove<span className="sr-only"> {task.title}</span>
-          </button>
         </div>
       )}
     </li>
@@ -277,6 +294,11 @@ export function TasksPage({ agents, demo, onOpenAgent }: { agents: readonly Agen
                   <Card key={t.id} task={t} team={work.team} demo={demo} onOpenAgent={onOpenAgent} onChange={(r) => r.ok && setOwn(r.tasks)} onAsk={setDialog} />
                 ))}
               </ul>
+            )}
+            {c === "active" && (
+              <button type="button" className="add-round tip" aria-label="Add a task" data-tip="Add a task" onClick={() => setDialog({ kind: "new" })}>
+                <Plus size={18} strokeWidth={2} aria-hidden="true" />
+              </button>
             )}
           </section>
         ))}

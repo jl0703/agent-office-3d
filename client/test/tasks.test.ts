@@ -90,3 +90,33 @@ describe("the tasks board: the owner's own tasks", () => {
     assert.deepEqual(ids(tasksOf([waiting], [], [], [], [])).review, ["agent-m2"], "a plan waiting for you still needs a card");
   });
 });
+
+describe("the tasks board: suggestions and assignees", () => {
+  const suggestion = (over: Partial<OwnTask> = {}) => mine({ id: "s1", title: "Add a changelog", assignee: null, suggestedBy: "Planner", ...over });
+
+  it("puts a suggestion in Active, marked with who suggested it, until the owner accepts it", () => {
+    const card = own(suggestion()).active[0];
+    assert.equal(card?.chip, "Suggested by Planner");
+    assert.equal(card?.own?.suggestedBy, "Planner");
+    assert.equal(card?.person, null);
+    const accepted = own(suggestion({ suggestedBy: undefined })).active[0];
+    assert.equal(accepted?.chip, "Not given out", "accepted: an ordinary task nobody has been given yet");
+    assert.deepEqual(ids(own(suggestion({ done: true }))).done, ["own-s1"], "a finished one is Done whatever its mark");
+  });
+
+  it("shows a suggestion's details in full, because the owner must read all of it before it can become a worker's task", () => {
+    const long = "Read this. ".repeat(40).trim();
+    assert.equal(own(suggestion({ details: long })).active[0]?.text, long);
+    assert.ok((own(mine({ details: long })).active[0]?.text ?? "").length <= 101, "an ordinary task keeps the short preview");
+  });
+
+  it("knows who every kind of card is for: a person on tasks and on a person's worker, nobody on builds and finds", () => {
+    const worker = agent({ id: "w2", personId: "p1", status: "working" });
+    const card = tasksOf([worker], [build({ status: "building" })], [find({})], [mine({ id: "t2", agentId: null })], people);
+    assert.equal(card.progress.find((t) => t.id === "agent-w2")?.person?.name, "Riley", "a worker started as a person shows them");
+    assert.equal(card.active.find((t) => t.id === "own-t2")?.person?.name, "Riley");
+    assert.equal(card.progress.find((t) => t.id === "build-b1")?.person, null);
+    const plain = tasksOf([agent({ id: "w3", status: "working" })], [], [], [], people);
+    assert.equal(plain.progress[0]?.person, null, "a session with no role has nobody");
+  });
+});

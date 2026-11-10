@@ -19,6 +19,7 @@ import { createOfficeServer, MASTER_SYSTEM_PROMPT, MAX_RESULT_CHARS, PLAN_FIRST_
 import type { Plan } from "../../shared/events.ts";
 import { PlanInput } from "./plan.ts";
 import { isInside, resolveAllowedFolder } from "./paths.ts";
+import { MAX_SUGGESTIONS_PER_MASTER } from "./tasks.ts";
 import { inspectProcess, killLeftovers, type ProcessInfo } from "./processInfo.ts";
 import type { Registry } from "./registry.ts";
 import { RESEARCH_LEAD_PROMPT, RESEARCHER_PROMPT } from "./research.ts";
@@ -83,6 +84,8 @@ export type SupervisorOptions = {
   forgetAfterMs?: number;
   /** Where the worker file lives. Without it nothing is stored. */
   dataDir?: string;
+  /** Writes a task a master suggested (the server's task list); without it the tool answers that suggestions are off. */
+  suggestTask?: (by: string, title: string, details: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** The Claude log folder, to see whether a conversation is still being written to. Without it that check is skipped. */
   projectsDir?: string;
   /** The research team's folder. Must also be one of `roots`. Without it a research team cannot start. */
@@ -133,6 +136,8 @@ type Managed = {
   goal: string;
   /** Workers this master has started. */
   workersStarted: number;
+  /** Tasks this master has suggested in this run. */
+  suggested: number;
   /** The session was stopped by a usage cap. */
   capped: boolean;
   role: "worker" | "master";
@@ -524,6 +529,7 @@ export function createSupervisor(opts: SupervisorOptions) {
       role: "worker",
       goal: "",
       workersStarted: 0,
+      suggested: 0,
       capped: false,
       phase: "executing",
       plan: null,
@@ -839,6 +845,22 @@ export function createSupervisor(opts: SupervisorOptions) {
       },
       list() {
         return { ok: true, data: { workers: ownedBy(owner).map((w) => ({ ...row(w), task: w.task })) } };
+      },
+      async suggestTask({ title, details }) {
+        if (!opts.suggestTask) return { ok: false, error: "Suggesting tasks is not set up here." };
+        if (owner.suggested >= MAX_SUGGESTIONS_PER_MASTER) return { ok: false, error: `You have already suggested ${MAX_SUGGESTIONS_PER_MASTER} tasks in this run. Do not suggest more.` };
+        owner.suggested++; // counted before the write, so quick repeated calls cannot pass the limit
+        let done: { ok: true } | { ok: false; error: string };
+        try {
+          done = await opts.suggestTask(owner.name, title, details);
+        } catch {
+          done = { ok: false, error: "The suggestion could not be saved. Try again later." };
+        }
+        if (!done.ok) {
+          owner.suggested--; // a suggestion that was not saved does not use up one of the master's few
+          return { ok: false, error: done.error };
+        }
+        return { ok: true, data: { message: "Suggested. The owner will see it on the task board and decide." } };
       },
       async submitPlan(plan) {
         if (owner.phase !== "planning") return { ok: false, error: "Your plan is already approved; no new plan is needed." };

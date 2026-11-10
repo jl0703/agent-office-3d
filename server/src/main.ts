@@ -9,7 +9,7 @@ import { createDecisionStore, ensureResearchLayout } from "./findings.ts";
 import { PLANS_LOG_DIR } from "./planLog.ts";
 import { createGithub } from "./github.ts";
 import { createAutoApproveStore } from "./autoApprove.ts";
-import { createTasksStore } from "./tasks.ts";
+import { createTasksStore, suggestVia } from "./tasks.ts";
 import { createTeamStore } from "./team.ts";
 import { createScheduleStore, createScheduler } from "./schedule.ts";
 import { buildDigest } from "./digest.ts";
@@ -83,6 +83,7 @@ const tasks = createTasksStore(dataDir);
 const supervisor = createSupervisor({
   registry,
   autoApprove,
+  suggestTask: suggestVia(tasks),
   ...(workshop ? { onWorkshopEnd: async (build: string, final: boolean) => void (await workshop?.finish(build, final)) } : {}),
   query,
   roots,

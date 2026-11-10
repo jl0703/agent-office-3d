@@ -119,14 +119,14 @@ async function makeCaller(r: Rig, session: number) {
 }
 
 describe("the master session", () => {
-  it("is a master in the list, has exactly the worker tools plus the six office tools, and keeps the lockdown", async () => {
+  it("is a master in the list, has exactly the worker tools plus the seven office tools, and keeps the lockdown", async () => {
     const r = rig();
     const id = await startMaster(r);
     assert.equal(r.registry.get(id)?.role, "master");
     assert.equal(r.registry.get(id)?.parentId, null);
     const o = r.calls[0] as Options;
     const expected = [...WORKER_TOOLS, ...OFFICE_TOOL_NAMES];
-    assert.deepEqual(OFFICE_TOOL_NAMES, ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers", "submit_plan"].map((n) => `mcp__office__${n}`));
+    assert.deepEqual(OFFICE_TOOL_NAMES, ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers", "submit_plan", "suggest_task"].map((n) => `mcp__office__${n}`));
     assert.deepEqual(o.tools, expected);
     assert.deepEqual(o.allowedTools, expected);
     assert.equal(o.strictMcpConfig, true);

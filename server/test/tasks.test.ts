@@ -6,7 +6,10 @@ import { after, describe, it } from "node:test";
 import { startServer, type RunningServer } from "../src/app.ts";
 import { createRegistry } from "../src/registry.ts";
 import { createSupervisor } from "../src/supervisor.ts";
-import { createTasksStore, taskGoal, TASKS_FILE, TaskInput, type Task } from "../src/tasks.ts";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { OFFICE_SERVER } from "../src/officeTools.ts";
+import { createTasksStore, MAX_SUGGESTIONS_PER_MASTER, MAX_WAITING_SUGGESTIONS, suggestVia, taskGoal, TASKS_FILE, TaskInput, type Task } from "../src/tasks.ts";
 import { createTeamStore, type Person } from "../src/team.ts";
 import { createFake } from "./fakeQuery.ts";
 import { loginTo, send } from "./helpers.ts";
@@ -97,10 +100,12 @@ describe("tasks: the routes", () => {
     const dataDir = join(root, "data");
     const registry = createRegistry();
     const f = createFake();
-    const supervisor = createSupervisor({ registry, query: f.query, roots: [root], env: {}, stopGraceMs: 150, startTimeoutMs: 1000, dataDir, maxMasters: 5, maxManaged: 10, log: () => {} });
-    closers.push(() => supervisor.close());
     const team = createTeamStore(dataDir);
     const tasks = createTasksStore(dataDir);
+    const writes = { fail: false };
+    const suggest = suggestVia(tasks);
+    const supervisor = createSupervisor({ registry, query: f.query, roots: [root], env: {}, stopGraceMs: 150, startTimeoutMs: 1000, dataDir, maxMasters: 5, maxManaged: 10, suggestTask: (by, title, details) => (writes.fail ? Promise.reject(new Error("disk")) : suggest(by, title, details)), log: () => {} });
+    closers.push(() => supervisor.close());
     const srv = await startServer({ port: 0, staticDir, registry, supervisor, team, tasks, log: () => {} });
     servers.push(srv);
     const auth = await loginTo(srv);
@@ -109,7 +114,24 @@ describe("tasks: the routes", () => {
     const json = (r: { body: string }) => JSON.parse(r.body) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     const boss = (await team.add({ name: "Alex", role: "CEO", brief: "Decide.", reportsTo: null })) as { ok: true; person: Person };
     const dev = (await team.add({ name: "Riley", role: "Frontend Developer", brief: "Builds the UI.", reportsTo: boss.person.id })) as { ok: true; person: Person };
-    return { post, json, registry, f, work, root, dataDir, boss: boss.person, dev: dev.person, srv, headers, tasks };
+    /** Starts a master and returns a caller for its office tools, as the model would use them. */
+    let sessions = 0;
+    const master = async (name = "Planner") => {
+      const res = await supervisor.startMaster({ cwd: work, prompt: "the goal", name });
+      assert.ok(res.ok);
+      const server = f.calls[sessions++]?.mcpServers?.[OFFICE_SERVER] as { instance: { connect(t: unknown): Promise<void> } };
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      await server.instance.connect(a);
+      const client = new Client({ name: "test", version: "1" });
+      await client.connect(b);
+      closers.push(() => client.close());
+      const call = async (toolName: string, args: object = {}) => {
+        const out = (await client.callTool({ name: toolName, arguments: args as Record<string, unknown> })) as { isError?: boolean; content: { text: string }[] };
+        return { error: out.isError === true, text: out.content[0]?.text ?? "" };
+      };
+      return { id: res.id, call };
+    };
+    return { post, json, registry, f, work, root, dataDir, boss: boss.person, dev: dev.person, srv, headers, tasks, master, writes };
   }
 
   it("creates, edits and removes tasks only with confirm:true and a known person", async () => {
@@ -181,5 +203,72 @@ describe("tasks: the routes", () => {
     const removed = await r.post("/api/team/people/remove", { id: r.dev.id, confirm: true });
     assert.equal(removed.status, 200);
     assert.equal(JSON.parse(readFileSync(join(r.dataDir, TASKS_FILE), "utf8")).tasks[0].assignee, null, "the task is unassigned");
+  });
+  it("lets a master propose a task: unassigned, marked with its name, never started, and counted per master", async () => {
+    const r = await rig();
+    const m = await r.master("Planner");
+    const first = await m.call("suggest_task", { title: "Add a changelog", details: "Keep it short" });
+    assert.equal(first.error, false);
+    const [made] = await r.tasks.list();
+    assert.deepEqual([made?.title, made?.assignee, made?.suggestedBy, made?.agentId, made?.done], ["Add a changelog", null, "Planner", null, false]);
+    for (let i = 2; i <= MAX_SUGGESTIONS_PER_MASTER; i++) assert.equal((await m.call("suggest_task", { title: `Idea ${i}`, details: "" })).error, false);
+    const over = await m.call("suggest_task", { title: "One too many", details: "" });
+    assert.deepEqual([over.error, /already suggested 3/.test(over.text)], [true, true]);
+    assert.equal((await r.tasks.list()).length, MAX_SUGGESTIONS_PER_MASTER);
+    const bad = await (await r.master("Other")).call("suggest_task", { title: "two\nlines", details: "" });
+    assert.deepEqual([bad.error, /one line/.test(bad.text)], [true, true], "the same text rules as any task");
+  });
+
+  it("stops at ten waiting suggestions in all, and a refused one does not use up a master's three", async () => {
+    const r = await rig();
+    for (let i = 0; i < MAX_WAITING_SUGGESTIONS; i++) assert.ok((await r.tasks.suggest({ title: `S${i}`, details: "" }, "Someone")).ok);
+    const m = await r.master();
+    for (let i = 0; i < MAX_SUGGESTIONS_PER_MASTER + 1; i++) {
+      const refused = await m.call("suggest_task", { title: `Eleventh ${i}`, details: "" });
+      assert.deepEqual([refused.error, /already waiting/.test(refused.text)], [true, true], "refused because the board is full, not because of the master's own count");
+    }
+    const [first] = await r.tasks.list();
+    assert.ok((await r.tasks.accept(first!.id)).ok);
+    assert.equal((await m.call("suggest_task", { title: "Now there is room", details: "" })).error, false, "a refusal did not cost a go");
+  });
+
+  it("is accepted by the owner, who then can start it; until then it cannot be started, and a client cannot set the mark", async () => {
+    const r = await rig();
+    const m = await r.master("Planner");
+    await m.call("suggest_task", { title: "Review the docs", details: "" });
+    const task = (await r.tasks.list())[0] as Task;
+    await r.post("/api/tasks/update", { id: task.id, assignee: r.dev.id, confirm: true });
+    assert.deepEqual(r.json(await r.post("/api/tasks/start", { id: task.id, cwd: r.work, confirm: true })), { reason: "not_accepted" }, "an agent cannot put work in motion by itself");
+    assert.equal((await r.post("/api/tasks/update", { id: task.id, suggestedBy: "Me", confirm: true })).status, 400, "the mark is not the client's to set");
+    assert.equal((await r.post("/api/tasks/accept", { id: task.id })).status, 400, "no confirm");
+    const accepted = r.json(await r.post("/api/tasks/accept", { id: task.id, confirm: true }));
+    assert.equal((accepted["task"] as Task).suggestedBy, undefined);
+    assert.deepEqual(r.json(await r.post("/api/tasks/accept", { id: task.id, confirm: true })), { reason: "not_suggested" });
+    assert.equal((await r.post("/api/tasks/start", { id: task.id, cwd: r.work, confirm: true })).status, 202);
+    assert.equal((await r.post("/api/tasks/accept", { id: "0".repeat(12), confirm: true })).status, 404);
+  });
+
+  it("does not let a suggestion be marked done, and a write that throws does not use up one of the master's few", async () => {
+    const r = await rig();
+    const m = await r.master("Planner");
+    await m.call("suggest_task", { title: "An idea", details: "" });
+    const task = (await r.tasks.list())[0] as Task;
+    assert.deepEqual(r.json(await r.post("/api/tasks/update", { id: task.id, done: true, confirm: true })), { reason: "not_accepted" });
+    assert.equal((await r.post("/api/tasks/update", { id: task.id, assignee: r.dev.id, confirm: true })).status, 200, "it can still be given to someone");
+    r.writes.fail = true;
+    for (let i = 0; i < MAX_SUGGESTIONS_PER_MASTER + 1; i++) assert.equal((await m.call("suggest_task", { title: `Lost ${i}`, details: "" })).error, true, "a failed save is an error to the master");
+    r.writes.fail = false;
+    assert.equal((await m.call("suggest_task", { title: "Saved", details: "" })).error, false, "the failures did not count");
+  });
+
+  it("can be dismissed with the ordinary remove, and a damaged suggestion mark marks the file damaged", async () => {
+    const r = await rig();
+    const made = await r.tasks.suggest({ title: "Maybe", details: "" }, "Planner");
+    assert.ok(made.ok && made.task);
+    assert.equal((await r.post("/api/tasks/remove", { id: made.task.id, confirm: true })).status, 200);
+    const broken = tmp();
+    writeFileSync(join(broken, TASKS_FILE), JSON.stringify({ version: 1, tasks: [{ id: "a".repeat(12), title: "T", details: "", assignee: null, done: false, agentId: null, createdAt: 1, suggestedBy: "bad\nname" }] }));
+    assert.deepEqual(await createTasksStore(broken).list(), []);
+    assert.equal(existsSync(join(broken, `${TASKS_FILE}.bad`)), true);
   });
 });
