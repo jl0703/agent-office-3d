@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { AVATAR_PARTS, type AvatarPart } from "../../shared/avatar.ts";
 import { realOps, renameWithRetry, type WriteOps } from "./managedStore.ts";
 
 // The team: people with a role and a reporting line. One file in the data folder. The owner writes everything in it; workers have no route to it.
@@ -26,13 +27,19 @@ export const Brief = z.string().max(1500).regex(/^[^\u0000-\u0008\u000b-\u001f\u
 /* eslint-enable no-control-regex */
 export const Id = z.string().regex(/^[0-9a-f]{12}$/);
 
-const Fields = { name: Line, role: Line, brief: Brief, reportsTo: Id.nullable() };
+const part = (k: AvatarPart) => z.number().int().min(0).max(AVATAR_PARTS[k] - 1);
+/** A person's picture: one small number per part, each inside its list (see shared/avatar.ts). */
+export const Avatar = z
+  .object({ skin: part("skin"), hair: part("hair"), hairColor: part("hairColor"), eyes: part("eyes"), mouth: part("mouth"), glasses: part("glasses"), outfit: part("outfit"), outfitColor: part("outfitColor"), background: part("background") })
+  .strict();
+
+const Fields = { name: Line, role: Line, brief: Brief, reportsTo: Id.nullable(), avatar: Avatar.optional() };
 const Person = z.object({ id: Id, ...Fields }).strict();
 const TeamFile = z.object({ version: z.literal(1), people: z.array(Person).max(MAX_PEOPLE) }).strict();
 
 export type Person = z.infer<typeof Person>;
 export const PersonInput = z.object(Fields).strict();
-export const PersonUpdate = z.object({ id: Id, ...Fields }).partial({ name: true, role: true, brief: true, reportsTo: true }).strict();
+export const PersonUpdate = z.object({ id: Id, ...Fields }).partial({ name: true, role: true, brief: true, reportsTo: true, avatar: true }).strict();
 export type PersonInput = z.infer<typeof PersonInput>;
 
 export type TeamError = "invalid" | "too_many" | "unknown_person" | "unknown_manager" | "cycle" | "too_deep" | "one_top" | "is_top" | "not_empty" | "busy";

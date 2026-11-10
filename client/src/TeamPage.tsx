@@ -1,7 +1,9 @@
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
+import { AvatarDesigner, AvatarImage } from "./Avatar.tsx";
+import { randomAvatar, type Avatar } from "./avatar.ts";
 import { Modal } from "./Modal.tsx";
-import { addPerson, addStarterTeam, belowOf, demoTeam, getTeam, orgOf, removePerson, reportsLine, reportsOf, updatePerson, type OrgNode, type Person, type PersonFields } from "./team.ts";
+import { addPerson, addStarterTeam, avatarOf, belowOf, demoTeam, getTeam, orgOf, removePerson, reportsLine, reportsOf, updatePerson, type OrgNode, type Person, type PersonFields } from "./team.ts";
 
 type View = "cards" | "chart";
 type Dialog = { kind: "form"; editing: Person | null } | { kind: "remove"; person: Person } | { kind: "starter" } | null;
@@ -27,6 +29,9 @@ function useTeam(demo: boolean) {
 function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person[]; editing: Person | null; demo: boolean; onDone: (people: Person[]) => void; onClose: () => void }) {
   const id = useId();
   const [fields, setFields] = useState<PersonFields>(editing ? { name: editing.name, role: editing.role, brief: editing.brief, reportsTo: editing.reportsTo } : EMPTY);
+  // A new person starts with a random look; someone being edited starts with the look they have.
+  const [original] = useState<Avatar>(() => (editing ? avatarOf(editing) : randomAvatar()));
+  const [look, setLook] = useState<Avatar>(original);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const blocked = editing ? new Set([editing.id, ...belowOf(people, editing.id)]) : new Set<string>();
@@ -38,7 +43,7 @@ function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person
     if (demo) return setError("Demo mode: nothing is saved.");
     setBusy(true);
     setError("");
-    const result = editing ? await updatePerson(editing.id, { ...fields, name: fields.name.trim(), role: fields.role.trim() }) : await addPerson({ ...fields, name: fields.name.trim(), role: fields.role.trim() });
+    const result = editing ? await updatePerson(editing.id, { ...fields, avatar: look, name: fields.name.trim(), role: fields.role.trim() }) : await addPerson({ ...fields, avatar: look, name: fields.name.trim(), role: fields.role.trim() });
     setBusy(false);
     if (!result.ok) return setError(result.message);
     onDone(result.people);
@@ -52,6 +57,7 @@ function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person
         if (ready && !busy) void save();
       }}
     >
+      <AvatarDesigner value={look} original={original} onChange={setLook} />
       <label htmlFor={`${id}-name`}>Name</label>
       <input id={`${id}-name`} value={fields.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} autoComplete="off" />
       <label htmlFor={`${id}-role`}>Role</label>
@@ -95,7 +101,10 @@ function Chart({ nodes, people }: { nodes: OrgNode[]; people: Person[] }) {
       {nodes.map(({ person, reports }) => (
         <li key={person.id}>
           <span className="org-node">
-            <strong>{person.name}</strong>, {person.role}
+            <AvatarImage avatar={avatarOf(person)} size={28} />
+            <span>
+              <strong>{person.name}</strong>, {person.role}
+            </span>
           </span>
           {reports.length > 0 && <Chart nodes={reports} people={people} />}
         </li>
@@ -182,6 +191,7 @@ export function TeamPage({ demo }: { demo: boolean }) {
         <ul className="person-grid">
           {list.map((p) => (
             <li key={p.id} className="person-card">
+              <AvatarImage avatar={avatarOf(p)} size={72} />
               <h2>{p.name}</h2>
               <span className="chip">{p.role}</span>
               <p>{reportsLine(list, p.id)}</p>
