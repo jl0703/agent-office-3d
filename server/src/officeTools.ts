@@ -2,12 +2,12 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { PlanInput } from "./plan.ts";
 
-// The master's six tools. They run inside this process (the SDK's in-process tool server):
+// The master's seven tools. They run inside this process (the SDK's in-process tool server):
 // no port, no route. The master's identity is fixed by the supervisor when it builds the
 // server, so nothing the model writes can name another owner.
 
 export const OFFICE_SERVER = "office";
-const TOOLS = ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers", "submit_plan"] as const;
+const TOOLS = ["spawn_worker", "assign_task", "wait_for_workers", "stop_worker", "list_workers", "submit_plan", "suggest_task"] as const;
 export const OFFICE_TOOL_NAMES = TOOLS.map((name) => `mcp__${OFFICE_SERVER}__${name}`);
 
 export const MAX_WAIT_SECONDS = 120;
@@ -25,13 +25,14 @@ export type OfficeApi = {
   stop(id: string): Promise<Reply>;
   list(): Reply;
   submitPlan(plan: z.infer<typeof PlanInput>): Reply | Promise<Reply>;
+  suggestTask(args: { title: string; details: string }): Promise<Reply>;
 };
 
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
 const task = z.string().min(1).max(10_000);
 
 export const MASTER_SYSTEM_PROMPT = `You are a master agent in a small office. You split a big job into parts and run worker agents on them.
-Office tools: spawn_worker (name, folder, task) starts a worker and returns its id at once; assign_task (id, task) gives an idle worker its next task; wait_for_workers (ids optional, timeout_s up to ${MAX_WAIT_SECONDS}) waits and returns each worker's state and last result, or "still working" at the timeout, in which case call it again; list_workers shows your workers; stop_worker (id) stops one.
+Office tools: spawn_worker (name, folder, task) starts a worker and returns its id at once; assign_task (id, task) gives an idle worker its next task; wait_for_workers (ids optional, timeout_s up to ${MAX_WAIT_SECONDS}) waits and returns each worker's state and last result, or "still working" at the timeout, in which case call it again; list_workers shows your workers; stop_worker (id) stops one; suggest_task (title, details) proposes a task for the owner's board, which the owner may accept or dismiss (you cannot assign or start it, and you may suggest only a few).
 Rules: you can only control workers you started. Workers can read, search, edit and write files and search the web; they cannot run commands and cannot start workers. A worker's folder must be inside your own folder. Be economical: start only as many workers as the job needs (at most a few at once), give each a self-contained task that names the files and the expected result, read the results and check them, and stop every worker when its work is done. Never put secrets in a task.`;
 
 /** Appended for a master that must have its plan approved first (every master except the research sweep's Lead). */
@@ -72,6 +73,12 @@ export function createOfficeServer(api: OfficeApi) {
         "Submit your plan for the owner's approval while you are in the planning phase. Submitting again replaces the plan. Afterwards end your turn and wait for the decision.",
         PlanInput.shape,
         async (args) => text(await api.submitPlan(args)),
+      ),
+      tool(
+        "suggest_task",
+        "Propose a task for the owner's task board (a short title and details). It appears as a suggestion; the owner decides whether to keep it and who gets it. You cannot start or assign it.",
+        { title: z.string().min(1).max(200), details: z.string().max(3000) },
+        async (args) => text(await api.suggestTask(args)),
       ),
     ],
   });

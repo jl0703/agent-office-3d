@@ -523,7 +523,19 @@ try {
       await page.wait(400);
       // The owner's tasks: an assignee picker on each, Start needs a person, and New task and Start open pop-ups.
       const own = await page.evaluate<string>(`JSON.stringify({ selects: document.querySelectorAll(".task-card select").length, startOff: [...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Plan next month"))?.querySelector("button")?.disabled, riley: [...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Make the header sticky"))?.querySelector("select option:checked")?.textContent })`);
-      expect(own.includes('"selects":4') && own.includes('"startOff":true') && own.includes("Riley, Frontend Developer"), `sidebar(${scheme}): the owner's tasks show who they are given to, and Start waits for a person (${own})`);
+      expect(own.includes('"selects":5') && own.includes('"startOff":true') && own.includes("Riley, Frontend Developer"), `sidebar(${scheme}): the owner's tasks show who they are given to, and Start waits for a person (${own})`);
+      // Every card says who it is for; a suggestion from an agent can be accepted or dismissed but not started; the + under Active adds a task.
+      const assignees = await page.evaluate<string>(`JSON.stringify({ cards: document.querySelectorAll(".task-card").length, withAssignee: [...document.querySelectorAll(".task-card")].filter((c) => c.querySelector(".task-assignee")).length, avatars: document.querySelectorAll(".task-assignee svg.avatar").length, sug: (() => { const c = [...document.querySelectorAll(".task-card")].find((x) => x.textContent.includes("Suggested by Planner")); return { buttons: [...(c?.querySelectorAll("button") ?? [])].map((b) => b.textContent.trim()), column: c?.closest(".board-col")?.querySelector("h2")?.textContent }; })() })`);
+      const asg = JSON.parse(assignees) as { cards: number; withAssignee: number; avatars: number; sug: { buttons: string[]; column: string } };
+      expect(asg.cards === asg.withAssignee && asg.avatars >= 3 && asg.sug.column?.startsWith("Active") && asg.sug.buttons.join(",") === "Accept Add a changelog,Dismiss Add a changelog", `sidebar(${scheme}): every card shows its assignee, and a suggestion offers Accept and Dismiss (${assignees.slice(0, 260)})`);
+      const plus = await page.evaluate<string>(`JSON.stringify((() => { const col = document.querySelector(".board-col"); const b = col?.querySelector("button.add-round"); const last = [...(col?.querySelectorAll(".task-card") ?? [])].at(-1); return { label: b?.getAttribute("aria-label"), under: b && last ? b.getBoundingClientRect().top >= last.getBoundingClientRect().bottom - 1 : false, first: col?.querySelector("h2")?.textContent?.startsWith("Active") }; })())`);
+      expect(plus === '{"label":"Add a task","under":true,"first":true}', `sidebar(${scheme}): a small + under the first column's cards (${plus})`);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))(document.querySelector(".board-col button.add-round"))`);
+      await page.wait(300);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Assigned to"), `sidebar(${scheme}): the + opens the New task pop-up`);
+      await page.key("Escape", { keyCode: 27 });
+      await page.wait(300);
+      expect(await page.evaluate<boolean>(`!document.querySelector("dialog[open]") && document.activeElement?.classList.contains("add-round")`), `sidebar(${scheme}): Escape returns focus to the + button`);
       await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".add-btn")].find((b) => b.textContent.includes("New task")))`);
       await page.wait(300);
       expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Assigned to"), `sidebar(${scheme}): New task opens a pop-up with an assignee`);

@@ -1742,6 +1742,55 @@ textarea {
   font-size: 14px;
 }
 
+.task-assignee {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.task-assignee .avatar {
+  border-radius: 8px;
+}
+
+.task-assignee select {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 2px var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+}
+
+.add-round {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  width: 36px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 2px dashed var(--color-border);
+  border-radius: 50%;
+}
+
+.add-round:hover {
+  border-style: solid;
+  background: var(--color-surface-2);
+}
+
+@media (max-width: 600px) {
+  .add-round {
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+}
+
 .task-card p {
   margin: 0;
 }

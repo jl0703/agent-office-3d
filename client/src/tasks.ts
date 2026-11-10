@@ -18,8 +18,8 @@ export const DONE_LIMIT = 20;
 
 /** Where a card leads: an agent's panel in the office, or a find's own page. */
 export type Target = { agent: string } | { find: string };
-/** `own` is set on a card made from one of the owner's tasks: it can be given to a person, started, finished or removed. */
-export type Task = { id: string; column: Column; title: string; who: string; text: string; chip: string; at: number; target: Target | null; own?: OwnTask; /** The person it is given to, as "Name, Role", or null. */ assignee?: string | null; /** A worker is on it right now (planning or working), so it cannot be started again. */ running?: boolean };
+/** `own` is set on a card made from one of the owner's tasks: it can be given to a person, started, finished or removed. `person` is who the card is for, on every kind of card: null when nobody. */
+export type Task = { id: string; column: Column; title: string; who: string; text: string; chip: string; at: number; target: Target | null; person: Person | null; own?: OwnTask; /** The person it is given to, as "Name, Role", or null. */ assignee?: string | null; /** A worker is on it right now (planning or working), so it cannot be started again. */ running?: boolean };
 
 const short = (text: string, max = 100) => {
   const chars = Array.from(text.replace(/\s+/g, " ").trim());
@@ -27,11 +27,11 @@ const short = (text: string, max = 100) => {
 };
 const time = (iso: string) => (Number.isFinite(Date.parse(iso)) ? Date.parse(iso) : 0);
 
-function agentTask(a: Agent, own: ReadonlySet<string>): Task | null {
+function agentTask(a: Agent, own: ReadonlySet<string>, team: ReadonlyMap<string, Person>): Task | null {
   if (a.kind === "subagent" || a.status === "detached") return null;
   if (a.taskId && own.has(a.id)) return null; // the owner's task card stands for it
   if (a.workshop && !(a.phase === "planning" && a.plan?.status === "pending")) return null; // the build's card stands for it
-  const base = { id: `agent-${a.id}`, title: a.name, who: a.role === "master" ? "Master" : a.role === "worker" ? "Worker" : "Session", at: time(a.updatedAt), target: { agent: a.id } };
+  const base = { id: `agent-${a.id}`, title: a.name, who: a.role === "master" ? "Master" : a.role === "worker" ? "Worker" : "Session", at: time(a.updatedAt), target: { agent: a.id }, person: (a.personId ? team.get(a.personId) : undefined) ?? null };
   const text = short(a.currentTask ?? a.activity ?? a.note ?? "");
   if (a.phase === "planning" && a.plan?.status === "pending") return { ...base, column: "review", text: short(`Plan to approve: ${a.plan.goal}`), chip: "Plan waits for you" };
   if (a.status === "error") return { ...base, column: "review", text: short(a.note ?? a.activity ?? "Open it to see what went wrong"), chip: "Failed" };
@@ -44,9 +44,10 @@ function agentTask(a: Agent, own: ReadonlySet<string>): Task | null {
 function ownTask(t: OwnTask, agents: ReadonlyMap<string, Agent>, team: ReadonlyMap<string, Person>): Task {
   const p = t.assignee ? team.get(t.assignee) : undefined;
   const a = t.agentId ? agents.get(t.agentId) : undefined;
-  const base = { id: `own-${t.id}`, title: t.title, who: p ? `${p.name}, ${p.role}` : "Nobody yet", at: t.createdAt, target: a ? { agent: a.id } : null, own: t, assignee: p ? `${p.name}, ${p.role}` : null, running: false };
+  const base = { id: `own-${t.id}`, title: t.title, who: p ? `${p.name}, ${p.role}` : "Nobody yet", at: t.createdAt, target: a ? { agent: a.id } : null, person: p ?? null, own: t, assignee: p ? `${p.name}, ${p.role}` : null, running: false };
   const text = short(t.details);
   if (t.done) return { ...base, column: "done", text, chip: "Done" };
+  if (t.suggestedBy !== undefined) return { ...base, column: "active", text, chip: `Suggested by ${t.suggestedBy}` };
   if (!a) return { ...base, column: "active", text, chip: p ? "To do" : "Not given out" };
   if (a.status === "detached") return { ...base, column: "review", text: "The server restarted while the worker was on it. Resume it from the office, or start the task again.", chip: "Detached" };
   if (a.phase === "planning" && a.plan?.status === "pending") return { ...base, column: "review", text: short(`Plan to approve: ${a.plan.goal}`), chip: "Plan waits for you", running: true };
@@ -57,7 +58,7 @@ function ownTask(t: OwnTask, agents: ReadonlyMap<string, Agent>, team: ReadonlyM
 }
 
 function buildTask(b: Build): Task {
-  const base = { id: `build-${b.id}`, title: b.title, who: "Workshop", at: b.createdAt, target: { find: b.finding } };
+  const base = { id: `build-${b.id}`, title: b.title, who: "Workshop", at: b.createdAt, target: { find: b.finding }, person: null };
   const round = (b.round ?? 1) > 1 ? ` (round ${b.round})` : "";
   if (b.status === "building") return { ...base, column: "progress", text: b.evalRun && !b.evalRun.failed ? `Eval running: ${b.evalRun.done} of ${b.evalRun.total}` : `Building the change${round}`, chip: "Building" };
   if (b.status === "ready") return { ...base, column: "review", text: b.eval ? `Eval: ${VERDICT_WORD[b.eval.verdict]}. ${b.changed} files changed${round}` : `${b.changed} files changed${round}, no eval yet`, chip: STATUS_WORD.ready };
@@ -73,8 +74,8 @@ export function tasksOf(agents: readonly Agent[], builds: readonly Build[], find
   const built = new Set(builds.map((b) => b.finding));
   const adopted: Task[] = findings
     .filter((f) => f.status === "adopt" && !built.has(f.id))
-    .map((f) => ({ id: `find-${f.id}`, column: "active", title: f.title, who: "Research", text: short(f.why), chip: "Adopted", at: time(f.date), target: { find: f.id } }));
-  const all = [...own.map((t) => ownTask(t, agentById, personById)), ...adopted, ...builds.map(buildTask), ...agents.map((a) => agentTask(a, linkedAgents)).filter((t): t is Task => t !== null)];
+    .map((f) => ({ id: `find-${f.id}`, column: "active", title: f.title, who: "Research", text: short(f.why), chip: "Adopted", at: time(f.date), target: { find: f.id }, person: null }));
+  const all = [...own.map((t) => ownTask(t, agentById, personById)), ...adopted, ...builds.map(buildTask), ...agents.map((a) => agentTask(a, linkedAgents, personById)).filter((t): t is Task => t !== null)];
   const columns: Record<Column, Task[]> = { active: [], progress: [], review: [], done: [] };
   for (const t of all.sort((x, y) => y.at - x.at || x.id.localeCompare(y.id))) columns[t.column].push(t);
   columns.done = columns.done.slice(0, DONE_LIMIT);

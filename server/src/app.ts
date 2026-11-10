@@ -119,7 +119,8 @@ const UpdateTaskBody = TaskUpdate.extend({ confirm: z.literal(true) }).strict();
 const RemoveTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), confirm: z.literal(true) }).strict();
 const StartTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), cwd: z.string().min(1).max(1000), confirm: z.literal(true) }).strict();
 const startingTasks = new Set<string>();
-const TASK_POSTS = new Set(["/api/tasks", "/api/tasks/update", "/api/tasks/remove", "/api/tasks/start"]);
+const TASK_POSTS = new Set(["/api/tasks", "/api/tasks/update", "/api/tasks/remove", "/api/tasks/start", "/api/tasks/accept"]);
+const AcceptTaskBody = z.object({ id: z.string().regex(/^[0-9a-f]{12}$/), confirm: z.literal(true) }).strict();
 const BuildBody = z.object({ findingId: z.string().regex(SLUG) }).strict();
 const FINDING_BRIEF = /^\/api\/research\/findings\/([^/]{1,200})\/brief(\/save)?$/;
 const BriefEdit = z
@@ -401,6 +402,12 @@ export async function startServer(opts: Options): Promise<RunningServer> {
             const done = await tasks.update(id, change);
             return done.ok ? json(res, 200, { tasks: done.tasks, task: done.task }) : json(res, 404, { reason: done.code });
           }
+          if (url.pathname === "/api/tasks/accept") {
+            const parsed = AcceptTaskBody.safeParse(body);
+            if (!parsed.success) return json(res, 400, { error: "invalid_request" });
+            const done = await tasks.accept(parsed.data.id);
+            return done.ok ? json(res, 200, { tasks: done.tasks, task: done.task }) : json(res, done.code === "unknown_task" ? 404 : 409, { reason: done.code });
+          }
           if (url.pathname === "/api/tasks/remove") {
             const parsed = RemoveTaskBody.safeParse(body);
             if (!parsed.success) return json(res, 400, { error: "invalid_request" });
@@ -413,6 +420,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           if (!parsed.success || !opts.supervisor) return json(res, parsed.success ? 404 : 400, parsed.success ? { error: "not_found" } : { error: "invalid_request" });
           const task = await tasks.get(parsed.data.id);
           if (!task) return json(res, 404, { reason: "unknown_task" });
+          if (task.suggestedBy !== undefined) return json(res, 409, { reason: "not_accepted" });
           const people = await team.list();
           const person = people.find((p) => p.id === task.assignee);
           if (!person) return json(res, 409, { reason: "no_assignee" });
