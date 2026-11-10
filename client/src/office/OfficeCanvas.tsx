@@ -8,7 +8,6 @@ import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, fitCamera, truncateTa
 import { AvatarImage } from "../Avatar.tsx";
 import { avatarOf, roleOf, type Person } from "../team.ts";
 import { lookOfAgent } from "./look.ts";
-import type { Vault } from "../vault.ts";
 import { MAX_BUBBLES } from "./story.ts";
 import { overviewBounds, roomBounds, type Bounds, type Layout } from "./building.ts";
 import { FAMILY_LETTERS } from "./palette.ts";
@@ -205,11 +204,6 @@ export type OfficeCanvasProps = {
   connection: "connecting" | "connected" | "disconnected";
   demo: boolean;
   layout: Layout;
-  vault: Vault | null;
-  hubOpen: boolean;
-  /** Findings waiting for a decision, shown on the hub's sign. */
-  newFindings?: number;
-  onOpenHub: () => void;
   selection: Selection;
   /** Raised by one each time the header's Reset view is pressed. */
   resetSignal: number;
@@ -217,7 +211,7 @@ export type OfficeCanvasProps = {
   onStartWorker: () => void;
 };
 
-export function OfficeCanvas({ agents, team = [], connection, demo, layout, vault, hubOpen, newFindings = 0, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
+export function OfficeCanvas({ agents, team = [], connection, demo, layout, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
   const scheme = useScheme();
   const reduced = useReducedMotion();
   const [supported] = useState(webglAvailable);
@@ -226,7 +220,6 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
   const rig = useRef<RigApi | null>(null);
   const tagRefs = useRef(new Map<string, HTMLElement>());
   const roomRefs = useRef(new Map<string, HTMLElement>());
-  const hubRef = useRef<HTMLElement | null>(null);
   const bubbleRefs = useRef<(HTMLElement | null)[]>([]);
   const { room } = useSelection(selection);
   const stats = useRef<HTMLPreElement | null>(null);
@@ -284,7 +277,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
               });
             }}
           >
-            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} layout={layout} looks={looks} roomRefs={roomRefs} vault={vault} hubRef={hubRef} bubbleRefs={bubbleRefs} />
+            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} layout={layout} looks={looks} roomRefs={roomRefs} bubbleRefs={bubbleRefs} />
             <CameraRig view={view} limit={limit} focusKey={room ?? ""} reduced={reduced} api={rig} />
             {demo && <Stats out={stats} />}
           </Canvas>
@@ -306,7 +299,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
         )}
 
         <div className="office-rooms">
-          {layout.building.rooms.filter((r) => r.kind !== "library").map(({ key, name }) => {
+          {layout.building.rooms.filter((r) => r.desks.length > 0).map(({ key, name }) => {
             const members = agents.filter((a) => assignment.roomOf.get(a.id) === key);
             const errors = members.filter((a) => a.status === "error").length;
             return (
@@ -330,23 +323,21 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
               </button>
             );
           })}
-        </div>
-
-        <div className="office-rooms">
-          <button
-            type="button"
-            className={`room-sign hub-sign${hubOpen ? " room-focused" : ""}`}
-            style={{ display: "none" }}
-            aria-pressed={hubOpen}
-            ref={(el) => {
-              hubRef.current = el;
-            }}
-            onClick={onOpenHub}
-          >
-            <span className="room-name">Knowledge hub</span>
-            <span className="room-meta">{vault ? `${vault.noteCount} notes` : "no vault connected"}</span>
-            {newFindings > 0 && <span className="room-meta hub-new">{newFindings} new {newFindings === 1 ? "finding" : "findings"}</span>}
-          </button>
+          {layout.building.rooms.filter((r) => r.desks.length === 0).map(({ key, name }) => (
+            // The shared rooms hold no desks, so there is nothing to focus: a name on the floor, for the eye only.
+            <span
+              key={key}
+              className="room-sign room-label"
+              style={{ display: "none" }}
+              aria-hidden="true"
+              ref={(el) => {
+                if (el) roomRefs.current.set(key, el);
+                else roomRefs.current.delete(key);
+              }}
+            >
+              <span className="room-name">{name}</span>
+            </span>
+          ))}
         </div>
 
         <div className="office-bubbles" aria-hidden="true">

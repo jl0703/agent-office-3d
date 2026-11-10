@@ -122,9 +122,11 @@ export function groundsOf(building: Bounds = BUILDING_RECT): Grounds {
   return { lawn, path, trees, bushes, benches };
 }
 
-/** A fixed floor colour for the rooms that are not a department's colour: wood for the executives and the library, a light neutral for the open plan. Null: use the room's own colour. */
+/** A fixed floor colour for the rooms that are not a department's colour: wood for the executives and the meeting room, tile for the pantry, a warm rug for the lounge, a light neutral for the open plan. Null: use the room's own colour. */
 export function floorTone(kind: RoomKind, scheme: Scheme): string | null {
-  if (kind === "management" || kind === "library") return scheme === "light" ? "#C9A56E" : "#5B4A35";
+  if (kind === "management" || kind === "meeting") return scheme === "light" ? "#C9A56E" : "#5B4A35";
+  if (kind === "pantry") return scheme === "light" ? "#DCE6E4" : "#3A4650";
+  if (kind === "lounge") return scheme === "light" ? "#C98F82" : "#55403F";
   if (kind === "visitors") return scheme === "light" ? "#D8D2C4" : "#343C48";
   return null;
 }
@@ -138,6 +140,11 @@ const FABRIC = "#5b6b7a";
 const PAPER = "#e9e4d6";
 const SCREEN = "#1d2530";
 const LIGHT = "#7fd1c7";
+const STEEL = "#aeb9c4";
+const FRIDGE = "#d8dde3";
+const SOFA = "#c2574a";
+const TABLE = "#2f7d52";
+const BEAN = "#d9a21b";
 
 /**
  * Furniture for one room, as boxes, kept to the strip along the back wall: the desks and their chairs fill the middle, and the door is
@@ -162,8 +169,35 @@ export function furnitureOf(room: RoomSpec): Furniture[] {
   switch (room.kind) {
     case "management":
       return [piece(right, backZ, 2.4, 0.9, 0.75, WOOD), piece(left, backZ, 0.8, 1.2, 1.1, DARK)];
-    case "library":
-      return [piece(left, cz, 0.6, 5.4, 1.9, WOOD), piece(cx, backZ, 5.4, 0.6, 1.9, WOOD), piece(right, cz + 0.8, 0.6, 3, 1.9, WOOD)];
+    case "meeting":
+      // A long table with a chair at each side of both long edges, a screen on the back wall, a whiteboard on the left wall.
+      return [
+        piece(cx, cz, 4.6, 1.3, 0.75, WOOD),
+        ...[-1.8, 0, 1.8].flatMap((dx) => [piece(cx + dx, cz - 1.15, 0.55, 0.55, 0.9, DARK), piece(cx + dx, cz + 1.15, 0.55, 0.55, 0.9, DARK)]),
+        piece(cx, backZ, 3.2, 0.12, 1.3, SCREEN, 0.9),
+        piece(r.minX + 0.3, cz, 0.1, 2.6, 1.3, PAPER, 0.8),
+      ];
+    case "pantry":
+      // A counter along the back wall with a sink, a coffee machine and a fridge; a high table with four stools.
+      return [
+        piece(cx - 0.4, backZ, 5.2, 0.8, 0.9, WOOD),
+        piece(cx - 1.8, backZ, 0.9, 0.5, 0.06, STEEL, 0.9),
+        piece(cx + 0.9, backZ, 0.45, 0.4, 0.5, DARK, 0.9),
+        piece(right, backZ, 0.9, 0.8, 1.9, FRIDGE),
+        piece(cx, cz + 0.2, 1.6, 1.0, 1.0, WOOD),
+        ...[-1, 1].flatMap((sx) => [piece(cx + sx * 1.2, cz - 0.2, 0.45, 0.45, 0.7, FABRIC), piece(cx + sx * 1.2, cz + 0.6, 0.45, 0.45, 0.7, FABRIC)]),
+      ];
+    case "lounge":
+      // A sofa and a low table facing a TV on the east wall, a game table and a bean bag. The middle is kept clear for the door.
+      return [
+        piece(cx - 1.2, cz, 0.9, 3.0, 0.5, SOFA),
+        piece(cx - 1.65, cz, 0.25, 3.0, 1.0, SOFA),
+        piece(cx + 0.2, cz, 0.8, 1.4, 0.4, WOOD),
+        piece(r.maxX - 0.3, cz, 0.5, 2.4, 0.5, DARK),
+        piece(r.maxX - 0.3, cz, 0.12, 2.0, 1.1, SCREEN, 0.9),
+        piece(cx, r.maxZ - 1.2, 2.4, 1.3, 0.8, TABLE),
+        piece(right, r.maxZ - 1.8, 0.9, 0.9, 0.5, BEAN),
+      ];
     case "engineering":
       return [piece(right, backZ, 0.8, 0.8, 1.7, DARK), piece(right - 1.1, backZ, 0.8, 0.8, 1.7, DARK), piece(left, backZ, 1.8, 0.8, 0.5, FABRIC)];
     case "qa":
@@ -180,12 +214,3 @@ export function furnitureOf(room: RoomSpec): Furniture[] {
       return [piece(-8, r.maxZ, 3.2, 0.9, 1.0, WOOD), piece(8, r.maxZ, 2.6, 0.9, 0.5, FABRIC), piece(-14.5, r.maxZ, 1.4, 1.4, 0.5, FABRIC)];
   }
 }
-
-/** The Library room's centre: where the knowledge hub stands. */
-export const hubCentre = (building: Building): Point => {
-  const lib = building.rooms.find((r) => r.kind === "library");
-  return lib ? { x: (lib.rect.minX + lib.rect.maxX) / 2, z: (lib.rect.minZ + lib.rect.maxZ) / 2 } : { x: 0, z: 0 };
-};
-
-/** How big the hub is drawn in the Library: it was drawn with this radius in the middle of the old ring. */
-export const HUB_SCALE = 0.78;

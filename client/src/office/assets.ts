@@ -1,4 +1,4 @@
-import { type BufferGeometry, DoubleSide, LineBasicMaterial, MeshBasicMaterial, MeshLambertMaterial, SphereGeometry } from "three";
+import { type BufferGeometry, DoubleSide, LineBasicMaterial, MeshBasicMaterial, MeshLambertMaterial } from "three";
 import type { AgentStatus } from "../../../shared/events.ts";
 import {
   accessoryGeometry,
@@ -8,12 +8,8 @@ import {
   bushGeometry,
   treeGeometry,
   chairGeometry,
-  coreGeometry,
-  daisGeometry,
   lampGeometry,
   plantGeometry,
-  shelfGeometry,
-  torusGeometry,
   deskGeometry,
   flatPlane,
   flatRing,
@@ -62,17 +58,11 @@ export function createAssets(scheme: Scheme) {
     beacon: beaconGeometry(),
     box: unitBox(),
     walkLeg: walkLegGeometry(),
-    node: new SphereGeometry(1, 8, 6),
     plant: plantGeometry(),
     tree: treeGeometry(scheme),
     bush: bushGeometry(scheme),
     bench: benchGeometry(),
-    shelf: shelfGeometry(),
     lamp: lampGeometry(),
-    dais: daisGeometry(),
-    core: coreGeometry(),
-    hubRing: torusGeometry(2.3, 0.05),
-    hubRingOuter: torusGeometry(3.2, 0.04),
   };
 
   const mat = {
@@ -99,11 +89,6 @@ export function createAssets(scheme: Scheme) {
     lawn: lambert({ color: scheme === "light" ? 0xa9cc8a : 0x27382d }),
     path: lambert({ color: scheme === "light" ? 0xe6dcc6 : 0x4a5362 }),
     board: new MeshBasicMaterial({ color: scheme === "light" ? 0xfbf8f0 : 0xdfe6ee }),
-    dais: lambert({ color: scheme === "light" ? 0xcfd6df : 0x2b3646 }),
-    core: new MeshBasicMaterial({ color: scheme === "light" ? 0x4a90d9 : 0x7fd0ff, toneMapped: false }),
-    hubRing: new MeshBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x7fb0f0, toneMapped: false }),
-    node: new MeshBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x9fd0ff, toneMapped: false }),
-    graphLine: new LineBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x7fb0f0, transparent: true, opacity: 0.35 }),
     hit: new MeshBasicMaterial({ colorWrite: false, depthWrite: false }),
   };
 

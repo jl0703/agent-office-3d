@@ -162,7 +162,6 @@ function App() {
   const state = demo.active ? demo.state : live;
   const demoNotes = useMemo(() => demoVault(), []);
   const shownVault: VaultInfo | "loading" | null = demo.active ? demoNotes : vaultInfo;
-  const vault = shownVault !== null && shownVault !== "loading" && shownVault.connected ? shownVault : null;
   useEffect(() => {
     selection.select(null);
     selection.focusRoom(null);
@@ -542,7 +541,7 @@ function App() {
           </section>
 
           <section className="pane pane-office" id="pane-office" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-office" : undefined}>
-            <OfficeCanvas agents={agents} team={team} connection={connection} demo={demo.active} layout={layout} vault={vault} hubOpen={hubOpen} newFindings={newFindings} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
+            <OfficeCanvas agents={agents} team={team} connection={connection} demo={demo.active} layout={layout} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
             {current && !hubOpen && !researchOpen && !workshopOpen && narrow && !expanded && (
               <button type="button" className="peek" onClick={() => setExpanded(true)}>
                 <strong>{current.name}</strong> · {STATUS_WORD[current.status]} · Details

@@ -1,15 +1,15 @@
-// The office building: one floor with a corridor, a Management office, a Library (the knowledge hub), up to six department
-// rooms and an open-plan Visitors area. Everything here is plain arithmetic, so it can be tested without drawing anything.
+// The office building: one floor with a corridor, a Management office, a Meeting room, up to six department rooms, a Pantry and a
+// Lounge, and an open-plan Visitors area. Everything here is plain arithmetic, so it can be tested without drawing anything.
 //
 //   z grows toward the camera (the entrance is at the near end); x grows to the right.
 //
-//        x: -17.5      -9.5      -1.5   1.5       9.5      17.5
-//   north   | Management | Library |  s  | slot 0  | slot 3 |        z -11.4 .. -4.2
-//   corridor|==========================================|             z  -4.2 .. -1.2
-//   south   | slot 4     | slot 1  |  p  | slot 2  | slot 5 |        z  -1.2 ..  6.0
-//   lobby   |   Visitors (open plan, 24 desks)         |            z   6.0 .. 15.6   entrance at x = 0
+//        x: -17.5      -9.5      -1.5   1.5       9.5      17.5      25.5
+//   north   | Management | Meeting |  s  | slot 0  | slot 3 | Pantry |        z -11.4 .. -4.2
+//   corridor|=====================================================|           z  -4.2 .. -1.2
+//   south   | slot 4     | slot 1  |  p  | slot 2  | slot 5 | Lounge |        z  -1.2 ..  6.0
+//   lobby   |   Visitors (open plan, 24 desks)                   |            z   6.0 .. 15.6   entrance at x = 0
 //
-// ("s" and "p" are the spine, 3 wide, that joins the corridor to the Library side and the lobby.)
+// ("s" and "p" are the spine, 3 wide, that joins the corridor to the lobby. The Meeting room, Pantry and Lounge hold no desks.)
 import type { Agent } from "../../../shared/events.ts";
 import { roleOf, type Person } from "../team.ts";
 
@@ -36,8 +36,9 @@ const SOUTH = { minZ: -1.2, maxZ: -1.2 + ROOM_D };
 const LOBBY = { minZ: SOUTH.maxZ, maxZ: SOUTH.maxZ + LOBBY_D };
 const HALF = (ROOM_W * 4 + SPINE_W) / 2; // 17.5: the outer wall (two rooms each side of the spine)
 const INNER = SPINE_W / 2; // 1.5: the spine's edge
+const EAST = HALF + ROOM_W; // 25.5: the end of the wing with the Pantry and the Lounge
 
-export type RoomKind = "management" | "library" | "engineering" | "qa" | "design" | "product" | "operations" | "general" | "visitors";
+export type RoomKind = "management" | "meeting" | "pantry" | "lounge" | "engineering" | "qa" | "design" | "product" | "operations" | "general" | "visitors";
 
 /** What a department's room looks like, from its name. A name that matches none gets the plain General look. */
 export function kindOfDepartment(name: string): RoomKind {
@@ -69,9 +70,11 @@ export type RoomSpec = {
 
 const rect = (minX: number, maxX: number, z: { minZ: number; maxZ: number }): Bounds => ({ minX, maxX, minZ: z.minZ, maxZ: z.maxZ });
 
-// Where each place is: the Management office, the Library, and the six department places in the order they fill.
+// Where each place is: the Management office, the shared rooms, and the six department places in the order they fill.
 const MANAGEMENT = rect(-HALF, -HALF + ROOM_W, NORTH);
-const LIBRARY = rect(-HALF + ROOM_W, -INNER, NORTH);
+const MEETING = rect(-HALF + ROOM_W, -INNER, NORTH);
+const PANTRY = rect(HALF, EAST, NORTH);
+const LOUNGE = rect(HALF, EAST, SOUTH);
 const SLOT_RECTS: Bounds[] = [
   rect(INNER, INNER + ROOM_W, NORTH), // 0 north, right of the spine
   rect(-INNER - ROOM_W, -INNER, SOUTH), // 1 south, left of the spine
@@ -96,15 +99,17 @@ function lobbyDesks(): Point[] {
   return [2, 4.8, 7.6].flatMap((dz) => xs.map((x) => ({ x, z: LOBBY.minZ + dz })));
 }
 
-export const LOBBY_RECT = rect(-HALF, HALF, LOBBY);
-export const CORRIDOR_RECT = rect(-HALF, HALF, CORRIDOR);
+export const LOBBY_RECT = rect(-HALF, EAST, LOBBY);
+export const CORRIDOR_RECT = rect(-HALF, EAST, CORRIDOR);
 export const SPINE_RECT = rect(-INNER, INNER, { minZ: NORTH.minZ, maxZ: LOBBY.minZ });
 /** The whole building, outer wall to outer wall. */
-export const BUILDING_RECT: Bounds = { minX: -HALF, maxX: HALF, minZ: NORTH.minZ, maxZ: LOBBY.maxZ };
+export const BUILDING_RECT: Bounds = { minX: -HALF, maxX: EAST, minZ: NORTH.minZ, maxZ: LOBBY.maxZ };
 export const ENTRANCE: Point = { x: 0, z: LOBBY.maxZ };
 
 export const MANAGEMENT_KEY = "management";
-export const LIBRARY_KEY = "library";
+export const MEETING_KEY = "meeting";
+export const PANTRY_KEY = "pantry";
+export const LOUNGE_KEY = "lounge";
 export const VISITORS_KEY = "visitors";
 export const deptKey = (name: string) => `dept:${name.trim().toLowerCase().replace(/\s+/g, " ")}`;
 
@@ -121,7 +126,7 @@ export type Building = {
 };
 
 /**
- * The rooms of the building for a team: the fixed ones, and one room per department up to MAX_DEPARTMENTS. A department keeps its place from
+ * The rooms of the building for a team: the fixed ones (Management, the three shared rooms, Visitors), and one room per department up to MAX_DEPARTMENTS. A department keeps its place from
  * `previous` while it exists; a new one takes the first free place. Departments past the sixth have no room (their people sit in Visitors).
  * A department that means "management" shares the Management office.
  */
@@ -152,7 +157,9 @@ export function buildingFor(team: readonly Person[], previous: ReadonlyMap<strin
   const door = (r: Bounds): Point => ({ x: centre(r).x, z: r.maxZ <= CORRIDOR.minZ + 1e-9 ? r.maxZ : r.minZ });
   const rooms: RoomSpec[] = [
     { key: MANAGEMENT_KEY, name: "Management", kind: "management", rect: MANAGEMENT, door: door(MANAGEMENT), desks: roomDesks(MANAGEMENT), color: 0 },
-    { key: LIBRARY_KEY, name: "Library", kind: "library", rect: LIBRARY, door: door(LIBRARY), desks: [], color: 1 },
+    { key: MEETING_KEY, name: "Meeting room", kind: "meeting", rect: MEETING, door: door(MEETING), desks: [], color: 1 },
+    { key: PANTRY_KEY, name: "Pantry", kind: "pantry", rect: PANTRY, door: door(PANTRY), desks: [], color: 3 },
+    { key: LOUNGE_KEY, name: "Lounge", kind: "lounge", rect: LOUNGE, door: door(LOUNGE), desks: [], color: 4 },
   ];
   for (const [key, slot] of [...slotOf].sort((a, b) => a[1] - b[1])) {
     const name = names.get(key) as string;
