@@ -1,5 +1,6 @@
 // What stands in the building besides desks: the walls (with gaps for the doors) and each room's furniture. Plain arithmetic.
-import { BUILDING_RECT, ENTRANCE, type Building, type Point, type RoomSpec } from "./building.ts";
+import { BUILDING_RECT, ENTRANCE, type Bounds, type Building, type Point, type RoomKind, type RoomSpec } from "./building.ts";
+import { hashId, type Scheme } from "./palette.ts";
 
 export const WALL_THICK = 0.25;
 export const WALL_TALL = 2.6;
@@ -7,9 +8,26 @@ export const WALL_GLASS = 0.8;
 export const DOOR_GAP = 1.8;
 
 /** A wall piece on the floor: its centre, its size on the floor and how high it is. `tall` walls are the back and left walls the camera looks at; `glass` ones are low and see-through so the rooms can be seen into. */
-export type Wall = { x: number; z: number; w: number; d: number; kind: "tall" | "glass" };
+export type Wall = { x: number; z: number; w: number; d: number; kind: "tall" | "glass"; facing: Point; flips: boolean };
 
-type Seg = { x0: number; z0: number; x1: number; z1: number; kind: "tall" | "glass"; gap?: number };
+/** The side of the camera, as +1 or -1 on each floor axis: which way it looks from, seen from the middle of the building. */
+export type ViewSide = { x: 1 | -1; z: 1 | -1 };
+
+type Seg = { x0: number; z0: number; x1: number; z1: number; kind: "tall" | "glass"; gap?: number; facing: Point; flips: boolean };
+
+const NORTH: Point = { x: 0, z: 1 };
+const SOUTH: Point = { x: 0, z: -1 };
+const WEST: Point = { x: 1, z: 0 };
+const EAST: Point = { x: -1, z: 0 };
+
+/**
+ * Whether a wall is full height from this side. The walls on the far side of a room stand tall and those between the camera and
+ * the room drop to glass, so turning the view never hides a room behind a wall. A wall with `flips` off keeps its own height.
+ */
+export const isTall = (wall: Wall, view: ViewSide): boolean => (wall.flips ? wall.facing.x * view.x + wall.facing.z * view.z > 0 : wall.kind === "tall");
+
+/** The side the camera is on, from where it stands: the building's middle is where it looks. */
+export const viewSideOf = (camera: Point, middle: Point): ViewSide => ({ x: camera.x - middle.x > 0 ? 1 : -1, z: camera.z - middle.z > 0 ? 1 : -1 });
 
 /** Splits a straight segment around a gap (a door) of DOOR_GAP centred at `at`. */
 function cut(seg: Seg): Seg[] {
@@ -27,14 +45,15 @@ function cut(seg: Seg): Seg[] {
 const toWall = (s: Seg): Wall => {
   const horizontal = s.z0 === s.z1;
   return horizontal
-    ? { x: (s.x0 + s.x1) / 2, z: s.z0, w: s.x1 - s.x0 + WALL_THICK, d: WALL_THICK, kind: s.kind }
-    : { x: s.x0, z: (s.z0 + s.z1) / 2, w: WALL_THICK, d: s.z1 - s.z0 + WALL_THICK, kind: s.kind };
+    ? { x: (s.x0 + s.x1) / 2, z: s.z0, w: s.x1 - s.x0 + WALL_THICK, d: WALL_THICK, kind: s.kind, facing: s.facing, flips: s.flips }
+    : { x: s.x0, z: (s.z0 + s.z1) / 2, w: WALL_THICK, d: s.z1 - s.z0 + WALL_THICK, kind: s.kind, facing: s.facing, flips: s.flips };
 };
 
 /**
- * The walls of the building. The back (north) wall and every room's left wall are full height, as the camera looks from the south
- * and the right; the walls facing the camera are low glass, so every room can be seen into. Each room's door is a gap in its wall
- * on the corridor; the entrance is a gap in the near wall. Rooms that share an edge share one wall.
+ * The walls of the building. Seen from the south and the east (the opening view) the back (north) wall and every room's left wall are
+ * full height and the walls facing the camera are low glass, so every room can be seen into; the outer walls and the walls between
+ * side-by-side rooms change over as the view turns (see `isTall`). Each room's door is a gap in its wall on the corridor; the entrance
+ * is a gap in the near wall. Rooms that share an edge share one wall, which stays full height.
  */
 export function wallsOf(building: Building): Wall[] {
   const B = BUILDING_RECT;
@@ -42,23 +61,72 @@ export function wallsOf(building: Building): Wall[] {
   const add = (seg: Seg) => {
     const key = `${seg.x0},${seg.z0},${seg.x1},${seg.z1}`;
     const old = segs.get(key);
-    if (!old || (seg.kind === "tall" && old.kind === "glass")) segs.set(key, seg);
+    if (!old) segs.set(key, seg);
+    else if (old.facing.x + seg.facing.x === 0 && old.facing.z + seg.facing.z === 0) segs.set(key, { ...old, kind: "tall", flips: false }); // between two rooms
+    else if (seg.kind === "tall" && old.kind === "glass") segs.set(key, seg);
   };
-  add({ x0: B.minX, z0: B.minZ, x1: B.maxX, z1: B.minZ, kind: "tall" });
-  add({ x0: B.minX, z0: B.minZ, x1: B.minX, z1: B.maxZ, kind: "tall" });
-  add({ x0: B.maxX, z0: B.minZ, x1: B.maxX, z1: B.maxZ, kind: "glass" });
-  add({ x0: B.minX, z0: B.maxZ, x1: B.maxX, z1: B.maxZ, kind: "glass", gap: ENTRANCE.x });
+  add({ x0: B.minX, z0: B.minZ, x1: B.maxX, z1: B.minZ, kind: "tall", facing: NORTH, flips: true });
+  add({ x0: B.minX, z0: B.minZ, x1: B.minX, z1: B.maxZ, kind: "tall", facing: WEST, flips: true });
+  add({ x0: B.maxX, z0: B.minZ, x1: B.maxX, z1: B.maxZ, kind: "glass", facing: EAST, flips: true });
+  add({ x0: B.minX, z0: B.maxZ, x1: B.maxX, z1: B.maxZ, kind: "glass", facing: SOUTH, flips: true, gap: ENTRANCE.x });
   for (const room of building.rooms) {
     if (room.kind === "visitors") continue;
     const r = room.rect;
-    add({ x0: r.minX, z0: r.minZ, x1: r.minX, z1: r.maxZ, kind: "tall" });
-    add({ x0: r.maxX, z0: r.minZ, x1: r.maxX, z1: r.maxZ, kind: "glass" });
+    add({ x0: r.minX, z0: r.minZ, x1: r.minX, z1: r.maxZ, kind: "tall", facing: WEST, flips: true });
+    add({ x0: r.maxX, z0: r.minZ, x1: r.maxX, z1: r.maxZ, kind: "glass", facing: EAST, flips: true });
     const doorOnNorthEdge = room.door.z === r.minZ;
-    add({ x0: r.minX, z0: r.minZ, x1: r.maxX, z1: r.minZ, kind: doorOnNorthEdge ? "glass" : "tall", ...(doorOnNorthEdge ? { gap: room.door.x } : {}) });
-    add({ x0: r.minX, z0: r.maxZ, x1: r.maxX, z1: r.maxZ, kind: "glass", ...(!doorOnNorthEdge ? { gap: room.door.x } : {}) });
+    // The walls on the corridor and the ones between the rows keep one height from every side; a room's back wall on the outer edge turns with the outer wall.
+    add({ x0: r.minX, z0: r.minZ, x1: r.maxX, z1: r.minZ, kind: doorOnNorthEdge ? "glass" : "tall", facing: NORTH, flips: r.minZ === B.minZ, ...(doorOnNorthEdge ? { gap: room.door.x } : {}) });
+    add({ x0: r.minX, z0: r.maxZ, x1: r.maxX, z1: r.maxZ, kind: "glass", facing: SOUTH, flips: false, ...(!doorOnNorthEdge ? { gap: room.door.x } : {}) });
   }
   // A shared vertical edge appears twice (one room's right, the next one's left): the tall one was kept above.
   return [...segs.values()].flatMap(cut).map(toWall);
+}
+
+/** The lawn round the building, the path from the entrance, and what grows or stands on it. All outside the walls. */
+export type Grounds = { lawn: Bounds; path: Bounds; trees: { x: number; z: number; scale: number }[]; bushes: Point[]; benches: Point[] };
+
+export const TREE_LIMIT = 64;
+export const BUSH_LIMIT = 48;
+export const BENCH_LIMIT = 4;
+const LAWN_MARGIN = 13;
+const PATH_HALF = 1.3;
+
+/** Points along the four sides of a rectangle, `step` apart. */
+function ring(r: Bounds, step: number): Point[] {
+  const out: Point[] = [];
+  for (let x = r.minX; x <= r.maxX; x += step) out.push({ x, z: r.minZ }, { x, z: r.maxZ });
+  for (let z = r.minZ + step; z < r.maxZ; z += step) out.push({ x: r.minX, z }, { x: r.maxX, z });
+  return out;
+}
+
+/** A number between 0 and 1 that is always the same for the same name. */
+const unit = (name: string) => (hashId(name) % 1000) / 1000;
+
+/** Trees in two rings round the building, bushes along its walls, benches by the path; the same every time. */
+export function groundsOf(building: Bounds = BUILDING_RECT): Grounds {
+  const lawn: Bounds = { minX: building.minX - LAWN_MARGIN, maxX: building.maxX + LAWN_MARGIN, minZ: building.minZ - LAWN_MARGIN, maxZ: building.maxZ + LAWN_MARGIN };
+  const path: Bounds = { minX: ENTRANCE.x - PATH_HALF, maxX: ENTRANCE.x + PATH_HALF, minZ: building.maxZ, maxZ: lawn.maxZ };
+  const onPath = (p: Point, clear: number) => p.x > path.minX - clear && p.x < path.maxX + clear && p.z > building.maxZ - 0.5;
+  const grow = (rect: Bounds, step: number, near: number, tag: string) =>
+    ring(rect, step).flatMap((p, i) => {
+      const q = { x: p.x + (unit(`${tag}x${i}`) - 0.5) * near, z: p.z + (unit(`${tag}z${i}`) - 0.5) * near };
+      return onPath(q, 1.2) ? [] : [{ ...q, scale: 0.8 + unit(`${tag}s${i}`) * 0.6 }];
+    });
+  const grown = (margin: number) => ({ minX: building.minX - margin, maxX: building.maxX + margin, minZ: building.minZ - margin, maxZ: building.maxZ + margin });
+  const trees = [...grow(grown(3.4), 4.6, 1.2, "near"), ...grow(grown(8), 6.5, 2.4, "far")].slice(0, TREE_LIMIT);
+  const bushes = ring(grown(1.1), 3.2)
+    .filter((p) => !onPath(p, 1.4))
+    .slice(0, BUSH_LIMIT);
+  const benches: Point[] = [{ x: ENTRANCE.x - 3.4, z: building.maxZ + 2.4 }, { x: ENTRANCE.x + 3.4, z: building.maxZ + 2.4 }];
+  return { lawn, path, trees, bushes, benches };
+}
+
+/** A fixed floor colour for the rooms that are not a department's colour: wood for the executives and the library, a light neutral for the open plan. Null: use the room's own colour. */
+export function floorTone(kind: RoomKind, scheme: Scheme): string | null {
+  if (kind === "management" || kind === "library") return scheme === "light" ? "#C9A56E" : "#5B4A35";
+  if (kind === "visitors") return scheme === "light" ? "#D8D2C4" : "#343C48";
+  return null;
 }
 
 /** One box of furniture: its centre on the floor, its size, its colour and how high off the floor its underside is (a device on a bench). */

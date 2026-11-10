@@ -191,6 +191,28 @@ export function plantGeometry(): BufferGeometry {
   ]);
 }
 
+/** A low-poly tree, about 3.2 m tall: a trunk and three stacked round crowns. */
+export function treeGeometry(scheme: Scheme): BufferGeometry {
+  const leaf = scheme === "light" ? ["#4E9A5B", "#5FAE6A", "#78C27C"] : ["#2F6B3F", "#397B49", "#46905A"];
+  return merge([
+    { geometry: place(new CylinderGeometry(0.16, 0.24, 1.2, 6), 0, 0.6, 0), color: scheme === "light" ? "#7A5A3C" : "#5A4430" },
+    { geometry: place(new SphereGeometry(1.15, 7, 5), 0, 1.7, 0), color: leaf[0] as string },
+    { geometry: place(new SphereGeometry(0.9, 7, 5), 0.1, 2.5, 0.05), color: leaf[1] as string },
+    { geometry: place(new SphereGeometry(0.6, 7, 5), -0.05, 3.1, 0), color: leaf[2] as string },
+  ]);
+}
+
+/** A round bush about 0.7 m tall. */
+export const bushGeometry = (scheme: Scheme): BufferGeometry =>
+  merge([
+    { geometry: place(new SphereGeometry(0.5, 7, 5), 0, 0.35, 0), color: scheme === "light" ? "#5FAE6A" : "#397B49" },
+    { geometry: place(new SphereGeometry(0.34, 7, 5), 0.3, 0.3, 0.15), color: scheme === "light" ? "#78C27C" : "#46905A" },
+  ]);
+
+/** A park bench facing +z, 1.6 m wide. */
+export const benchGeometry = (): BufferGeometry =>
+  merge([box(1.6, 0.08, 0.5, 0, 0.45, 0, "#9a7448"), box(1.6, 0.4, 0.07, 0, 0.7, -0.22, "#9a7448"), box(0.08, 0.45, 0.45, -0.7, 0.22, 0, "#2f3640"), box(0.08, 0.45, 0.45, 0.7, 0.22, 0, "#2f3640")]);
+
 /** A bookshelf against a wall, facing +z, 1.8 m wide. */
 export function shelfGeometry(): BufferGeometry {
   const parts: Part[] = [box(1.8, 1.7, 0.4, 0, 0.85, 0, "#8C6B4A")];
