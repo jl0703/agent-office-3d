@@ -261,7 +261,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         set("roomFloors", i, compose(m1, cx, -0.15, cz, 0, 0, 0, r.maxX - r.minX, 0.3, r.maxZ - r.minZ));
         const tone = floorTone(room.kind, scheme);
         instanced("roomFloors")?.setColorAt(i, tone ? new Color(tone).lerp(hue, 0.12) : hue.clone().lerp(settle, dark ? 0.6 : 0.45));
-        const northRow = room.door.z === r.maxZ && (room.desks.length > 0 || room.kind === "meeting") && room.kind !== "visitors"; // its back wall is the tall one at the north
+        const northRow = room.door.z === r.maxZ && room.desks.length > 0 && room.kind !== "visitors"; // its back wall is the tall one at the north
         set("roomBoards", i, northRow ? compose(m1, cx - 1.2, 1.75, r.minZ + 0.3, 0, 0, 0, 3.0, 1.1, 0.06) : ZERO);
         set("roomPlants", i, compose(m1, r.minX + 0.45, 0, r.maxZ - 0.5));
         set("roomLamps", i, compose(m1, r.maxX - 0.45, 0, r.maxZ - 0.5));

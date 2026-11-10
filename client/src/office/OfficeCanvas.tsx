@@ -204,7 +204,6 @@ export type OfficeCanvasProps = {
   connection: "connecting" | "connected" | "disconnected";
   demo: boolean;
   layout: Layout;
-  /** Findings waiting for a decision, shown on the hub's sign. */
   selection: Selection;
   /** Raised by one each time the header's Reset view is pressed. */
   resetSignal: number;

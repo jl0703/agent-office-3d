@@ -56,6 +56,8 @@ describe("the building: walls and furniture", () => {
         const box: Rect = { minX: f.x - f.w / 2, maxX: f.x + f.w / 2, minZ: f.z - f.d / 2, maxZ: f.z + f.d / 2 };
         assert.ok(box.minX >= room.rect.minX - 0.01 && box.maxX <= room.rect.maxX + 0.01 && box.minZ >= room.rect.minZ - 0.01 && box.maxZ <= room.rect.maxZ + 0.01, `${room.key}: furniture inside the room`);
         for (const s of solid) assert.equal(box.minX < s.maxX && s.minX < box.maxX && box.minZ < s.maxZ && s.minZ < box.maxZ, false, `${room.key}: furniture clear of the desks`);
+        // Every room also gets a plant in its near-left corner and a lamp in its near-right one (Office.tsx), about 0.35 m across.
+        for (const spot of [{ x: room.rect.minX + 0.45, z: room.rect.maxZ - 0.5 }, { x: room.rect.maxX - 0.45, z: room.rect.maxZ - 0.5 }]) assert.equal(box.minX < spot.x + 0.35 && spot.x - 0.35 < box.maxX && box.minZ < spot.z + 0.35 && spot.z - 0.35 < box.maxZ, false, `${room.key}: furniture clear of the plant and the lamp`);
         if (room.kind !== "visitors") assert.equal(box.minX < doorZone.maxX && doorZone.minX < box.maxX && box.minZ < doorZone.maxZ && doorZone.minZ < box.maxZ, false, `${room.key}: furniture clear of the door`);
       }
     }

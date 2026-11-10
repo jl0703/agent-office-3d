@@ -196,7 +196,7 @@ export function furnitureOf(room: RoomSpec): Furniture[] {
         piece(r.maxX - 0.3, cz, 0.5, 2.4, 0.5, DARK),
         piece(r.maxX - 0.3, cz, 0.12, 2.0, 1.1, SCREEN, 0.9),
         piece(cx, r.maxZ - 1.2, 2.4, 1.3, 0.8, TABLE),
-        piece(right, r.maxZ - 0.8, 0.9, 0.9, 0.5, BEAN),
+        piece(right, r.maxZ - 1.8, 0.9, 0.9, 0.5, BEAN),
       ];
     case "engineering":
       return [piece(right, backZ, 0.8, 0.8, 1.7, DARK), piece(right - 1.1, backZ, 0.8, 0.8, 1.7, DARK), piece(left, backZ, 1.8, 0.8, 0.5, FABRIC)];
