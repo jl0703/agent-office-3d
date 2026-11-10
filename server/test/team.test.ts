@@ -6,6 +6,7 @@ import { after, describe, it } from "node:test";
 import { startServer, type RunningServer } from "../src/app.ts";
 import { createRegistry } from "../src/registry.ts";
 import { realOps } from "../src/managedStore.ts";
+import { AVATAR_KEYS, isAvatar } from "../../shared/avatar.ts";
 import { chainOf, checkTeam, createTeamStore, MAX_PEOPLE, PersonInput, TEAM_FILE, type Person } from "../src/team.ts";
 import { loginTo, send } from "./helpers.ts";
 
@@ -171,5 +172,65 @@ describe("team: the routes", () => {
     assert.equal(foreign.status, 403);
     const off = await rig(false);
     assert.equal((await off.get()).status, 404);
+  });
+});
+
+describe("team: the picture", () => {
+  const look = { skin: 1, hair: 2, hairColor: 3, eyes: 0, mouth: 1, glasses: 2, outfit: 4, outfitColor: 7, background: 5 };
+
+  it("accepts a look with every part inside its list, and refuses anything else", () => {
+    const base = { name: "Alex", role: "CEO", brief: "", reportsTo: null };
+    assert.ok(PersonInput.safeParse({ ...base, avatar: look }).success);
+    assert.ok(PersonInput.safeParse(base).success, "a person with no look yet is fine");
+    for (const [what, avatar] of Object.entries({
+      "a part too high": { ...look, skin: 6 },
+      "a negative part": { ...look, hair: -1 },
+      "a fraction": { ...look, eyes: 0.5 },
+      "text": { ...look, mouth: "1" },
+      "a missing part": { ...look, outfit: undefined },
+      "an extra key": { ...look, extra: 1 },
+      "not an object": "skin",
+    })) assert.equal(PersonInput.safeParse({ ...base, avatar }).success, false, what);
+    assert.equal(AVATAR_KEYS.length, 9);
+    assert.ok(isAvatar(look) && !isAvatar({ ...look, skin: 99 }) && !isAvatar(null));
+  });
+
+  it("keeps the look through add, update and a restart, and still reads a file written before looks existed", async () => {
+    const dir = tmp();
+    const store = createTeamStore(dir);
+    const made = await store.add({ name: "Alex", role: "CEO", brief: "", reportsTo: null, avatar: look });
+    assert.ok(made.ok && made.person);
+    assert.deepEqual(made.person.avatar, look);
+    const next = { ...look, hair: 5 };
+    const updated = await store.update(made.person.id, { avatar: next });
+    assert.ok(updated.ok && updated.person?.avatar?.hair === 5);
+    assert.deepEqual((await createTeamStore(dir).list())[0]?.avatar, next);
+    const old = tmp();
+    writeFileSync(join(old, TEAM_FILE), JSON.stringify({ version: 1, people: [{ id: "a".repeat(12), name: "Old", role: "Dev", brief: "", reportsTo: null }] }));
+    const [loaded] = await createTeamStore(old).list();
+    assert.equal(loaded?.name, "Old");
+    assert.equal(loaded?.avatar, undefined);
+    const broken = tmp();
+    writeFileSync(join(broken, TEAM_FILE), JSON.stringify({ version: 1, people: [{ id: "a".repeat(12), name: "Bad", role: "Dev", brief: "", reportsTo: null, avatar: { ...look, skin: 9 } }] }));
+    assert.deepEqual(await createTeamStore(broken).list(), [], "an out-of-range look makes the file damaged, not half-read");
+  });
+
+  it("carries the look through the routes", async () => {
+    const root = tmp();
+    const staticDir = join(root, "dist");
+    mkdirSync(staticDir);
+    writeFileSync(join(staticDir, "index.html"), "x");
+    const srv = await startServer({ port: 0, staticDir, registry: createRegistry(), team: createTeamStore(join(root, "data")), log: () => {} });
+    servers.push(srv);
+    const auth = await loginTo(srv);
+    const headers = { host: auth.host, cookie: auth.cookie, origin: `http://${auth.host}`, "content-type": "application/json" };
+    const post = (path: string, body: unknown) => send(srv.port, path, { method: "POST", body: JSON.stringify(body), headers });
+    const base = { name: "Alex", role: "CEO", brief: "", reportsTo: null, confirm: true };
+    assert.equal((await post("/api/team/people", { ...base, avatar: { ...look, skin: 6 } })).status, 400);
+    const made = JSON.parse((await post("/api/team/people", { ...base, avatar: look })).body) as { person: Person };
+    assert.deepEqual(made.person.avatar, look);
+    const upd = JSON.parse((await post("/api/team/people/update", { id: made.person.id, avatar: { ...look, hair: 0 }, confirm: true })).body) as { person: Person };
+    assert.equal(upd.person.avatar?.hair, 0);
+    assert.equal(upd.person.name, "Alex", "a change of look alone leaves the rest");
   });
 });

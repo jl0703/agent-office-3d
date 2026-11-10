@@ -542,8 +542,11 @@ try {
       await page.wait(500);
       const teamCards = await page.evaluate<string>(`JSON.stringify({ hash: location.hash, title: document.title, cards: document.querySelectorAll(".person-card").length, line: [...document.querySelectorAll(".person-card")].find((c) => c.textContent.includes("Riley"))?.textContent ?? "" })`);
       expect(teamCards.includes('"hash":"#/team"') && teamCards.includes("Team - Agent Office") && teamCards.includes('"cards":6') && teamCards.includes("Reports to Sam, then Alex"), `sidebar(${scheme}): the Team page shows six people and who each reports to (${teamCards.slice(0, 200)})`);
+      expect(await page.evaluate<boolean>(`document.querySelectorAll(".person-card svg.avatar").length === 6 && [...document.querySelectorAll(".person-card svg.avatar")].every((s) => s.getAttribute("aria-hidden") === "true")`), `sidebar(${scheme}): each person card has a picture that screen readers skip`);
+      await page.screenshot(join(out, `team-cards-${scheme}.png`));
       await page.evaluate(`[...document.querySelectorAll(".chips button")].find((b) => b.textContent === "Org chart")?.click()`);
       await page.wait(300);
+      expect(await page.evaluate<boolean>(`document.querySelectorAll(".org-node svg.avatar").length === 6`), `sidebar(${scheme}): each org chart node has a picture`);
       expect(await page.evaluate<boolean>(`document.querySelectorAll(".org-tree .org-node").length === 6 && Boolean(document.querySelector(".org-tree ul ul"))`), `sidebar(${scheme}): the org chart nests the people by who reports to whom`);
       await page.wait(700);
       await page.screenshot(join(out, `team-${scheme}.png`));
@@ -552,6 +555,36 @@ try {
       await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".add-btn")].find((b) => b.textContent.includes("Add a person")))`);
       await page.wait(300);
       expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Reports to"), `sidebar(${scheme}): Add a person opens a pop-up with the form`);
+      // The designer: a preview and a row of choices per part; Randomize changes the picture and Reset brings it back.
+      const designer = await page.evaluate<string>(`JSON.stringify({ rows: document.querySelectorAll("dialog[open] .designer-row").length, swatches: document.querySelectorAll("dialog[open] .swatch").length, resetOff: [...document.querySelectorAll("dialog[open] .designer button")].find((b) => b.textContent === "Reset")?.disabled })`);
+      expect(designer === '{"rows":9,"swatches":30,"resetOff":true}', `sidebar(${scheme}): the pop-up has the picture designer (${designer})`);
+      const pickPreview = `[...document.querySelectorAll("dialog[open] .designer button[aria-pressed=true]")].map((b) => b.getAttribute("aria-label") ?? b.textContent).join("|")`;
+      const before = await page.evaluate<string>(pickPreview);
+      let after = before;
+      for (let tries = 0; tries < 6 && after === before; tries++) {
+        await page.evaluate(`[...document.querySelectorAll("dialog[open] .designer button")].find((b) => b.textContent === "Randomize")?.click()`);
+        await page.wait(250);
+        after = await page.evaluate<string>(pickPreview);
+      }
+      expect(after !== before, `sidebar(${scheme}): Randomize changes the picture`);
+      await page.evaluate(`[...document.querySelectorAll("dialog[open] .designer button")].find((b) => b.textContent === "Reset")?.click()`);
+      await page.wait(300);
+      const restored = await page.evaluate<string>(pickPreview);
+      expect(restored === before, `sidebar(${scheme}): Reset brings back the look the pop-up opened with (${before} | ${restored})`);
+      // Every outfit draws something different (a choice that changes nothing would be a bug).
+      const outfits = new Set<string>();
+      for (let n = 1; n <= 5; n++) {
+        await page.evaluate(`document.querySelector('dialog[open] .designer-row[aria-label="Outfit"] button:nth-child(${n})')?.click()`);
+        await page.wait(80);
+        outfits.add(await page.evaluate<string>(`document.querySelector("dialog[open] .designer-top svg")?.innerHTML ?? ""`));
+      }
+      expect(outfits.size === 5, `sidebar(${scheme}): each of the five outfits draws differently (${outfits.size})`);
+      await page.evaluate(`document.querySelector('dialog[open] .designer-row[aria-label="Hair style"] button:nth-child(3)')?.click()`);
+      await page.wait(100);
+      expect(await page.evaluate<boolean>(`document.querySelector('dialog[open] .designer-row[aria-label="Hair style"] button:nth-child(3)')?.getAttribute("aria-pressed") === "true"`), `sidebar(${scheme}): choosing a hair style marks it pressed`);
+      await page.wait(700); // the pressed chip fades its colour in; axe must not read it half way
+      await page.screenshot(join(out, `designer-${scheme}.png`));
+      await page.wait(700); // taking the picture can restart the fade of a pressed chip
       const popViolations = await axe(page);
       expect(popViolations.length === 0, `sidebar(${scheme}): axe with the person pop-up open: ${popViolations.join(", ")}`);
       await page.key("Escape", { keyCode: 27 });

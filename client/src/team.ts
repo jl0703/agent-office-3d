@@ -1,6 +1,8 @@
 // The team: people with a role and a reporting line, kept by the server in one file. The page only reads and changes it through these calls.
+import { isAvatar, type Avatar } from "../../shared/avatar.ts";
+import { defaultAvatar } from "./avatar.ts";
 
-export type Person = { id: string; name: string; role: string; brief: string; reportsTo: string | null };
+export type Person = { id: string; name: string; role: string; brief: string; reportsTo: string | null; /** Their picture; a person saved before pictures existed has none and gets a default from their id. */ avatar?: Avatar };
 export type PersonFields = Omit<Person, "id">;
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
@@ -13,8 +15,11 @@ export function toPerson(raw: unknown): Person | null {
   const { id, name, role, brief, reportsTo } = raw;
   if (typeof id !== "string" || typeof name !== "string" || typeof role !== "string" || typeof brief !== "string") return null;
   if (reportsTo !== null && typeof reportsTo !== "string") return null;
-  return { id, name, role, brief, reportsTo };
+  return { id, name, role, brief, reportsTo, ...(isAvatar(raw["avatar"]) ? { avatar: raw["avatar"] } : {}) };
 }
+
+/** The picture to show for a person: their own, or the default made from their id. */
+export const avatarOf = (person: Pick<Person, "id" | "avatar">): Avatar => person.avatar ?? defaultAvatar(person.id);
 
 const toPeople = (raw: unknown): Person[] | null => {
   const list = isRecord(raw) ? raw["people"] : null;
