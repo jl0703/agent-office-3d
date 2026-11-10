@@ -104,6 +104,12 @@ describe("the tasks board: suggestions and assignees", () => {
     assert.deepEqual(ids(own(suggestion({ done: true }))).done, ["own-s1"], "a finished one is Done whatever its mark");
   });
 
+  it("shows a suggestion's details in full, because the owner must read all of it before it can become a worker's task", () => {
+    const long = "Read this. ".repeat(40).trim();
+    assert.equal(own(suggestion({ details: long })).active[0]?.text, long);
+    assert.ok((own(mine({ details: long })).active[0]?.text ?? "").length <= 101, "an ordinary task keeps the short preview");
+  });
+
   it("knows who every kind of card is for: a person on tasks and on a person's worker, nobody on builds and finds", () => {
     const worker = agent({ id: "w2", personId: "p1", status: "working" });
     const card = tasksOf([worker], [build({ status: "building" })], [find({})], [mine({ id: "t2", agentId: null })], people);

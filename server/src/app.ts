@@ -397,6 +397,8 @@ export async function startServer(opts: Options): Promise<RunningServer> {
             const parsed = UpdateTaskBody.safeParse(body);
             if (!parsed.success) return json(res, 400, { error: "invalid_request" });
             if (!(await known(parsed.data.assignee))) return json(res, 409, { reason: "unknown_person" });
+            const current = await tasks.get(parsed.data.id);
+            if (current?.suggestedBy !== undefined && parsed.data.done !== undefined) return json(res, 409, { reason: "not_accepted" }); // a suggestion is accepted or dismissed, not finished
             const { id, confirm: _c, ...change } = parsed.data;
             void _c;
             const done = await tasks.update(id, change);

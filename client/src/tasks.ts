@@ -45,7 +45,8 @@ function ownTask(t: OwnTask, agents: ReadonlyMap<string, Agent>, team: ReadonlyM
   const p = t.assignee ? team.get(t.assignee) : undefined;
   const a = t.agentId ? agents.get(t.agentId) : undefined;
   const base = { id: `own-${t.id}`, title: t.title, who: p ? `${p.name}, ${p.role}` : "Nobody yet", at: t.createdAt, target: a ? { agent: a.id } : null, person: p ?? null, own: t, assignee: p ? `${p.name}, ${p.role}` : null, running: false };
-  const text = short(t.details);
+  // An agent's suggestion is shown in full: the owner reads all of it before deciding, because it can later become a worker's task.
+  const text = t.suggestedBy !== undefined ? t.details : short(t.details);
   if (t.done) return { ...base, column: "done", text, chip: "Done" };
   if (t.suggestedBy !== undefined) return { ...base, column: "active", text, chip: `Suggested by ${t.suggestedBy}` };
   if (!a) return { ...base, column: "active", text, chip: p ? "To do" : "Not given out" };

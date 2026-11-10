@@ -850,9 +850,14 @@ export function createSupervisor(opts: SupervisorOptions) {
         if (!opts.suggestTask) return { ok: false, error: "Suggesting tasks is not set up here." };
         if (owner.suggested >= MAX_SUGGESTIONS_PER_MASTER) return { ok: false, error: `You have already suggested ${MAX_SUGGESTIONS_PER_MASTER} tasks in this run. Do not suggest more.` };
         owner.suggested++; // counted before the write, so quick repeated calls cannot pass the limit
-        const done = await opts.suggestTask(owner.name, title, details);
+        let done: { ok: true } | { ok: false; error: string };
+        try {
+          done = await opts.suggestTask(owner.name, title, details);
+        } catch {
+          done = { ok: false, error: "The suggestion could not be saved. Try again later." };
+        }
         if (!done.ok) {
-          owner.suggested--;
+          owner.suggested--; // a suggestion that was not saved does not use up one of the master's few
           return { ok: false, error: done.error };
         }
         return { ok: true, data: { message: "Suggested. The owner will see it on the task board and decide." } };

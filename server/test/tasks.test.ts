@@ -102,7 +102,9 @@ describe("tasks: the routes", () => {
     const f = createFake();
     const team = createTeamStore(dataDir);
     const tasks = createTasksStore(dataDir);
-    const supervisor = createSupervisor({ registry, query: f.query, roots: [root], env: {}, stopGraceMs: 150, startTimeoutMs: 1000, dataDir, maxMasters: 5, maxManaged: 10, suggestTask: suggestVia(tasks), log: () => {} });
+    const writes = { fail: false };
+    const suggest = suggestVia(tasks);
+    const supervisor = createSupervisor({ registry, query: f.query, roots: [root], env: {}, stopGraceMs: 150, startTimeoutMs: 1000, dataDir, maxMasters: 5, maxManaged: 10, suggestTask: (by, title, details) => (writes.fail ? Promise.reject(new Error("disk")) : suggest(by, title, details)), log: () => {} });
     closers.push(() => supervisor.close());
     const srv = await startServer({ port: 0, staticDir, registry, supervisor, team, tasks, log: () => {} });
     servers.push(srv);
@@ -129,7 +131,7 @@ describe("tasks: the routes", () => {
       };
       return { id: res.id, call };
     };
-    return { post, json, registry, f, work, root, dataDir, boss: boss.person, dev: dev.person, srv, headers, tasks, master };
+    return { post, json, registry, f, work, root, dataDir, boss: boss.person, dev: dev.person, srv, headers, tasks, master, writes };
   }
 
   it("creates, edits and removes tasks only with confirm:true and a known person", async () => {
@@ -244,6 +246,19 @@ describe("tasks: the routes", () => {
     assert.deepEqual(r.json(await r.post("/api/tasks/accept", { id: task.id, confirm: true })), { reason: "not_suggested" });
     assert.equal((await r.post("/api/tasks/start", { id: task.id, cwd: r.work, confirm: true })).status, 202);
     assert.equal((await r.post("/api/tasks/accept", { id: "0".repeat(12), confirm: true })).status, 404);
+  });
+
+  it("does not let a suggestion be marked done, and a write that throws does not use up one of the master's few", async () => {
+    const r = await rig();
+    const m = await r.master("Planner");
+    await m.call("suggest_task", { title: "An idea", details: "" });
+    const task = (await r.tasks.list())[0] as Task;
+    assert.deepEqual(r.json(await r.post("/api/tasks/update", { id: task.id, done: true, confirm: true })), { reason: "not_accepted" });
+    assert.equal((await r.post("/api/tasks/update", { id: task.id, assignee: r.dev.id, confirm: true })).status, 200, "it can still be given to someone");
+    r.writes.fail = true;
+    for (let i = 0; i < MAX_SUGGESTIONS_PER_MASTER + 1; i++) assert.equal((await m.call("suggest_task", { title: `Lost ${i}`, details: "" })).error, true, "a failed save is an error to the master");
+    r.writes.fail = false;
+    assert.equal((await m.call("suggest_task", { title: "Saved", details: "" })).error, false, "the failures did not count");
   });
 
   it("can be dismissed with the ordinary remove, and a damaged suggestion mark marks the file damaged", async () => {
