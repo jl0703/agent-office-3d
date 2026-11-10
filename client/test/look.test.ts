@@ -44,12 +44,12 @@ describe("walls follow the view", () => {
     for (const w of fixed) for (const x of [1, -1] as const) for (const z of [1, -1] as const) assert.equal(isTall(w, { x, z }), w.kind === "tall");
   });
 
-  it("builds a wall between side-by-side rooms once, full height, whatever the side", () => {
+  it("builds a wall between side-by-side rooms once, as low glass whatever the side, so neither room is hidden", () => {
     const keys = walls.map((w) => `${w.x.toFixed(3)},${w.z.toFixed(3)},${w.w.toFixed(3)},${w.d.toFixed(3)}`);
     // A wall between two side-by-side rooms is the same place from both sides, so one piece only.
-    const shared = walls.filter((w) => !w.flips && w.kind === "tall" && w.w === 0.25);
+    const shared = walls.filter((w) => !w.flips && w.kind === "glass" && w.w === 0.25 && w.d > 5 && w.x > B.minX && w.x < B.maxX && w.x !== 0);
     assert.ok(shared.length > 0, "side-by-side rooms share walls");
-    for (const w of shared) for (const x of [1, -1] as const) assert.equal(isTall(w, { x, z: 1 }), true);
+    for (const w of shared) for (const x of [1, -1] as const) assert.equal(isTall(w, { x, z: 1 }), false);
     assert.equal(new Set(keys).size, keys.length, "no two walls in the same place");
   });
 

@@ -156,6 +156,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
+    // Lets the browser tests see the walls change over as the view turns.
+    document.documentElement.dataset["walls"] = `${tall}/${glass}`;
   }, [scheme]);
 
   // ---- Static part: everything that only changes when agents arrive, leave, or change status ----

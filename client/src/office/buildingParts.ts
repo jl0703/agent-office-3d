@@ -53,7 +53,7 @@ const toWall = (s: Seg): Wall => {
  * The walls of the building. Seen from the south and the east (the opening view) the back (north) wall and every room's left wall are
  * full height and the walls facing the camera are low glass, so every room can be seen into; the outer walls and the walls between
  * side-by-side rooms change over as the view turns (see `isTall`). Each room's door is a gap in its wall on the corridor; the entrance
- * is a gap in the near wall. Rooms that share an edge share one wall, which stays full height.
+ * is a gap in the near wall. Rooms that share an edge share one wall, which stays low glass from every side.
  */
 export function wallsOf(building: Building): Wall[] {
   const B = BUILDING_RECT;
@@ -62,7 +62,7 @@ export function wallsOf(building: Building): Wall[] {
     const key = `${seg.x0},${seg.z0},${seg.x1},${seg.z1}`;
     const old = segs.get(key);
     if (!old) segs.set(key, seg);
-    else if (old.facing.x + seg.facing.x === 0 && old.facing.z + seg.facing.z === 0) segs.set(key, { ...old, kind: "tall", flips: false }); // between two rooms
+    else if (old.facing.x + seg.facing.x === 0 && old.facing.z + seg.facing.z === 0) segs.set(key, { ...old, kind: "glass", flips: false }); // between two rooms: low from every side, so neither room is hidden
     else if (seg.kind === "tall" && old.kind === "glass") segs.set(key, seg);
   };
   add({ x0: B.minX, z0: B.minZ, x1: B.maxX, z1: B.minZ, kind: "tall", facing: NORTH, flips: true });

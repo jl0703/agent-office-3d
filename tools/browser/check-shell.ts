@@ -712,14 +712,19 @@ try {
     await demo(page, server.base);
     const calls = () => page.evaluate<number>(`window.__office?.calls ?? 0`);
     const before = await calls();
+    const walls = () => page.evaluate<string>(`document.documentElement.dataset.walls ?? ""`);
+    const seen = new Set<string>([await walls()]);
     await page.evaluate(`document.querySelector(".office-stage").focus()`);
     for (let quarter = 1; quarter <= 4; quarter++) {
       for (let i = 0; i < 16; i++) await page.key("ArrowRight", { code: "ArrowRight", keyCode: 39 });
       await page.wait(900);
       await page.screenshot(join(out, `turn-${quarter}.png`));
       const now = await calls();
-      expect(now > 20 && Math.abs(now - before) <= 12, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
+      seen.add(await walls());
+      expect(now > 20 && now <= 66, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
     }
+    const totals = new Set([...seen].map((w) => w.split("/").reduce((a, n) => a + Number(n), 0)));
+    expect(seen.size >= 2 && totals.size === 1 && !seen.has(""), `turn: the tall and low walls change over as the view turns, the total stays the same (${[...seen].join(" | ")})`);
     await page.key("0", { code: "Digit0", keyCode: 48 });
     await page.wait(900);
     await page.screenshot(join(out, "turn-reset.png"));
