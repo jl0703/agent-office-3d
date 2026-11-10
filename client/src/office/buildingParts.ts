@@ -131,6 +131,31 @@ export function floorTone(kind: RoomKind, scheme: Scheme): string | null {
   return null;
 }
 
+/** A place to stand in a shared room, and the x it is approached along from the door (`lane`). */
+export type Spot = Point & { lane: number };
+
+/**
+ * Where people stand in a shared room, worked out from its furniture: round the meeting table (two gaps on the door side, two at the ends),
+ * in front of the pantry counter, in front of the lounge TV. Each is reached from the door along its lane, clear of the furniture.
+ * Rooms with desks have none.
+ */
+export function standingSpots(room: RoomSpec): Spot[] {
+  const r = room.rect;
+  const cx = (r.minX + r.maxX) / 2;
+  const cz = (r.minZ + r.maxZ) / 2;
+  const on = (x: number, z: number, lane = x): Spot => ({ x, z, lane });
+  switch (room.kind) {
+    case "meeting":
+      return [on(cx - 0.9, cz + 1.2), on(cx + 0.9, cz + 1.2), on(cx - 3.1, cz), on(cx + 3.1, cz)];
+    case "pantry":
+      return [-2.3, -0.9, 0.9, 2.1].map((dx) => on(cx + dx, r.minZ + 1.5, cx - 2.3));
+    case "lounge":
+      return [-2, -0.7, 0.6, 1.9].map((dz) => on(cx + 1.9, cz + dz));
+    default:
+      return [];
+  }
+}
+
 /** One box of furniture: its centre on the floor, its size, its colour and how high off the floor its underside is (a device on a bench). */
 export type Furniture = { x: number; z: number; w: number; d: number; h: number; color: string; y?: number };
 
