@@ -10,7 +10,7 @@ export const CORRIDOR_Z = -2.7; // the middle of the corridor
 const AISLE_Z = 0.3; // local z of the aisle between the two rows of desks in a room
 const GAPS = [-3.75, -1.25, 1.25, 3.75] as const; // local x of the free columns between desks in a room
 const DOOR_DEPTH = 0.6; // how far inside the door the path turns
-const ENTRY_DEPTH = 0.8; // how far inside a shared room's door the path turns toward its lane
+const ENTRY_DEPTH = 1.2; // how far inside a shared room's door the path turns toward its lane: far enough to clear the corner plant and lamp
 const LOBBY_GAPS = [-16, -12.25, -8.75, -5.25, 0, 5.25, 8.75, 12.25, 16] as const;
 const LOBBY_STRIP_Z = LOBBY_RECT.minZ + 0.55; // the free strip along the top of the Visitors area, above the first row
 

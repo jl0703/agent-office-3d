@@ -158,7 +158,9 @@ describe("the shared rooms: places to stand and the way there", () => {
     for (const seat of allSeats) {
       const solid = solidFor(seat);
       for (const room of shared) {
-        const furniture = furnitureOf(room).map((f) => boxOf(f, 0.1));
+        const furniture = furnitureOf(room).map((f) => boxOf(f, 0.3)); // a body is about 0.3 m across from its middle
+        // The plant (canopy 0.42 across) in the near-left corner and the lamp (shade 0.3) in the near-right one, which every room has.
+        const corners = [{ x: room.rect.minX + 0.45, z: room.rect.maxZ - 0.5, r: 0.72 }, { x: room.rect.maxX - 0.45, z: room.rect.maxZ - 0.5, r: 0.5 }];
         for (let spot = 0; spot < 4; spot++) {
           const route = placeRoute(building, { seat, at: "seat" }, { room: room.key, spot });
           routes++;
@@ -171,6 +173,7 @@ describe("the shared rooms: places to stand and the way there", () => {
             assert.equal(wallBoxes.some((w) => within(w, p, 0.02)), false, `${label}: no wall at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
             assert.equal(solid.some((x) => within(x, p, 0.02)), false, `${label}: no desk or chair at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
             assert.equal(furniture.some((f) => within(f, p)), false, `${label}: no furniture at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+            assert.equal(corners.some((c) => Math.hypot(p.x - c.x, p.z - c.z) < c.r), false, `${label}: clear of the plant and the lamp at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
           }
         }
       }
