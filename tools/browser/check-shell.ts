@@ -123,8 +123,8 @@ try {
       // An agent that works as a person: the name tag shows the role, and on selection who they report to and the task; the list and panel say the same in text.
       await page.evaluate(`((e) => (e?.focus(), e?.click()))(document.querySelector('[data-agent-id="demo-1"]'))`);
       await page.wait(500);
-      const card = await page.evaluate<string>(`(() => { const t = document.querySelector('.office-tag[data-state="selected"]'); const d = t?.querySelector(".tag-detail"); return JSON.stringify({ role: t?.querySelector(".tag-role")?.textContent, detail: d?.textContent, shown: d ? getComputedStyle(d).display !== "none" : false, panel: [...document.querySelectorAll(".panel-facts")].map((f) => f.textContent).join(" "), row: document.querySelector('[data-agent-id="demo-1"]')?.closest("li")?.textContent ?? "" }); })()`);
-      expect(card.includes('"role":"Frontend Developer"') && card.includes("Reports to Sam, then Alex") && card.includes("Task:") && card.includes('"shown":true'), `rooms(${scheme}): the selected name tag shows the role, the reporting line and the task (${card.slice(0, 240)})`);
+      const card = await page.evaluate<string>(`(() => { const t = document.querySelector('.office-tag[data-state="selected"]'); const d = t?.querySelector(".tag-detail"); return JSON.stringify({ role: t?.querySelector(".tag-role")?.textContent, detail: d?.textContent, picture: Boolean(t?.querySelector(".tag-line .avatar")), shown: d ? getComputedStyle(d).display !== "none" : false, panel: [...document.querySelectorAll(".panel-facts")].map((f) => f.textContent).join(" "), row: document.querySelector('[data-agent-id="demo-1"]')?.closest("li")?.textContent ?? "" }); })()`);
+      expect(card.includes('"role":"Frontend Developer"') && card.includes("Reports to Sam, then Alex") && card.includes("Task:") && card.includes('"picture":true') && card.includes('"shown":true'), `rooms(${scheme}): the selected name tag shows the picture, the role, the reporting line and the task (${card.slice(0, 240)})`);
       expect(card.includes("RoleFrontend Developer") && card.includes("Reports toSam, then Alex") && card.includes("Frontend Developer"), `rooms(${scheme}): the panel and the list say the role in text (${card.slice(0, 420)})`);
       await page.screenshot(join(out, `card-${scheme}.png`));
       await page.key("Escape", { keyCode: 27 });
@@ -721,7 +721,7 @@ try {
       await page.screenshot(join(out, `turn-${quarter}.png`));
       const now = await calls();
       seen.add(await walls());
-      expect(now > 20 && now <= 66, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
+      expect(now > 20 && now <= 70, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
     }
     const totals = new Set([...seen].map((w) => w.split("/").reduce((a, n) => a + Number(n), 0)));
     expect(seen.size >= 2 && totals.size === 1 && !seen.has(""), `turn: the tall and low walls change over as the view turns, the total stays the same (${[...seen].join(" | ")})`);

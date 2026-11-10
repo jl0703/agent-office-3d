@@ -19,7 +19,10 @@ import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
 import { BUILDING_RECT, LIBRARY_KEY, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
 import { BENCH_LIMIT, BUSH_LIMIT, TREE_LIMIT, floorTone, furnitureOf, groundsOf, hubCentre, HUB_SCALE, isTall, viewSideOf, wallsOf, WALL_GLASS, WALL_TALL, type ViewSide } from "./buildingParts.ts";
-import { ACCESSORIES, CHARACTER_COLORS, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, characterStyle, type Accessory, type Scheme } from "./palette.ts";
+import { AVATAR_PARTS } from "../../../shared/avatar.ts";
+import { OUTFIT_TINTED } from "./geometry.ts";
+import { lookOfAgent, type Look } from "./look.ts";
+import { ALL_ACCESSORIES, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, type Scheme } from "./palette.ts";
 import { blendPose, poseFor, type Pose } from "./poses.ts";
 import type { Selection } from "./selection.ts";
 
@@ -31,9 +34,21 @@ const FURNITURE_LIMIT = 96;
 const GROUNDS = groundsOf();
 const MIDDLE: Point = { x: (BUILDING_RECT.minX + BUILDING_RECT.maxX) / 2, z: (BUILDING_RECT.minZ + BUILDING_RECT.maxZ) / 2 };
 const ORIGIN: Point = { x: 0, z: 0 };
-const NAMED: readonly Exclude<Accessory, "none">[] = ACCESSORIES.filter((a): a is Exclude<Accessory, "none"> => a !== "none");
+const NAMED = ALL_ACCESSORIES;
+const HAIR_NAMES = Array.from({ length: AVATAR_PARTS.hair }, (_, i) => `hair-${i}`);
+const OUTFIT_NAMES = Array.from({ length: AVATAR_PARTS.outfit }, (_, i) => `outfit-${i}`);
+const hairCount = HAIR_NAMES.map(() => 0);
+const outfitCount = OUTFIT_NAMES.map(() => 0);
+const HEAD_SCALE = 1.2; // a friendly, chunky head
+const colours = new Map<string, Color>();
+/** A colour from its hex text, kept so the frame loop does not parse it again. */
+const colourOf = (hex: string): Color => {
+  let c = colours.get(hex);
+  if (!c) colours.set(hex, (c = new Color(hex)));
+  return c;
+};
 
-type Slot = { id: string; status: AgentStatus; since: number; appearedAt: number; pose: Pose; color: number; accessory: Accessory; family: number };
+type Slot = { id: string; status: AgentStatus; since: number; appearedAt: number; pose: Pose; look: Look; family: number };
 type World = {
   slots: (Slot | null)[];
   byId: Map<string, number>;
@@ -89,6 +104,8 @@ export type OfficeProps = {
   tagRefs: MutableRefObject<Map<string, HTMLElement>>;
   /** The building and where everyone sits in it. */
   layout: Layout;
+  /** How each agent looks, by id; one that is missing gets the look its id gives. */
+  looks: ReadonlyMap<string, Look>;
   /** The connected vault, drawn as notes orbiting the hub; null when there is none. */
   vault: Vault | null;
   /** The hub's sign, positioned over the scene by the frame loop. */
@@ -99,7 +116,7 @@ export type OfficeProps = {
   bubbleRefs: MutableRefObject<(HTMLElement | null)[]>;
 };
 
-export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, layout, roomRefs, vault, hubRef, bubbleRefs }: OfficeProps) {
+export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, layout, looks, roomRefs, vault, hubRef, bubbleRefs }: OfficeProps) {
   const invalidate = useThree((s) => s.invalidate);
   const [assets, setAssets] = useState<Assets | null>(null);
   useEffect(() => {
@@ -125,6 +142,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
   assignmentRef.current = assignment;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const looksRef = useRef(looks);
+  looksRef.current = looks;
   const clock = useThree((s) => s.clock);
   const scene = useThree((s) => s.scene);
   useEffect(() => {
@@ -197,8 +216,9 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         set("legs", d, compose(m1, x, 0, z - 0.75));
         instanced("desks")?.setColorAt(d, mix.set("#ffffff").lerp(floorColor, ghost));
         instanced("stripes")?.setColorAt(d, tint.set(FAMILY_COLORS[slot.family % FAMILY_COLORS.length] as string));
-        const body = tint.set(CHARACTER_COLORS[slot.color] as string).lerp(floorColor, ghost);
+        const body = tint.set(slot.look.outfitColor).lerp(floorColor, ghost);
         for (const name of ["torsos", "armsL", "armsR"]) instanced(name)?.setColorAt(d, body);
+        instanced("heads")?.setColorAt(d, mix.set(slot.look.skin).lerp(floorColor, ghost));
         w.onScreen[slot.status].push(d);
       }
 
@@ -304,9 +324,10 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
     [scheme, selection, placeWalls],
   );
 
-  // The lawn's trees, bushes and benches: the same every time, placed once.
+  // The lawn's trees, bushes and benches: the same every time, placed once. The hair and outfit meshes that are tinted get their colour buffer now, so the first agent to use a style does not make the shader be built again.
   useLayoutEffect(() => {
     if (!assets) return;
+    for (const name of [...HAIR_NAMES, ...OUTFIT_NAMES.filter((_, i) => OUTFIT_TINTED[i])]) instanced(name)?.setColorAt(0, colourOf("#ffffff"));
     const put = (name: string, i: number, x: number, z: number, turn: number, size: number) => instanced(name)?.setMatrixAt(i, compose(m1, x, -0.05, z, 0, turn, 0, size, size, size));
     GROUNDS.trees.forEach((t, i) => {
       put("trees", i, t.x, t.z, i * 2.4, t.scale);
@@ -363,6 +384,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       const prev = w.slots[d];
       const family = families.get(a.id) ?? 0;
       if (prev && prev.id === a.id) {
+        prev.look = looksRef.current.get(a.id) ?? prev.look; // the owner may have redrawn the picture
         if (prev.status !== a.status) {
           prev.status = a.status;
           prev.since = t;
@@ -371,15 +393,13 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         prev.family = family;
         next.push(prev);
       } else {
-        const style = characterStyle(a.id);
         next.push({
           id: a.id,
           status: a.status,
           since: instant ? -100 : t,
           appearedAt: instant ? -100 : t,
           pose: poseFor(a.status, 0, 100, true),
-          color: style.color,
-          accessory: style.accessory,
+          look: looksRef.current.get(a.id) ?? lookOfAgent(a, []),
           family,
         });
         w.pulse[d] = -1;
@@ -394,7 +414,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
     rebuild();
     invalidate();
     return () => clearTimeout(redraw);
-  }, [assets, agents, layout, assignment, clock, rebuild, invalidate, reduced, frozen]);
+  }, [assets, agents, looks, layout, assignment, clock, rebuild, invalidate, reduced, frozen]);
 
   // Bright cables follow the selection.
   useEffect(
@@ -426,6 +446,34 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
     const chairs = instanced("chairs");
     const accessory = Object.fromEntries(NAMED.map((k) => [k, instanced(`acc-${k}`)])) as Record<string, InstancedMesh | null | undefined>;
     const counts: Record<string, number> = Object.fromEntries(NAMED.map((k) => [k, 0]));
+    hairCount.fill(0);
+    outfitCount.fill(0);
+    // What a character wears: the accessory, the hair on the head and the outfit detail on the torso, each in the mesh for its style.
+    const wear = (look: Look, head: Matrix4, torso: Matrix4) => {
+      const piece = look.accessory;
+      if (piece !== "none") {
+        const mesh = accessory[piece];
+        const i = counts[piece] ?? 0;
+        if (mesh) {
+          mesh.setMatrixAt(i, piece === "tie" ? torso : head); // the tie sits on the torso; the others on the head
+          counts[piece] = i + 1;
+        }
+      }
+      const hair = instanced(HAIR_NAMES[look.hair] ?? "");
+      if (hair) {
+        const i = hairCount[look.hair] as number;
+        hair.setMatrixAt(i, head);
+        hair.setColorAt(i, colourOf(look.hairColor));
+        hairCount[look.hair] = i + 1;
+      }
+      const outfit = instanced(OUTFIT_NAMES[look.outfit] ?? "");
+      if (outfit) {
+        const i = outfitCount[look.outfit] as number;
+        outfit.setMatrixAt(i, torso);
+        if (OUTFIT_TINTED[look.outfit]) outfit.setColorAt(i, colourOf(look.outfitColor));
+        outfitCount[look.outfit] = i + 1;
+      }
+    };
     if (!torsos || !heads || !armsL || !armsR || !chairs) return;
     const nowMs = performance.now();
     const told: StoryFrame = frozen ? { walkers: [], bubbles: [] } : story.current.frame(nowMs);
@@ -452,7 +500,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         const bob = away.moving ? Math.abs(Math.sin(t * 8)) * 0.03 : 0;
         compose(m1, away.x, 0.8 + bob, away.z, 0.06, away.heading, 0, 1, 1, 1, "YXZ");
         torsos.setMatrixAt(d, m1);
-        m2.multiplyMatrices(m1, compose(m4, 0, 0.74, 0, 0, 0, 0, 1, 1, 1, "YXZ"));
+        m2.multiplyMatrices(m1, compose(m4, 0, 0.77, 0, 0, 0, 0, HEAD_SCALE, HEAD_SCALE, HEAD_SCALE, "YXZ"));
         heads.setMatrixAt(d, m2);
         armsL.setMatrixAt(d, m3.multiplyMatrices(m1, compose(m4, 0.26, 0.42, 0, -0.7 * swing, 0, 0.05, 1, 1, 1, "ZXY")));
         armsR.setMatrixAt(d, m3.multiplyMatrices(m1, compose(m4, -0.26, 0.42, 0, 0.7 * swing, 0, -0.05, 1, 1, 1, "ZXY")));
@@ -463,15 +511,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
           walkLegs.setMatrixAt(legCount++, m5.multiplyMatrices(m3, compose(m4, 0.11, 0, 0, 0.8 * swing, 0, 0)));
           walkLegs.setMatrixAt(legCount++, m5.multiplyMatrices(m3, compose(m4, -0.11, 0, 0, -0.8 * swing, 0, 0)));
         }
-        const kindAway = slot.accessory;
-        if (kindAway !== "none") {
-          const mesh = accessory[kindAway];
-          const i = counts[kindAway] ?? 0;
-          if (mesh) {
-            mesh.setMatrixAt(i, kindAway === "tie" ? m1 : m2);
-            counts[kindAway] = i + 1;
-          }
-        }
+        wear(slot.look, m2, m1);
         continue;
       }
       if (walking.current.delete(d) && legsMesh) {
@@ -484,7 +524,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       compose(m1, x, 0.55 + p.bob, charZ, p.lean, 0, 0);
       torsos.setMatrixAt(d, m3.copy(m1).scale(one.set(1, p.breathe, 1))); // breathing scales the torso after the lean
       // Head, on top of the torso.
-      m2.multiplyMatrices(m1, compose(m4, 0, 0.74, 0, p.headPitch, p.headYaw, 0, 1, 1, 1, "YXZ"));
+      m2.multiplyMatrices(m1, compose(m4, 0, 0.77, 0, p.headPitch, p.headYaw, 0, HEAD_SCALE, HEAD_SCALE, HEAD_SCALE, "YXZ"));
       heads.setMatrixAt(d, m2);
       // Arms hang from the shoulders and turn forward (negative) and outward (roll).
       armsL.setMatrixAt(d, m3.multiplyMatrices(m1, compose(m4, 0.26, 0.42, 0, p.armL, 0, p.rollL, 1, 1, 1, "ZXY")));
@@ -492,22 +532,22 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       // The chair rolls back for a stopped worker, and in from the side when someone arrives.
       chairs.setMatrixAt(d, compose(m3, x, 0, z - 0.8 - p.chairBack - (1 - arrived) * 0.9));
 
-      const kind = slot.accessory;
-      if (kind !== "none") {
-        const mesh = accessory[kind];
-        const i = counts[kind] ?? 0;
-        if (mesh) {
-          // The tie sits on the torso; the others on the head.
-          mesh.setMatrixAt(i, kind === "tie" ? m1 : m2);
-          counts[kind] = i + 1;
-        }
-      }
+      wear(slot.look, m2, m1);
     }
     for (const kind of NAMED) {
       const mesh = accessory[kind];
       if (!mesh) continue;
       mesh.count = counts[kind] ?? 0;
       mesh.instanceMatrix.needsUpdate = true;
+    }
+    for (const [names, used] of [[HAIR_NAMES, hairCount], [OUTFIT_NAMES, outfitCount]] as const) {
+      names.forEach((name, style) => {
+        const mesh = instanced(name);
+        if (!mesh) return;
+        mesh.count = used[style] as number;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      });
     }
     for (const mesh of [torsos, heads, armsL, armsR, chairs]) mesh.instanceMatrix.needsUpdate = true;
     if (walkLegs) {
@@ -728,6 +768,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       {NAMED.map((k) => (
         <instancedMesh key={k} ref={bind(`acc-${k}`)} args={[geo.accessories[k], mat.vertex, N]} frustumCulled={false} />
       ))}
+      {geo.hair.map((g, i) => g && <instancedMesh key={HAIR_NAMES[i]} ref={bind(HAIR_NAMES[i] as string)} args={[g, mat.vertex, N]} frustumCulled={false} />)}
+      {geo.outfit.map((g, i) => g && <instancedMesh key={OUTFIT_NAMES[i]} ref={bind(OUTFIT_NAMES[i] as string)} args={[g, mat.vertex, N]} frustumCulled={false} />)}
       {STATUSES.map((s) => (
         <instancedMesh key={`screen-${s}`} ref={bind(`screen-${s}`)} args={[geo.screen, mat.screens[s], N]} frustumCulled={false} />
       ))}

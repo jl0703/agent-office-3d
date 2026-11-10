@@ -5,7 +5,9 @@ import { Spherical, Vector3 } from "three";
 import type { Agent } from "../../../shared/events.ts";
 import { Office } from "./Office.tsx";
 import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, fitCamera, truncateTag } from "./layout.ts";
-import { roleOf, type Person } from "../team.ts";
+import { AvatarImage } from "../Avatar.tsx";
+import { avatarOf, roleOf, type Person } from "../team.ts";
+import { lookOfAgent } from "./look.ts";
 import type { Vault } from "../vault.ts";
 import { MAX_BUBBLES } from "./story.ts";
 import { overviewBounds, roomBounds, type Bounds, type Layout } from "./building.ts";
@@ -183,8 +185,7 @@ const shortText = (text: string | null, max: number) => {
 };
 
 /** The role under the name, and, when the tag is hovered or selected, who the agent reports to and its current task. */
-function TagCard({ agent, team }: { agent: Agent; team: readonly Person[] }) {
-  const role = roleOf(agent, team);
+function TagCard({ agent, role }: { agent: Agent; role: ReturnType<typeof roleOf> }) {
   const task = shortText(agent.currentTask, 90);
   return (
     <>
@@ -242,6 +243,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
     if (room !== null && focused === undefined) selection.focusRoom(null);
   }, [room, focused, selection]);
   const families = familyIndexes(agents);
+  const looks = useMemo(() => new Map(agents.map((a) => [a.id, lookOfAgent(a, team)])), [agents, team]);
   const empty = agents.length === 0 && connection === "connected" && !demo;
 
   useEffect(() => {
@@ -282,7 +284,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
               });
             }}
           >
-            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} layout={layout} roomRefs={roomRefs} vault={vault} hubRef={hubRef} bubbleRefs={bubbleRefs} />
+            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} layout={layout} looks={looks} roomRefs={roomRefs} vault={vault} hubRef={hubRef} bubbleRefs={bubbleRefs} />
             <CameraRig view={view} limit={limit} focusKey={room ?? ""} reduced={reduced} api={rig} />
             {demo && <Stats out={stats} />}
           </Canvas>
@@ -361,7 +363,9 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
         </div>
 
         <div className="office-tags" aria-hidden="true">
-          {shown.map((a) => (
+          {shown.map((a) => {
+            const role = roleOf(a, team);
+            return (
             <div
               key={a.id}
               className="office-tag"
@@ -372,13 +376,15 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
               }}
             >
               <span className="tag-line">
+                {role && <AvatarImage avatar={avatarOf(role.person)} size={20} />}
                 <span className="tag-family">{FAMILY_LETTERS[families.get(a.id) ?? 0]}</span>
                 <span className="tag-name">{truncateTag(a.name)}</span>
                 <span className="tag-status">{a.status}</span>
               </span>
-              <TagCard agent={a} team={team} />
+              <TagCard agent={a} role={role} />
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {demo && <div className="office-watermark" aria-hidden="true">DEMO</div>}
