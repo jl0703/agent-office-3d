@@ -1836,6 +1836,10 @@ textarea {
   border-radius: 50%;
 }
 
+.swatch:focus-visible {
+  outline-offset: 6px;
+}
+
 .swatch[aria-pressed="true"] {
   border-color: var(--color-text);
   box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-text);

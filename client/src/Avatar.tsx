@@ -170,8 +170,8 @@ export function AvatarImage({ avatar, size = 64 }: { avatar: Avatar; size?: numb
     <svg className="avatar" width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       <rect width="100" height="100" rx="14" fill={BACKGROUND[avatar.background] ?? BACKGROUND[0]!} />
       <Hair style={avatar.hair} color={hair} front={false} />
-      <Outfit style={avatar.outfit} color={outfit} skin={skin} />
       <rect x="44" y="60" width="12" height="14" fill={skin} />
+      <Outfit style={avatar.outfit} color={outfit} skin={skin} />
       <circle cx="32" cy="48" r="4" fill={skin} />
       <circle cx="68" cy="48" r="4" fill={skin} />
       <ellipse cx="50" cy="47" rx="18" ry="20" fill={skin} />

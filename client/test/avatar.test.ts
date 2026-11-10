@@ -30,6 +30,14 @@ describe("avatars: making a look", () => {
   });
 });
 
+describe("avatars: what counts as a look", () => {
+  it("wants a whole look: every part, whole numbers, inside its list, and nothing extra", () => {
+    const look = randomAvatar(() => 0.3);
+    assert.ok(isAvatar(look));
+    for (const bad of [{ ...look, eyes: 0.5 }, { ...look, extra: 1 }, { ...look, mouth: -1 }, { ...look, glasses: "1" }, [], null, "skin", Object.fromEntries(Object.entries(look).slice(1))]) assert.equal(isAvatar(bad), false, JSON.stringify(bad));
+  });
+});
+
 describe("avatars: a person's picture", () => {
   it("uses the person's own look, or the default made from their id", () => {
     const look = randomAvatar(() => 0.3);

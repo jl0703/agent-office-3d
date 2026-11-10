@@ -216,7 +216,7 @@ export function TeamPage({ demo }: { demo: boolean }) {
       )}
 
       <Modal open={dialog?.kind === "form"} onClose={close} title={dialog?.kind === "form" && dialog.editing ? `Edit ${dialog.editing.name}` : "Add a person"}>
-        {dialog?.kind === "form" && <PersonForm people={list} editing={dialog.editing} demo={demo} onClose={close} onDone={(l) => done(l, dialog.editing ? "Saved." : "Added.")} />}
+        {dialog?.kind === "form" && <PersonForm key={dialog.editing?.id ?? "new"} people={list} editing={dialog.editing} demo={demo} onClose={close} onDone={(l) => done(l, dialog.editing ? "Saved." : "Added.")} />}
       </Modal>
 
       <Modal

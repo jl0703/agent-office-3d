@@ -571,6 +571,14 @@ try {
       await page.wait(300);
       const restored = await page.evaluate<string>(pickPreview);
       expect(restored === before, `sidebar(${scheme}): Reset brings back the look the pop-up opened with (${before} | ${restored})`);
+      // Every outfit draws something different (a choice that changes nothing would be a bug).
+      const outfits = new Set<string>();
+      for (let n = 1; n <= 5; n++) {
+        await page.evaluate(`document.querySelector('dialog[open] .designer-row[aria-label="Outfit"] button:nth-child(${n})')?.click()`);
+        await page.wait(80);
+        outfits.add(await page.evaluate<string>(`document.querySelector("dialog[open] .designer-top svg")?.innerHTML ?? ""`));
+      }
+      expect(outfits.size === 5, `sidebar(${scheme}): each of the five outfits draws differently (${outfits.size})`);
       await page.evaluate(`document.querySelector('dialog[open] .designer-row[aria-label="Hair style"] button:nth-child(3)')?.click()`);
       await page.wait(100);
       expect(await page.evaluate<boolean>(`document.querySelector('dialog[open] .designer-row[aria-label="Hair style"] button:nth-child(3)')?.getAttribute("aria-pressed") === "true"`), `sidebar(${scheme}): choosing a hair style marks it pressed`);
