@@ -351,7 +351,7 @@ export async function startServer(opts: Options): Promise<RunningServer> {
           let done: Awaited<ReturnType<TeamStore["add"]>> | null = null;
           if (url.pathname === "/api/team/people") {
             const parsed = AddPersonBody.safeParse(body);
-            if (parsed.success) done = await team.add({ name: parsed.data.name, role: parsed.data.role, brief: parsed.data.brief, reportsTo: parsed.data.reportsTo, ...(parsed.data.avatar ? { avatar: parsed.data.avatar } : {}) });
+            if (parsed.success) done = await team.add({ name: parsed.data.name, role: parsed.data.role, brief: parsed.data.brief, reportsTo: parsed.data.reportsTo, ...(parsed.data.avatar ? { avatar: parsed.data.avatar } : {}), ...(parsed.data.department ? { department: parsed.data.department } : {}) });
           } else if (url.pathname === "/api/team/people/update") {
             const parsed = UpdatePersonBody.safeParse(body);
             if (parsed.success) {

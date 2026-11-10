@@ -234,3 +234,48 @@ describe("team: the picture", () => {
     assert.equal(upd.person.name, "Alex", "a change of look alone leaves the rest");
   });
 });
+
+describe("team: the department", () => {
+  const base = { name: "Alex", role: "CEO", brief: "", reportsTo: null };
+
+  it("is one short line, optional, and can be given, changed and taken away", async () => {
+    assert.ok(PersonInput.safeParse({ ...base, department: "Engineering" }).success);
+    assert.ok(PersonInput.safeParse({ ...base, department: null }).success, "null means none");
+    assert.ok(PersonInput.safeParse(base).success);
+    for (const bad of ["", " ", "a\nb", "x".repeat(41), "a\u202eb"]) assert.equal(PersonInput.safeParse({ ...base, department: bad }).success, false, JSON.stringify(bad));
+    const store = createTeamStore(tmp());
+    const made = await store.add({ ...base, department: "Engineering" });
+    assert.ok(made.ok && made.person?.department === "Engineering");
+    const moved = await store.update(made.person!.id, { department: "Quality" });
+    assert.equal(moved.ok && moved.person?.department, "Quality");
+    const none = await store.update(made.person!.id, { department: null });
+    assert.ok(none.ok && none.person && !("department" in none.person), "taking it away leaves no key in the file");
+    const again = await store.add({ name: "Sam", role: "Dev", brief: "", reportsTo: made.person!.id, department: null });
+    assert.ok(again.ok && again.person && !("department" in again.person));
+  });
+
+  it("is in the starter team, in the routes, and a file written before departments existed still loads", async () => {
+    const dir = tmp();
+    const made = await createTeamStore(dir).starter();
+    assert.ok(made.ok);
+    assert.deepEqual([...new Set(made.people.map((p) => p.department))].sort(), ["Engineering", "Management", "Quality"]);
+    assert.equal(made.people.find((p) => p.reportsTo === null)?.department, "Management");
+    const old = tmp();
+    writeFileSync(join(old, TEAM_FILE), JSON.stringify({ version: 1, people: [{ id: "a".repeat(12), name: "Old", role: "Dev", brief: "", reportsTo: null }] }));
+    assert.equal((await createTeamStore(old).list())[0]?.department, undefined);
+    const root = tmp();
+    const staticDir = join(root, "dist");
+    mkdirSync(staticDir);
+    writeFileSync(join(staticDir, "index.html"), "x");
+    const srv = await startServer({ port: 0, staticDir, registry: createRegistry(), team: createTeamStore(join(root, "data")), log: () => {} });
+    servers.push(srv);
+    const auth = await loginTo(srv);
+    const headers = { host: auth.host, cookie: auth.cookie, origin: `http://${auth.host}`, "content-type": "application/json" };
+    const post = (path: string, body: unknown) => send(srv.port, path, { method: "POST", body: JSON.stringify(body), headers });
+    const added = JSON.parse((await post("/api/team/people", { ...base, department: "Management", confirm: true })).body) as { person: Person };
+    assert.equal(added.person.department, "Management");
+    const cleared = JSON.parse((await post("/api/team/people/update", { id: added.person.id, department: null, confirm: true })).body) as { person: Person };
+    assert.equal("department" in cleared.person, false);
+    assert.equal((await post("/api/team/people/update", { id: added.person.id, department: "x".repeat(41), confirm: true })).status, 400);
+  });
+});

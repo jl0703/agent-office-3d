@@ -22,6 +22,8 @@ const oneLine = (max: number) =>
   .regex(/^[^\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$/);
 export const Line = oneLine(60);
 export const Title = oneLine(100);
+/** A department: one short line, e.g. Engineering. A person with none is in no department. */
+export const Department = oneLine(40);
 // The role brief may span lines.
 export const Brief = z.string().max(1500).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]*$/);
 /* eslint-enable no-control-regex */
@@ -34,12 +36,13 @@ export const Avatar = z
   .strict();
 
 const Fields = { name: Line, role: Line, brief: Brief, reportsTo: Id.nullable(), avatar: Avatar.optional() };
-const Person = z.object({ id: Id, ...Fields }).strict();
+// In the file a person either has a department or the key is missing; a request may send null to take it away.
+const Person = z.object({ id: Id, ...Fields, department: Department.optional() }).strict();
 const TeamFile = z.object({ version: z.literal(1), people: z.array(Person).max(MAX_PEOPLE) }).strict();
 
 export type Person = z.infer<typeof Person>;
-export const PersonInput = z.object(Fields).strict();
-export const PersonUpdate = z.object({ id: Id, ...Fields }).partial({ name: true, role: true, brief: true, reportsTo: true, avatar: true }).strict();
+export const PersonInput = z.object({ ...Fields, department: Department.nullable().optional() }).strict();
+export const PersonUpdate = z.object({ id: Id, ...Fields, department: Department.nullable().optional() }).partial({ name: true, role: true, brief: true, reportsTo: true, avatar: true }).strict();
 export type PersonInput = z.infer<typeof PersonInput>;
 
 export type TeamError = "invalid" | "too_many" | "unknown_person" | "unknown_manager" | "cycle" | "too_deep" | "one_top" | "is_top" | "not_empty" | "busy";
@@ -79,13 +82,19 @@ export function chainOf(people: readonly Person[], id: string): Person[] {
 
 const newId = () => randomBytes(6).toString("hex");
 
-const STARTER: { key: string; name: string; role: string; boss: string | null; brief: string }[] = [
-  { key: "ceo", name: "Alex", role: "CEO", boss: null, brief: "You set the direction and decide what matters most. You keep answers short and ask for the result, not the process." },
-  { key: "eng", name: "Sam", role: "Engineering Lead", boss: "ceo", brief: "You lead the developers. You break work into small steps, keep the design simple and check that each change is understood before it is made." },
-  { key: "qal", name: "Jordan", role: "QA Lead", boss: "ceo", brief: "You lead quality. You decide what must be tested, look for what could break, and say clearly what passed and what did not." },
-  { key: "fe", name: "Riley", role: "Frontend Developer", boss: "eng", brief: "You build the user interface: accessible, responsive, simple. You check your work in the browser and keep changes small." },
-  { key: "be", name: "Casey", role: "Backend Developer", boss: "eng", brief: "You build the server side: validate input, handle errors, write tests with the code. You do not add anything that was not asked for." },
-  { key: "qa", name: "Morgan", role: "QA Engineer", boss: "qal", brief: "You write and run tests, try to break the change and report what you found with the steps to repeat it. You do not fix the code yourself." },
+/** A person as saved: no department key at all when there is none (a request's null means "none"). */
+function tidy(person: Person | (Omit<Person, "department"> & { department?: string | null })): Person {
+  const { department, ...rest } = person;
+  return department ? { ...rest, department } : rest;
+}
+
+const STARTER: { key: string; name: string; role: string; boss: string | null; brief: string; department: string }[] = [
+  { key: "ceo", name: "Alex", role: "CEO", boss: null, brief: "You set the direction and decide what matters most. You keep answers short and ask for the result, not the process.", department: "Management" },
+  { key: "eng", name: "Sam", role: "Engineering Lead", boss: "ceo", brief: "You lead the developers. You break work into small steps, keep the design simple and check that each change is understood before it is made.", department: "Engineering" },
+  { key: "qal", name: "Jordan", role: "QA Lead", boss: "ceo", brief: "You lead quality. You decide what must be tested, look for what could break, and say clearly what passed and what did not.", department: "Quality" },
+  { key: "fe", name: "Riley", role: "Frontend Developer", boss: "eng", brief: "You build the user interface: accessible, responsive, simple. You check your work in the browser and keep changes small.", department: "Engineering" },
+  { key: "be", name: "Casey", role: "Backend Developer", boss: "eng", brief: "You build the server side: validate input, handle errors, write tests with the code. You do not add anything that was not asked for.", department: "Engineering" },
+  { key: "qa", name: "Morgan", role: "QA Engineer", boss: "qal", brief: "You write and run tests, try to break the change and report what you found with the steps to repeat it. You do not fix the code yourself.", department: "Quality" },
 ];
 
 /** The team file: strict shape, atomic writes, a damaged file is set aside as `.bad` and reads as an empty team. */
@@ -153,7 +162,7 @@ export function createTeamStore(dir: string, ops: WriteOps = realOps) {
     add: (input: PersonInput) =>
       enqueue(async (): Promise<Done> => {
         const people = await load();
-        const person: Person = { id: newId(), ...input };
+        const person: Person = tidy({ id: newId(), ...input });
         const problem = await commit([...people, person]);
         return problem ? fail(problem) : { ok: true, people: [...(await load())], person };
       }),
@@ -162,7 +171,7 @@ export function createTeamStore(dir: string, ops: WriteOps = realOps) {
         const people = await load();
         const old = people.find((p) => p.id === id);
         if (!old) return fail("unknown_person");
-        const person: Person = { ...old, ...change };
+        const person: Person = tidy({ ...old, ...change });
         const problem = await commit(people.map((p) => (p.id === id ? person : p)));
         return problem ? fail(problem) : { ok: true, people: [...(await load())], person };
       }),
@@ -183,7 +192,7 @@ export function createTeamStore(dir: string, ops: WriteOps = realOps) {
       enqueue(async (): Promise<Done> => {
         if ((await load()).length > 0) return fail("not_empty");
         const ids = new Map(STARTER.map((s) => [s.key, newId()]));
-        const people = STARTER.map((s): Person => ({ id: ids.get(s.key) as string, name: s.name, role: s.role, brief: s.brief, reportsTo: s.boss === null ? null : (ids.get(s.boss) as string) }));
+        const people = STARTER.map((s): Person => ({ id: ids.get(s.key) as string, name: s.name, role: s.role, brief: s.brief, department: s.department, reportsTo: s.boss === null ? null : (ids.get(s.boss) as string) }));
         const problem = await commit(people);
         return problem ? fail(problem) : { ok: true, people: [...(await load())] };
       }),
