@@ -17,7 +17,7 @@ import { createStory, type StoryFrame, type Walker } from "./story.ts";
 import { graphLayout, MAX_GRAPH_NODES, type Vault } from "../vault.ts";
 import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
-import { BUILDING_RECT, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
+import { BUILDING_RECT, LIBRARY_KEY, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
 import { furnitureOf, hubCentre, HUB_SCALE, wallsOf, WALL_GLASS, WALL_TALL } from "./buildingParts.ts";
 import { ACCESSORIES, CHARACTER_COLORS, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, characterStyle, type Accessory, type Scheme } from "./palette.ts";
 import { blendPose, poseFor, type Pose } from "./poses.ts";
@@ -629,7 +629,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         frustumCulled={false}
         onClick={(e) => {
           const room = e.instanceId === undefined ? undefined : world.current.rooms[e.instanceId];
-          if (room) {
+          if (room && room.key !== LIBRARY_KEY) {
+            // The Library is the hub: it has its own sign and panel, and no list of sessions to filter.
             e.stopPropagation();
             selection.focusRoom(selection.get().room === room.key ? null : room.key);
           }

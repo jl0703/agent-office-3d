@@ -966,13 +966,13 @@ textarea {
 }
 
 .room-name {
-  font: 600 14px/1.2 var(--font-display);
+  font: 600 12px/1.2 var(--font-display);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .room-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
