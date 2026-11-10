@@ -1,6 +1,7 @@
 // Where a character walks. Inside a room it keeps to the aisle and the gaps between desks and leaves by the room's door onto the
 // corridor; between rooms it follows the corridor (and the spine to the Visitors area). Pure geometry, no drawing.
 import { LOBBY_RECT, VISITORS_KEY, seatPoint, type Building, type Point, type RoomSpec } from "./building.ts";
+import { standingSpots } from "./buildingParts.ts";
 
 export type { Point };
 
@@ -9,6 +10,7 @@ export const CORRIDOR_Z = -2.7; // the middle of the corridor
 const AISLE_Z = 0.3; // local z of the aisle between the two rows of desks in a room
 const GAPS = [-3.75, -1.25, 1.25, 3.75] as const; // local x of the free columns between desks in a room
 const DOOR_DEPTH = 0.6; // how far inside the door the path turns
+const ENTRY_DEPTH = 0.8; // how far inside a shared room's door the path turns toward its lane
 const LOBBY_GAPS = [-16, -12.25, -8.75, -5.25, 0, 5.25, 8.75, 12.25, 16] as const;
 const LOBBY_STRIP_Z = LOBBY_RECT.minZ + 0.55; // the free strip along the top of the Visitors area, above the first row
 
@@ -115,6 +117,26 @@ export function walkRoute(building: Building, from: Stand, to: Stand): Point[] {
   const leave = leaveLobby ? [...lobbyToSpine(spotA, fromSeat), { x: 0, z: LOBBY_RECT.minZ - 0.3 }, { x: 0, z: CORRIDOR_Z }] : [...toDoor(a.room, spotA, fromSeat), { x: a.room.door.x, z: CORRIDOR_Z }];
   const arrive = enterLobby ? reversed([...lobbyToSpine(spotB, toSeat), { x: 0, z: LOBBY_RECT.minZ - 0.3 }, { x: 0, z: CORRIDOR_Z }]) : reversed([...toDoor(b.room, spotB, toSeat), { x: b.room.door.x, z: CORRIDOR_Z }]);
   return dedupe([...leave, ...arrive]);
+}
+
+/** A standing place in a shared room: the room's key and which of its places. */
+export type Place = { room: string; spot: number };
+
+/**
+ * The waypoints from a seat to a standing place in the Meeting room, the Pantry or the Lounge: out of the seat's room by its door, along
+ * the corridor (and the spine from Visitors), in at the shared room's door and along its lane to the place. Walking it backwards is the
+ * way home. Empty when the seat or the place does not exist.
+ */
+export function placeRoute(building: Building, from: Stand, to: Place): Point[] {
+  const a = roomOfSeat(building, from.seat);
+  const target = building.rooms.find((r) => r.key === to.room);
+  const spot = target ? standingSpots(target)[to.spot] : undefined;
+  if (!a || !target || !spot) return [];
+  const spotA = spotOf(building, from);
+  const fromSeat = from.at === "seat";
+  const leave = a.room.key === VISITORS_KEY ? [...lobbyToSpine(spotA, fromSeat), { x: 0, z: LOBBY_RECT.minZ - 0.3 }, { x: 0, z: CORRIDOR_Z }] : [...toDoor(a.room, spotA, fromSeat), { x: a.room.door.x, z: CORRIDOR_Z }];
+  const entryZ = target.door.z + (target.door.z === target.rect.minZ ? ENTRY_DEPTH : -ENTRY_DEPTH);
+  return dedupe([...leave, { x: target.door.x, z: CORRIDOR_Z }, target.door, { x: target.door.x, z: entryZ }, { x: spot.lane, z: entryZ }, { x: spot.lane, z: spot.z }, { x: spot.x, z: spot.z }]);
 }
 
 export function routeLength(route: readonly Point[]): number {

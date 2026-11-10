@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildingFor, ENTRANCE, MAX_DEPARTMENTS, SEAT_COUNT, seatPoint, VISITORS_KEY, type Building } from "../src/office/building.ts";
-import { DOOR_GAP, furnitureOf, wallsOf, WALL_THICK, type Wall } from "../src/office/buildingParts.ts";
-import { obstacles, pointAlong, routeLength, routeSeconds, seatSpot, visitSpot, walkRoute, WALK_SPEED, CORRIDOR_Z, type Point, type Rect } from "../src/office/walk.ts";
+import { DOOR_GAP, furnitureOf, standingSpots, wallsOf, WALL_THICK, type Wall } from "../src/office/buildingParts.ts";
+import { obstacles, placeRoute, pointAlong, routeLength, routeSeconds, seatSpot, visitSpot, walkRoute, WALK_SPEED, CORRIDOR_Z, type Point, type Rect } from "../src/office/walk.ts";
 import type { Person } from "../src/team.ts";
 
 const people: Person[] = ["Engineering", "Quality", "Design", "Product", "Operations", "Sales"].map((d, i) => ({ id: i.toString(16).padStart(12, "0"), name: `P${i}`, role: "r", brief: "", reportsTo: "000000000fff", department: d }));
@@ -125,5 +125,68 @@ describe("the building: walking", () => {
     const end = pointAlong(route, 1e6);
     assert.ok(Math.hypot(end.x - route.at(-1)!.x, end.z - route.at(-1)!.z) < 1e-9);
     assert.ok(MAX_DEPARTMENTS === 6);
+  });
+});
+
+describe("the shared rooms: places to stand and the way there", () => {
+  const shared = building.rooms.filter((r) => r.desks.length === 0);
+  const wallBoxes = wallsOf(building).map(rectOfWall);
+  const solidFor = (except: number) => obstacles(building, allSeats, except);
+  const boxOf = (f: ReturnType<typeof furnitureOf>[number], grow = 0): Rect => ({ minX: f.x - f.w / 2 - grow, maxX: f.x + f.w / 2 + grow, minZ: f.z - f.d / 2 - grow, maxZ: f.z + f.d / 2 + grow });
+
+  it("has four places in each shared room and none in a room with desks", () => {
+    assert.deepEqual(shared.map((r) => r.kind).sort(), ["lounge", "meeting", "pantry"]);
+    for (const room of shared) assert.equal(standingSpots(room).length, 4, room.key);
+    for (const room of building.rooms.filter((r) => r.desks.length > 0)) assert.equal(standingSpots(room).length, 0, room.key);
+  });
+
+  it("keeps every place inside its room, clear of the furniture, the corner plant and lamp, and of each other", () => {
+    for (const room of shared) {
+      const spots = standingSpots(room);
+      const r = room.rect;
+      for (const [i, p] of spots.entries()) {
+        assert.ok(p.x > r.minX + 0.5 && p.x < r.maxX - 0.5 && p.z > r.minZ + 0.5 && p.z < r.maxZ - 0.5, `${room.key} #${i}: inside the room`);
+        for (const f of furnitureOf(room)) assert.equal(within(boxOf(f, 0.3), p), false, `${room.key} #${i}: clear of the furniture`);
+        for (const corner of [{ x: r.minX + 0.45, z: r.maxZ - 0.5 }, { x: r.maxX - 0.45, z: r.maxZ - 0.5 }]) assert.ok(Math.hypot(p.x - corner.x, p.z - corner.z) > 0.7, `${room.key} #${i}: clear of the plant and the lamp`);
+        for (const q of spots.slice(i + 1)) assert.ok(Math.hypot(p.x - q.x, p.z - q.z) >= 0.8, `${room.key}: two places are not on top of each other`);
+      }
+    }
+  });
+
+  it("walks from every desk to every place by the door and the corridor, through no wall, desk, chair or furniture", () => {
+    let routes = 0;
+    for (const seat of allSeats) {
+      const solid = solidFor(seat);
+      for (const room of shared) {
+        const furniture = furnitureOf(room).map((f) => boxOf(f, 0.1));
+        for (let spot = 0; spot < 4; spot++) {
+          const route = placeRoute(building, { seat, at: "seat" }, { room: room.key, spot });
+          routes++;
+          const label = `${seat} -> ${room.key} #${spot}`;
+          assert.deepEqual(route[0], seatSpot(building, seat), `${label}: starts at the desk`);
+          assert.deepEqual(route.at(-1), { x: standingSpots(room)[spot]!.x, z: standingSpots(room)[spot]!.z }, `${label}: ends at the place`);
+          assert.ok(route.some((p) => p.x === room.door.x && p.z === room.door.z), `${label}: goes in at the door`);
+          assert.ok(routeLength(route) < 80, `${label}: a sensible length`);
+          for (const p of samples(route)) {
+            assert.equal(wallBoxes.some((w) => within(w, p, 0.02)), false, `${label}: no wall at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+            assert.equal(solid.some((x) => within(x, p, 0.02)), false, `${label}: no desk or chair at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+            assert.equal(furniture.some((f) => within(f, p)), false, `${label}: no furniture at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+          }
+        }
+      }
+    }
+    assert.ok(routes > 600, `routes tried: ${routes}`);
+  });
+
+  it("starts from a desk in Visitors by the spine, and gives no route to a place or a seat that is not there", () => {
+    const lobby = building.rooms.find((r) => r.key === VISITORS_KEY)!;
+    const lobbySeat = allSeats.find((s) => seatPoint(building, s)?.x === lobby.desks[0]!.x && seatPoint(building, s)?.z === lobby.desks[0]!.z)!;
+    const route = placeRoute(building, { seat: lobbySeat, at: "seat" }, { room: "pantry", spot: 0 });
+    assert.ok(route.some((p) => p.x === 0 && p.z > 0), "down the spine");
+    assert.ok(route.some((p) => p.z === CORRIDOR_Z), "along the corridor");
+    assert.deepEqual(placeRoute(building, { seat: 0, at: "seat" }, { room: "pantry", spot: 4 }), []);
+    assert.deepEqual(placeRoute(building, { seat: 0, at: "seat" }, { room: "engineering", spot: 0 }), []);
+    assert.deepEqual(placeRoute(building, { seat: 0, at: "seat" }, { room: "nowhere", spot: 0 }), []);
+    assert.deepEqual(placeRoute(building, { seat: 9999, at: "seat" }, { room: "pantry", spot: 0 }), []);
   });
 });
