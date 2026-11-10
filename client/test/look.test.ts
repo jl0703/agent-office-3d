@@ -93,14 +93,15 @@ describe("the grounds", () => {
 });
 
 describe("room floors", () => {
-  it("gives wood to the executives and the library, a neutral to the open plan, and the room's own colour to the rest", () => {
+  it("gives wood to the executives and the meeting room, tile to the pantry, a rug to the lounge, a neutral to the open plan, and the room's own colour to the rest", () => {
     assert.notEqual(floorTone("management", "light"), null);
-    assert.equal(floorTone("library", "light"), floorTone("management", "light"));
+    assert.equal(floorTone("meeting", "light"), floorTone("management", "light"));
+    assert.equal(new Set(["management", "pantry", "lounge", "visitors"].map((k) => floorTone(k as never, "light"))).size, 4, "each kind of shared room has its own floor");
     assert.notEqual(floorTone("visitors", "light"), floorTone("management", "light"));
     for (const kind of ["engineering", "qa", "design", "product", "operations", "general"] as const) assert.equal(floorTone(kind, "light"), null, kind);
   });
 
   it("has a different tone in the dark scheme", () => {
-    for (const kind of ["management", "library", "visitors"] as const) assert.notEqual(floorTone(kind, "dark"), floorTone(kind, "light"), kind);
+    for (const kind of ["management", "meeting", "pantry", "lounge", "visitors"] as const) assert.notEqual(floorTone(kind, "dark"), floorTone(kind, "light"), kind);
   });
 });

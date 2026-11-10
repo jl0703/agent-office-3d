@@ -14,11 +14,10 @@ import {
 } from "three";
 import type { Agent, AgentStatus } from "../../../shared/events.ts";
 import { createStory, type StoryFrame, type Walker } from "./story.ts";
-import { graphLayout, MAX_GRAPH_NODES, type Vault } from "../vault.ts";
 import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
-import { BUILDING_RECT, LIBRARY_KEY, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
-import { BENCH_LIMIT, BUSH_LIMIT, TREE_LIMIT, floorTone, furnitureOf, groundsOf, hubCentre, HUB_SCALE, isTall, viewSideOf, wallsOf, WALL_GLASS, WALL_TALL, type ViewSide } from "./buildingParts.ts";
+import { BUILDING_RECT, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
+import { BENCH_LIMIT, BUSH_LIMIT, TREE_LIMIT, floorTone, furnitureOf, groundsOf, isTall, viewSideOf, wallsOf, WALL_GLASS, WALL_TALL, type ViewSide } from "./buildingParts.ts";
 import { AVATAR_PARTS } from "../../../shared/avatar.ts";
 import { OUTFIT_TINTED } from "./geometry.ts";
 import { lookOfAgent, type Look } from "./look.ts";
@@ -27,10 +26,9 @@ import { blendPose, poseFor, type Pose } from "./poses.ts";
 import type { Selection } from "./selection.ts";
 
 const N = SEAT_COUNT;
-const HUB_RADIUS = 3.5;
-const ROOM_LIMIT = 9; // the Management office, the Library, six departments and Visitors
+const ROOM_LIMIT = 11; // the Management office, the Meeting room, the Pantry, the Lounge, six departments and Visitors
 const WALL_LIMIT = 96;
-const FURNITURE_LIMIT = 96;
+const FURNITURE_LIMIT = 128;
 const GROUNDS = groundsOf();
 const MIDDLE: Point = { x: (BUILDING_RECT.minX + BUILDING_RECT.maxX) / 2, z: (BUILDING_RECT.minZ + BUILDING_RECT.maxZ) / 2 };
 const ORIGIN: Point = { x: 0, z: 0 };
@@ -54,7 +52,7 @@ type World = {
   byId: Map<string, number>;
   first: boolean;
   /** Rooms of the building, in the order of their instances. */
-  rooms: { key: string }[];
+  rooms: { key: string; focusable: boolean }[];
   pulse: number[];
   /** For each status, the desk numbers drawn in that status's instanced mesh. */
   onScreen: Record<AgentStatus, number[]>;
@@ -106,17 +104,13 @@ export type OfficeProps = {
   layout: Layout;
   /** How each agent looks, by id; one that is missing gets the look its id gives. */
   looks: ReadonlyMap<string, Look>;
-  /** The connected vault, drawn as notes orbiting the hub; null when there is none. */
-  vault: Vault | null;
-  /** The hub's sign, positioned over the scene by the frame loop. */
-  hubRef: MutableRefObject<HTMLElement | null>;
   /** The room signs, positioned over the scene by the frame loop. */
   roomRefs: MutableRefObject<Map<string, HTMLElement>>;
   /** The speech bubbles: a few elements the frame loop fills in and places. */
   bubbleRefs: MutableRefObject<(HTMLElement | null)[]>;
 };
 
-export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, layout, looks, roomRefs, vault, hubRef, bubbleRefs }: OfficeProps) {
+export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, layout, looks, roomRefs, bubbleRefs }: OfficeProps) {
   const invalidate = useThree((s) => s.invalidate);
   const [assets, setAssets] = useState<Assets | null>(null);
   useEffect(() => {
@@ -137,7 +131,6 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
   const seatsRef = useRef<Point[]>([]);
   seatsRef.current = useMemo(() => Array.from({ length: N }, (_, i) => seatPoint(layout.building, i) ?? ORIGIN), [layout.building]);
   const deskPosition = (seat: number): Point => seatsRef.current[seat] ?? ORIGIN;
-  const hub = hubCentre(layout.building);
   const assignmentRef = useRef(assignment);
   assignmentRef.current = assignment;
   const agentsRef = useRef(agents);
@@ -259,7 +252,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       const dark = scheme === "dark";
       const settle = new Color(dark ? "#12161c" : "#f3eee2");
       const building = layoutRef.current.building;
-      w.rooms = building.rooms.map((r) => ({ key: r.key }));
+      w.rooms = building.rooms.map((r) => ({ key: r.key, focusable: r.desks.length > 0 }));
       building.rooms.forEach((room, i) => {
         const r = room.rect;
         const cx = (r.minX + r.maxX) / 2;
@@ -268,7 +261,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         set("roomFloors", i, compose(m1, cx, -0.15, cz, 0, 0, 0, r.maxX - r.minX, 0.3, r.maxZ - r.minZ));
         const tone = floorTone(room.kind, scheme);
         instanced("roomFloors")?.setColorAt(i, tone ? new Color(tone).lerp(hue, 0.12) : hue.clone().lerp(settle, dark ? 0.6 : 0.45));
-        const northRow = room.door.z === r.maxZ && room.kind !== "library" && room.kind !== "visitors"; // its back wall is the tall one at the north
+        const northRow = room.door.z === r.maxZ && (room.desks.length > 0 || room.kind === "meeting") && room.kind !== "visitors"; // its back wall is the tall one at the north
         set("roomBoards", i, northRow ? compose(m1, cx - 1.2, 1.75, r.minZ + 0.3, 0, 0, 0, 3.0, 1.1, 0.06) : ZERO);
         set("roomPlants", i, compose(m1, r.minX + 0.45, 0, r.maxZ - 0.5));
         set("roomLamps", i, compose(m1, r.maxX - 0.45, 0, r.maxZ - 0.5));
@@ -343,22 +336,6 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
     }
     invalidate();
   }, [assets, invalidate]);
-
-  // The vault's notes: small spheres and thin lines around the core, turned slowly as one group.
-  useLayoutEffect(() => {
-    if (!assets) return;
-    const nodes = instanced("graphNodes");
-    const layout = vault ? graphLayout(vault.nodes, vault.links) : { positions: [], sizes: [], lines: [] };
-    layout.sizes.forEach((size, i) => {
-      nodes?.setMatrixAt(i, compose(m1, layout.positions[i * 3] as number, layout.positions[i * 3 + 1] as number, layout.positions[i * 3 + 2] as number, 0, 0, 0, size, size, size));
-    });
-    if (nodes) {
-      nodes.count = layout.sizes.length;
-      nodes.instanceMatrix.needsUpdate = true;
-    }
-    setLines(meshes.current.graphLines as LineSegments | undefined, layout.lines);
-    invalidate();
-  }, [assets, vault, invalidate]);
 
   // ---- Follow the agents ----
   useLayoutEffect(() => {
@@ -674,20 +651,6 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         el.style.display = "none";
       }
     }
-    const hubRing = meshes.current.hubRing;
-    if (hubRing && !still) hubRing.rotation.y = t * 0.25;
-    const graph = meshes.current.graph;
-    if (graph && !still) graph.rotation.y = t * 0.12;
-    const sign = hubRef.current;
-    if (sign) {
-      pos.set(hubCentre(layoutRef.current.building).x, 3.3, hubCentre(layoutRef.current.building).z).project(camera);
-      if (pos.z < 1 && Math.abs(pos.x) < 1.3 && Math.abs(pos.y) < 1.3) {
-        sign.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
-        sign.style.display = "";
-      } else if (sign.style.display !== "none") {
-        sign.style.display = "none";
-      }
-    }
   });
 
   if (!assets) return null;
@@ -717,8 +680,8 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         frustumCulled={false}
         onClick={(e) => {
           const room = e.instanceId === undefined ? undefined : world.current.rooms[e.instanceId];
-          if (room && room.key !== LIBRARY_KEY) {
-            // The Library is the hub: it has its own sign and panel, and no list of sessions to filter.
+          if (room?.focusable) {
+            // The shared rooms hold no desks, so there is no list of sessions to filter to.
             e.stopPropagation();
             selection.focusRoom(selection.get().room === room.key ? null : room.key);
           }
@@ -732,19 +695,6 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       <instancedMesh ref={bind("roomLamps")} args={[geo.lamp, mat.vertex, ROOM_LIMIT]} frustumCulled={false} />
       <instancedMesh ref={bind("walkLegs")} args={[geo.walkLeg, mat.vertex, 8]} frustumCulled={false} />
 
-      {/* The knowledge hub stands in the middle of the Library. */}
-      <group position={[hub.x, 0, hub.z]} scale={HUB_SCALE}>
-        <mesh geometry={geo.dais} material={mat.dais} scale={[HUB_RADIUS, 0.3, HUB_RADIUS]} position={[0, -0.3, 0]} />
-        <mesh geometry={geo.core} material={mat.core} scale={0.9} position={[0, 1.7, 0]} />
-        <mesh ref={bind("hubRing")} geometry={geo.hubRing} material={mat.hubRing} position={[0, 1.7, 0]} />
-        <group ref={bind("graph")} position={[0, 1.7, 0]}>
-          <instancedMesh ref={bind("graphNodes")} args={[geo.node, mat.node, MAX_GRAPH_NODES]} frustumCulled={false} />
-          <lineSegments ref={bind("graphLines")} material={mat.graphLine} frustumCulled={false}>
-            <bufferGeometry />
-          </lineSegments>
-        </group>
-        <mesh geometry={geo.hubRingOuter} material={mat.hubRing} position={[0, 0.04, 0]} />
-      </group>
       <lineSegments ref={bind("outlines")} material={mat.outline}>
         <bufferGeometry />
       </lineSegments>

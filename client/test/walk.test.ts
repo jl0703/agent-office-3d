@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildingFor, ENTRANCE, MAX_DEPARTMENTS, SEAT_COUNT, seatPoint, VISITORS_KEY, type Building } from "../src/office/building.ts";
-import { DOOR_GAP, furnitureOf, hubCentre, HUB_SCALE, wallsOf, WALL_THICK, type Wall } from "../src/office/buildingParts.ts";
+import { DOOR_GAP, furnitureOf, wallsOf, WALL_THICK, type Wall } from "../src/office/buildingParts.ts";
 import { obstacles, pointAlong, routeLength, routeSeconds, seatSpot, visitSpot, walkRoute, WALK_SPEED, CORRIDOR_Z, type Point, type Rect } from "../src/office/walk.ts";
 import type { Person } from "../src/team.ts";
 
@@ -61,12 +61,18 @@ describe("the building: walls and furniture", () => {
     }
   });
 
-  it("stands the hub in the middle of the Library, small enough to fit", () => {
-    const lib = building.rooms.find((r) => r.kind === "library")!;
-    const c = hubCentre(building);
-    assert.deepEqual(c, { x: (lib.rect.minX + lib.rect.maxX) / 2, z: (lib.rect.minZ + lib.rect.maxZ) / 2 });
-    const radius = 3.5 * HUB_SCALE;
-    assert.ok(c.x - radius > lib.rect.minX && c.x + radius < lib.rect.maxX && c.z - radius > lib.rect.minZ && c.z + radius < lib.rect.maxZ);
+  it("furnishes the shared rooms: a long table and chairs, a counter with a fridge and stools, a sofa facing a TV", () => {
+    const furniture = (kind: string) => furnitureOf(building.rooms.find((r) => r.kind === kind)!);
+    const meeting = furniture("meeting");
+    assert.ok(meeting.some((f) => f.w >= 4 && f.h < 1), "a long table");
+    assert.ok(meeting.filter((f) => f.h >= 0.8 && f.w < 0.7 && f.d < 0.7).length >= 6, "six chairs");
+    const pantry = furniture("pantry");
+    assert.ok(pantry.some((f) => f.w >= 4), "a counter");
+    assert.ok(pantry.some((f) => f.h >= 1.8), "a fridge");
+    assert.ok(pantry.filter((f) => f.h > 0.6 && f.h < 0.8 && f.w < 0.6).length >= 4, "four stools");
+    const lounge = furniture("lounge");
+    assert.ok(lounge.some((f) => f.d >= 3 && f.h >= 0.9), "a sofa with a back");
+    assert.ok(lounge.some((f) => f.w <= 0.2 && f.d >= 2), "a TV");
   });
 });
 

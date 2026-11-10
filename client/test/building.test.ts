@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "../../shared/events.ts";
 import { BUILDING_RECT, CORRIDOR_RECT, SPINE_RECT, buildingFor, emptyPlacement, ENTRANCE, inside, kindOfDepartment, LOBBY_RECT, MAX_DEPARTMENTS, placeAgents, seatPoint, SEAT_COUNT, VISITORS_KEY, VISITOR_SEATS, MANAGEMENT_KEY, deptKey, type Building, type Placement } from "../src/office/building.ts";
-import { SEATS_PER_ROOM } from "../src/office/building.ts";
+import { SEATS_PER_ROOM, seatsOfRoom } from "../src/office/building.ts";
 import type { Person } from "../src/team.ts";
 
 let n = 0;
@@ -26,7 +26,7 @@ const allDepartments = (count: number) => Array.from({ length: count }, (_, i) =
 describe("the building: the floor plan", () => {
   it("fits every room inside the building without overlaps, with the doors on the room's edge and every desk inside its room", () => {
     const b = buildingFor(allDepartments(MAX_DEPARTMENTS));
-    assert.equal(b.rooms.length, 2 + MAX_DEPARTMENTS + 1, "management, library, six departments, visitors");
+    assert.equal(b.rooms.length, 4 + MAX_DEPARTMENTS + 1, "management, meeting room, pantry, lounge, six departments, visitors");
     for (const room of b.rooms) {
       assert.ok(room.rect.minX >= BUILDING_RECT.minX && room.rect.maxX <= BUILDING_RECT.maxX && room.rect.minZ >= BUILDING_RECT.minZ && room.rect.maxZ <= BUILDING_RECT.maxZ, `${room.key} is inside the building`);
       for (const d of room.desks) assert.ok(inside(room.rect, d), `${room.key}: a desk is inside its room`);
@@ -40,12 +40,27 @@ describe("the building: the floor plan", () => {
       assert.equal(room.door.z, room.rect.maxZ <= CORRIDOR_RECT.minZ + 1e-9 ? CORRIDOR_RECT.minZ : CORRIDOR_RECT.maxZ, `${room.key}: the door is on the corridor`);
       assert.ok(room.door.x > room.rect.minX && room.door.x < room.rect.maxX, `${room.key}: the door is within the room's width`);
     }
-    // The exact plan, so a slip in one number is seen: 35 wide, the corridor 3 deep between the rows, the spine 3 wide.
-    assert.deepEqual(round(BUILDING_RECT), { minX: -17.5, maxX: 17.5, minZ: -11.4, maxZ: 15.6 });
-    assert.deepEqual(round(CORRIDOR_RECT), { minX: -17.5, maxX: 17.5, minZ: -4.2, maxZ: -1.2 });
+    // The exact plan, so a slip in one number is seen: 43 wide (two rooms each side of the spine and a wing of one more), the corridor 3 deep between the rows, the spine 3 wide.
+    assert.deepEqual(round(BUILDING_RECT), { minX: -17.5, maxX: 25.5, minZ: -11.4, maxZ: 15.6 });
+    assert.deepEqual(round(CORRIDOR_RECT), { minX: -17.5, maxX: 25.5, minZ: -4.2, maxZ: -1.2 });
     assert.deepEqual(round(SPINE_RECT), { minX: -1.5, maxX: 1.5, minZ: -11.4, maxZ: 6 });
     assert.deepEqual(round(b.rooms.find((r) => r.slot === 1)!.rect), { minX: -9.5, maxX: -1.5, minZ: -1.2, maxZ: 6 });
     assert.equal(b.rooms.find((r) => r.key === VISITORS_KEY)?.desks.length, VISITOR_SEATS);
+  });
+
+  it("puts the Meeting room beside Management and the Pantry and the Lounge in the wing, none of them with a desk", () => {
+    const b = buildingFor([]);
+    const rect = (key: string) => round(b.rooms.find((r) => r.key === key)!.rect);
+    assert.deepEqual(rect("meeting"), { minX: -9.5, maxX: -1.5, minZ: -11.4, maxZ: -4.2 });
+    assert.deepEqual(rect("pantry"), { minX: 17.5, maxX: 25.5, minZ: -11.4, maxZ: -4.2 });
+    assert.deepEqual(rect("lounge"), { minX: 17.5, maxX: 25.5, minZ: -1.2, maxZ: 6 });
+    for (const key of ["meeting", "pantry", "lounge"]) {
+      const room = b.rooms.find((r) => r.key === key)!;
+      assert.equal(room.desks.length, 0, `${key} holds no desks`);
+      assert.equal(seatsOfRoom(b, key).length, 0);
+    }
+    assert.equal(b.rooms.some((r) => r.key === "library"), false, "the Library is gone");
+    assert.ok(buildingFor(allDepartments(MAX_DEPARTMENTS)).rooms.filter((r) => r.desks.length === 0).length === 3, "the same three shared rooms however many departments");
   });
 
   it("numbers the desks without gaps or repeats, and finds each desk's place from its number", () => {

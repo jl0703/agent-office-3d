@@ -267,17 +267,6 @@ export const bushGeometry = (scheme: Scheme): BufferGeometry =>
 export const benchGeometry = (): BufferGeometry =>
   merge([box(1.6, 0.08, 0.5, 0, 0.45, 0, "#9a7448"), box(1.6, 0.4, 0.07, 0, 0.7, -0.22, "#9a7448"), box(0.08, 0.45, 0.45, -0.7, 0.22, 0, "#2f3640"), box(0.08, 0.45, 0.45, 0.7, 0.22, 0, "#2f3640")]);
 
-/** A bookshelf against a wall, facing +z, 1.8 m wide. */
-export function shelfGeometry(): BufferGeometry {
-  const parts: Part[] = [box(1.8, 1.7, 0.4, 0, 0.85, 0, "#8C6B4A")];
-  const books = ["#C8553D", "#2E86AB", "#D9A21B", "#8E6BAE", "#4C9A6A", "#D17A9E"];
-  for (let row = 0; row < 3; row++) {
-    parts.push(box(1.64, 0.04, 0.38, 0, 0.3 + row * 0.55, 0.02, "#6E5238"));
-    for (let i = 0; i < 6; i++) parts.push(box(0.2, 0.36, 0.28, -0.7 + i * 0.28, 0.5 + row * 0.55, 0.06, books[(i + row) % books.length] as string));
-  }
-  return merge(parts);
-}
-
 /** A standing lamp with a warm shade. */
 export function lampGeometry(): BufferGeometry {
   return merge([
@@ -289,8 +278,3 @@ export function lampGeometry(): BufferGeometry {
 
 /** One leg of a standing figure, hanging from the hip (the pivot is at the top). */
 export const walkLegGeometry = () => merge([{ geometry: place(new CapsuleGeometry(0.08, 0.55, 2, 6), 0, -0.36, 0), color: "#4A5568" }]);
-
-/** The hub: a low round dais. */
-export const daisGeometry = () => place(new CylinderGeometry(1, 1.06, 1, 48), 0, 0.5, 0);
-export const coreGeometry = () => new SphereGeometry(1, 16, 12);
-export const torusGeometry = (r: number, tube: number) => place(new TorusGeometry(r, tube, 6, 64), 0, 0, 0, Math.PI / 2);

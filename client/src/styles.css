@@ -1004,8 +1004,8 @@ textarea {
   margin-top: 0;
 }
 
-.hub-sign .room-meta {
-  color: var(--color-accent);
+.room-label {
+  pointer-events: none;
 }
 
 .note-list {
