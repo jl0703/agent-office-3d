@@ -17,8 +17,6 @@ import { useSelection, type Selection } from "./selection.ts";
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const POLAR_MIN = rad(25);
 const POLAR_MAX = rad(70);
-const AZIMUTH_MIN = CAMERA_AZIMUTH - rad(60);
-const AZIMUTH_MAX = CAMERA_AZIMUTH + rad(60);
 
 type RigApi = { reset(): void; orbit(dTheta: number, dPhi: number): void; zoom(factor: number): void };
 
@@ -74,7 +72,7 @@ function CameraRig({ view, limit, focusKey, reduced, api }: { view: Bounds; limi
       const c = controls.current;
       if (!c) return;
       const g = goal.current;
-      const spherical = new Spherical(Math.min(g.fit * 1.5, Math.max(g.fit * 0.5, radius)), clampPolar(phi), Math.min(AZIMUTH_MAX, Math.max(AZIMUTH_MIN, theta)));
+      const spherical = new Spherical(Math.min(g.fit * 1.5, Math.max(g.fit * 0.5, radius)), clampPolar(phi), theta);
       camera.position.copy(c.target).add(new Vector3().setFromSpherical(spherical));
       c.update();
       g.userMoved = true;
@@ -132,8 +130,6 @@ function CameraRig({ view, limit, focusKey, reduced, api }: { view: Bounds; limi
       dampingFactor={0.12}
       minPolarAngle={POLAR_MIN}
       maxPolarAngle={POLAR_MAX}
-      minAzimuthAngle={AZIMUTH_MIN}
-      maxAzimuthAngle={AZIMUTH_MAX}
       onStart={() => {
         goal.current.userMoved = true;
         goal.current.animating = false;

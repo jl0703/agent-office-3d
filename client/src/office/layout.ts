@@ -2,8 +2,8 @@
 import type { Bounds } from "./building.ts";
 
 export const CAMERA_FOV_DEG = 35;
-export const CAMERA_ELEVATION = (50 * Math.PI) / 180;
-export const CAMERA_AZIMUTH = (25 * Math.PI) / 180;
+export const CAMERA_ELEVATION = (45 * Math.PI) / 180;
+export const CAMERA_AZIMUTH = (38 * Math.PI) / 180;
 const FILL = 0.94; // the area should fill about 78% of the view: the near edge looks bigger in perspective
 
 /** Camera distance and the point it looks at, so the given area fills about 78% of the view. */

@@ -18,7 +18,7 @@ import { graphLayout, MAX_GRAPH_NODES, type Vault } from "../vault.ts";
 import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
 import { BUILDING_RECT, LIBRARY_KEY, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
-import { furnitureOf, hubCentre, HUB_SCALE, wallsOf, WALL_GLASS, WALL_TALL } from "./buildingParts.ts";
+import { BENCH_LIMIT, BUSH_LIMIT, TREE_LIMIT, floorTone, furnitureOf, groundsOf, hubCentre, HUB_SCALE, isTall, viewSideOf, wallsOf, WALL_GLASS, WALL_TALL, type ViewSide } from "./buildingParts.ts";
 import { ACCESSORIES, CHARACTER_COLORS, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, characterStyle, type Accessory, type Scheme } from "./palette.ts";
 import { blendPose, poseFor, type Pose } from "./poses.ts";
 import type { Selection } from "./selection.ts";
@@ -28,6 +28,8 @@ const HUB_RADIUS = 3.5;
 const ROOM_LIMIT = 9; // the Management office, the Library, six departments and Visitors
 const WALL_LIMIT = 96;
 const FURNITURE_LIMIT = 96;
+const GROUNDS = groundsOf();
+const MIDDLE: Point = { x: (BUILDING_RECT.minX + BUILDING_RECT.maxX) / 2, z: (BUILDING_RECT.minZ + BUILDING_RECT.maxZ) / 2 };
 const ORIGIN: Point = { x: 0, z: 0 };
 const NAMED: readonly Exclude<Accessory, "none">[] = ACCESSORIES.filter((a): a is Exclude<Accessory, "none"> => a !== "none");
 
@@ -132,6 +134,32 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
 
   const instanced = (name: string) => meshes.current[name] as InstancedMesh | null | undefined;
 
+  // The walls on the far side of each room stand tall and those on the camera's side are low glass, so they follow the view.
+  const wallSide = useRef<ViewSide>({ x: 1, z: 1 });
+  const placeWalls = useCallback(() => {
+    const tallMesh = instanced("wallsTall");
+    const glassMesh = instanced("wallsGlass");
+    const tone = new Color(scheme === "dark" ? "#3a4250" : "#d9d2c3");
+    let tall = 0;
+    let glass = 0;
+    for (const wall of wallsOf(layoutRef.current.building)) {
+      const up = isTall(wall, wallSide.current);
+      const i = up ? tall++ : glass++;
+      if (i >= WALL_LIMIT) continue;
+      const h = up ? WALL_TALL : WALL_GLASS;
+      (up ? tallMesh : glassMesh)?.setMatrixAt(i, compose(m1, wall.x, h / 2, wall.z, 0, 0, 0, wall.w, h, wall.d));
+      if (up) tallMesh?.setColorAt(i, tone);
+    }
+    for (const [mesh, n] of [[tallMesh, tall], [glassMesh, glass]] as const) {
+      if (!mesh) continue;
+      mesh.count = Math.min(n, WALL_LIMIT);
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    // Lets the browser tests see the walls change over as the view turns.
+    document.documentElement.dataset["walls"] = `${tall}/${glass}`;
+  }, [scheme]);
+
   // ---- Static part: everything that only changes when agents arrive, leave, or change status ----
   const rebuild = useCallback(
     () => {
@@ -218,24 +246,14 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         const cz = (r.minZ + r.maxZ) / 2;
         const hue = new Color(ROOM_COLORS[room.color % ROOM_COLORS.length] as string);
         set("roomFloors", i, compose(m1, cx, -0.15, cz, 0, 0, 0, r.maxX - r.minX, 0.3, r.maxZ - r.minZ));
-        instanced("roomFloors")?.setColorAt(i, hue.clone().lerp(settle, dark ? 0.6 : 0.45));
+        const tone = floorTone(room.kind, scheme);
+        instanced("roomFloors")?.setColorAt(i, tone ? new Color(tone).lerp(hue, 0.12) : hue.clone().lerp(settle, dark ? 0.6 : 0.45));
         const northRow = room.door.z === r.maxZ && room.kind !== "library" && room.kind !== "visitors"; // its back wall is the tall one at the north
         set("roomBoards", i, northRow ? compose(m1, cx - 1.2, 1.75, r.minZ + 0.3, 0, 0, 0, 3.0, 1.1, 0.06) : ZERO);
         set("roomPlants", i, compose(m1, r.minX + 0.45, 0, r.maxZ - 0.5));
         set("roomLamps", i, compose(m1, r.maxX - 0.45, 0, r.maxZ - 0.5));
       });
-      let tall = 0;
-      let glass = 0;
-      const wallTone = new Color(dark ? "#3a4250" : "#d9d2c3");
-      for (const wall of wallsOf(building)) {
-        const isTall = wall.kind === "tall";
-        const i = isTall ? tall++ : glass++;
-        if (i >= WALL_LIMIT) continue;
-        const h = isTall ? WALL_TALL : WALL_GLASS;
-        const name = isTall ? "wallsTall" : "wallsGlass";
-        set(name, i, compose(m1, wall.x, h / 2, wall.z, 0, 0, 0, wall.w, h, wall.d));
-        if (isTall) instanced(name)?.setColorAt(i, wallTone);
-      }
+      placeWalls();
       let pieces = 0;
       for (const room of building.rooms) {
         for (const f of furnitureOf(room)) {
@@ -250,7 +268,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
         const mesh = instanced(name);
         if (mesh) mesh.boundingSphere = null;
       }
-      for (const [name, count] of [["roomFloors", w.rooms.length], ["roomBoards", w.rooms.length], ["roomPlants", w.rooms.length], ["roomLamps", w.rooms.length], ["wallsTall", Math.min(tall, WALL_LIMIT)], ["wallsGlass", Math.min(glass, WALL_LIMIT)], ["furniture", pieces]] as const) {
+      for (const [name, count] of [["roomFloors", w.rooms.length], ["roomBoards", w.rooms.length], ["roomPlants", w.rooms.length], ["roomLamps", w.rooms.length], ["furniture", pieces]] as const) {
         const mesh = instanced(name);
         if (!mesh) continue;
         mesh.count = count;
@@ -283,8 +301,27 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
       setLines(meshes.current.cables as LineSegments | undefined, cables);
       setLines(meshes.current.cablesHot as LineSegments | undefined, hot);
     },
-    [scheme, selection],
+    [scheme, selection, placeWalls],
   );
+
+  // The lawn's trees, bushes and benches: the same every time, placed once.
+  useLayoutEffect(() => {
+    if (!assets) return;
+    const put = (name: string, i: number, x: number, z: number, turn: number, size: number) => instanced(name)?.setMatrixAt(i, compose(m1, x, -0.05, z, 0, turn, 0, size, size, size));
+    GROUNDS.trees.forEach((t, i) => {
+      put("trees", i, t.x, t.z, i * 2.4, t.scale);
+      instanced("treeShadows")?.setMatrixAt(i, compose(m1, t.x + 0.3, -0.03, t.z + 0.3, 0, 0, 0, 3.4 * t.scale, 1, 3.4 * t.scale));
+    });
+    GROUNDS.bushes.forEach((b, i) => put("bushes", i, b.x, b.z, i * 1.3, 0.9 + (i % 3) * 0.2));
+    GROUNDS.benches.forEach((b, i) => put("benches", i, b.x, b.z, i === 0 ? Math.PI / 2 : -Math.PI / 2, 1));
+    for (const [name, n] of [["trees", GROUNDS.trees.length], ["treeShadows", GROUNDS.trees.length], ["bushes", GROUNDS.bushes.length], ["benches", GROUNDS.benches.length]] as const) {
+      const mesh = instanced(name);
+      if (!mesh) continue;
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    invalidate();
+  }, [assets, invalidate]);
 
   // The vault's notes: small spheres and thin lines around the core, turned slowly as one group.
   useLayoutEffect(() => {
@@ -377,6 +414,11 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
     const dt = Math.min(delta, 0.1);
     const still = reduced || frozen;
     const c = SCENE[scheme];
+    const side = viewSideOf(state.camera.position, MIDDLE);
+    if (side.x !== wallSide.current.x || side.z !== wallSide.current.z) {
+      wallSide.current = side;
+      placeWalls();
+    }
     const torsos = instanced("torsos");
     const heads = instanced("heads");
     const armsL = instanced("armsL");
@@ -610,7 +652,6 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
 
   if (!assets) return null;
   const { geo, mat } = assets;
-  const c = SCENE[scheme];
 
   const hit = (e: { stopPropagation(): void; instanceId?: number }) => {
     const d = e.instanceId;
@@ -619,8 +660,15 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
 
   return (
     <group>
-      <hemisphereLight args={["#ffffff", c.floor, 1.1]} />
-      <directionalLight position={[6, 12, 8]} intensity={1.4} />
+      <hemisphereLight args={[scheme === "light" ? "#eef5ff" : "#9fb4d6", scheme === "light" ? "#b9a98a" : "#2a323d", scheme === "light" ? 1.1 : 0.9]} />
+      <directionalLight color={scheme === "light" ? "#fff0d2" : "#b8c8ff"} position={[-8, 14, 10]} intensity={scheme === "light" ? 1.5 : 1.1} />
+
+      <mesh position={[(GROUNDS.lawn.minX + GROUNDS.lawn.maxX) / 2, -0.2, (GROUNDS.lawn.minZ + GROUNDS.lawn.maxZ) / 2]} scale={[GROUNDS.lawn.maxX - GROUNDS.lawn.minX, 0.3, GROUNDS.lawn.maxZ - GROUNDS.lawn.minZ]} geometry={geo.box} material={mat.lawn} />
+      <mesh position={[(GROUNDS.path.minX + GROUNDS.path.maxX) / 2, -0.05, (GROUNDS.path.minZ + GROUNDS.path.maxZ) / 2]} scale={[GROUNDS.path.maxX - GROUNDS.path.minX, 0.04, GROUNDS.path.maxZ - GROUNDS.path.minZ]} geometry={geo.box} material={mat.path} />
+      <instancedMesh ref={bind("treeShadows")} args={[geo.shadow, mat.shadow, TREE_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("trees")} args={[geo.tree, mat.vertex, TREE_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("bushes")} args={[geo.bush, mat.vertex, BUSH_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("benches")} args={[geo.bench, mat.vertex, BENCH_LIMIT]} frustumCulled={false} />
 
       <mesh position={[(BUILDING_RECT.minX + BUILDING_RECT.maxX) / 2, -0.17, (BUILDING_RECT.minZ + BUILDING_RECT.maxZ) / 2]} scale={[BUILDING_RECT.maxX - BUILDING_RECT.minX + 0.6, 0.3, BUILDING_RECT.maxZ - BUILDING_RECT.minZ + 0.6]} geometry={geo.box} material={mat.ground} />
       <instancedMesh

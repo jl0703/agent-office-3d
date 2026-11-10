@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|research|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|needs|panel|filter|research|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|needs|panel|filter|research|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|needs|panel|filter|research|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -703,6 +703,34 @@ try {
         await close();
       }
     }
+  }
+
+  if (run("turn")) {
+    // The view turns all the way round; walls change over as it does, so the drawing cost stays about the same and nothing goes wrong.
+    const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+    const server = await login(page);
+    await demo(page, server.base);
+    const calls = () => page.evaluate<number>(`window.__office?.calls ?? 0`);
+    const before = await calls();
+    const walls = () => page.evaluate<string>(`document.documentElement.dataset.walls ?? ""`);
+    const seen = new Set<string>([await walls()]);
+    await page.evaluate(`document.querySelector(".office-stage").focus()`);
+    for (let quarter = 1; quarter <= 4; quarter++) {
+      for (let i = 0; i < 16; i++) await page.key("ArrowRight", { code: "ArrowRight", keyCode: 39 });
+      await page.wait(900);
+      await page.screenshot(join(out, `turn-${quarter}.png`));
+      const now = await calls();
+      seen.add(await walls());
+      expect(now > 20 && now <= 66, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
+    }
+    const totals = new Set([...seen].map((w) => w.split("/").reduce((a, n) => a + Number(n), 0)));
+    expect(seen.size >= 2 && totals.size === 1 && !seen.has(""), `turn: the tall and low walls change over as the view turns, the total stays the same (${[...seen].join(" | ")})`);
+    await page.key("0", { code: "Digit0", keyCode: 48 });
+    await page.wait(900);
+    await page.screenshot(join(out, "turn-reset.png"));
+    console.log(`turn: draws ${before} -> ${await calls()} problems=${JSON.stringify(page.problems().filter((x) => !x.includes("THREE.Clock") && !x.includes("api/research")))}`);
+    expect(page.problems().filter((x) => !x.includes("THREE.Clock") && !x.includes("api/research")).length === 0, "turn: nothing logged while turning");
+    await close();
   }
 
   if (run("keys")) {
