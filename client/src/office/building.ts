@@ -36,12 +36,13 @@ export type RoomKind = "management" | "library" | "engineering" | "qa" | "design
 /** What a department's room looks like, from its name. A name that matches none gets the plain General look. */
 export function kindOfDepartment(name: string): RoomKind {
   const n = name.toLowerCase();
-  if (/(manage|executive|leadership|director|management)/.test(n)) return "management";
-  if (/(qa|quality|test)/.test(n)) return "qa";
-  if (/(engineer|develop|software|backend|frontend|platform|code)/.test(n)) return "engineering";
-  if (/(design|ux|ui\b|creative)/.test(n)) return "design";
-  if (/(product|pm\b|roadmap)/.test(n)) return "product";
-  if (/(operat|support|devops|infra|ops\b|help)/.test(n)) return "operations";
+  // The Management office is for a department with exactly such a name: "Product Management" is a product team, not the executives.
+  if (/^(management|executive|executives|leadership|directors?)$/.test(n.trim())) return "management";
+  if (/\b(qa|quality|test)/.test(n)) return "qa";
+  if (/\b(engineer|develop|software|backend|frontend|platform|code)/.test(n)) return "engineering";
+  if (/\b(design|ux|ui|creative)/.test(n)) return "design";
+  if (/\b(product|pm|roadmap)/.test(n)) return "product";
+  if (/\b(operat|support|devops|infra|ops|help)/.test(n)) return "operations";
   return "general";
 }
 
@@ -99,7 +100,7 @@ export const ENTRANCE: Point = { x: 0, z: LOBBY.maxZ };
 export const MANAGEMENT_KEY = "management";
 export const LIBRARY_KEY = "library";
 export const VISITORS_KEY = "visitors";
-export const deptKey = (name: string) => `dept:${name.trim().toLowerCase()}`;
+export const deptKey = (name: string) => `dept:${name.trim().toLowerCase().replace(/\s+/g, " ")}`;
 
 /** Seat numbers: the Management office first, then the six department places, then the Visitors area. */
 export const MANAGEMENT_SEATS = SEATS_PER_ROOM;
@@ -122,7 +123,8 @@ export function buildingFor(team: readonly Person[], previous: ReadonlyMap<strin
   const names = new Map<string, string>(); // key to the name as first written
   for (const p of team) {
     const name = p.department?.trim();
-    if (!name || kindOfDepartment(name) === "management") continue;
+    // The person at the top sits in the Management office whatever their department says, so it does not make a room.
+    if (!name || p.reportsTo === null || kindOfDepartment(name) === "management") continue;
     if (!names.has(deptKey(name))) names.set(deptKey(name), name);
   }
   const slotOf = new Map<string, number>();
@@ -188,8 +190,8 @@ function wantedRoom(agent: Agent, team: readonly Person[], building: Building): 
 
 /**
  * Gives every agent a room and a desk, keeping the place of those already seated while it is still right, so nothing moves when
- * others come and go. A subagent joins its parent's room when a desk is free. A lead (a person someone reports to) takes the
- * first desk of a room it enters. A full room sends the agent to Visitors; a full Visitors area leaves it unseated.
+ * others come and go. A subagent joins its parent's room when a desk is free. A lead (a person someone reports to) is placed before the
+ * others of a room, so it gets the first desk while that is free. A full room sends the agent to Visitors; a full Visitors area leaves it unseated.
  */
 export function placeAgents(building: Building, previous: Placement, agents: readonly Agent[], team: readonly Person[]): Placement {
   const roomOf = new Map<string, string>();
@@ -230,7 +232,13 @@ export function placeAgents(building: Building, previous: Placement, agents: rea
     const role = roleOf(a, team);
     return role !== null && team.some((p) => p.reportsTo === role.person.id);
   };
-  newcomers.sort((a, b) => Number(a.parentId !== null) - Number(b.parentId !== null) || Number(isLead(b)) - Number(isLead(a)) || a.project.localeCompare(b.project) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  const depth = (a: Agent): number => {
+    let d = 0;
+    for (let at: Agent | undefined = a; at?.parentId != null && d < 20; d++) at = byId.get(at.parentId);
+    return d;
+  };
+  newcomers.sort((a, b) => depth(a) - depth(b) || Number(isLead(b)) - Number(isLead(a)) || a.project.localeCompare(b.project) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 
   let unseated = 0;
   for (const agent of newcomers) {

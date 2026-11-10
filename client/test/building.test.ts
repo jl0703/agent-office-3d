@@ -1,23 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "../../shared/events.ts";
-import { BUILDING_RECT, buildingFor, emptyPlacement, ENTRANCE, inside, kindOfDepartment, LOBBY_RECT, MAX_DEPARTMENTS, placeAgents, seatPoint, SEAT_COUNT, VISITORS_KEY, VISITOR_SEATS, MANAGEMENT_KEY, deptKey, type Building, type Placement } from "../src/office/building.ts";
+import { BUILDING_RECT, CORRIDOR_RECT, SPINE_RECT, buildingFor, emptyPlacement, ENTRANCE, inside, kindOfDepartment, LOBBY_RECT, MAX_DEPARTMENTS, placeAgents, seatPoint, SEAT_COUNT, VISITORS_KEY, VISITOR_SEATS, MANAGEMENT_KEY, deptKey, type Building, type Placement } from "../src/office/building.ts";
 import { SEATS_PER_ROOM } from "../src/office/rooms.ts";
 import type { Person } from "../src/team.ts";
 
 let n = 0;
 const id12 = (i: number) => i.toString(16).padStart(12, "0");
-const person = (name: string, department: string | undefined, reportsTo: string | null = null): Person => ({ id: id12(++n), name, role: "Role", brief: "", reportsTo, ...(department ? { department } : {}) });
+const SOMEONE = id12(0xfff); // anyone but the top of the team
+const person = (name: string, department: string | undefined, reportsTo: string | null = SOMEONE): Person => ({ id: id12(++n), name, role: "Role", brief: "", reportsTo, ...(department ? { department } : {}) });
 const agent = (name: string, over: Partial<Agent> = {}): Agent => ({ id: `a-${name}`, kind: "session", origin: "managed", role: "worker", parentId: null, name, project: "web", status: "working", currentTask: null, tool: null, activity: null, desk: 0, updatedAt: "2026-11-10T00:00:00Z", note: null, ...over });
 const asPerson = (p: Person, name = p.name) => agent(name, { personId: p.id });
 
-const ceo = person("Alex", "Management");
-const lead = person("Sam", "Engineering", ceo.id);
+const ceo = person("Alex", "Management", null);
+const lead = person("Zed", "Engineering", ceo.id);
 const dev1 = person("Riley", "Engineering", lead.id);
 const dev2 = person("Casey", "Engineering", lead.id);
 const qa = person("Morgan", "Quality", lead.id);
 const team = [ceo, lead, dev1, dev2, qa];
 
+const round = (r: Record<string, number>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, Math.round(v * 1000) / 1000]));
 const overlap = (a: { minX: number; maxX: number; minZ: number; maxZ: number }, b: typeof a) => a.minX < b.maxX - 1e-9 && b.minX < a.maxX - 1e-9 && a.minZ < b.maxZ - 1e-9 && b.minZ < a.maxZ - 1e-9;
 const allDepartments = (count: number) => Array.from({ length: count }, (_, i) => person(`P${i}`, `Dept ${i}`));
 
@@ -33,6 +35,16 @@ describe("the building: the floor plan", () => {
     }
     for (let i = 0; i < b.rooms.length; i++) for (let j = i + 1; j < b.rooms.length; j++) assert.equal(overlap(b.rooms[i]!.rect, b.rooms[j]!.rect), false, `${b.rooms[i]!.key} and ${b.rooms[j]!.key} do not overlap`);
     assert.deepEqual(ENTRANCE, { x: 0, z: BUILDING_RECT.maxZ }, "the entrance is in the middle of the near wall");
+    // The doors open onto the corridor: a room north of it by its near edge, a room south of it by its far edge.
+    for (const room of b.rooms.filter((r) => r.kind !== "visitors")) {
+      assert.equal(room.door.z, room.rect.maxZ <= CORRIDOR_RECT.minZ + 1e-9 ? CORRIDOR_RECT.minZ : CORRIDOR_RECT.maxZ, `${room.key}: the door is on the corridor`);
+      assert.ok(room.door.x > room.rect.minX && room.door.x < room.rect.maxX, `${room.key}: the door is within the room's width`);
+    }
+    // The exact plan, so a slip in one number is seen: 35 wide, the corridor 3 deep between the rows, the spine 3 wide.
+    assert.deepEqual(round(BUILDING_RECT), { minX: -17.5, maxX: 17.5, minZ: -11.4, maxZ: 15.6 });
+    assert.deepEqual(round(CORRIDOR_RECT), { minX: -17.5, maxX: 17.5, minZ: -4.2, maxZ: -1.2 });
+    assert.deepEqual(round(SPINE_RECT), { minX: -1.5, maxX: 1.5, minZ: -11.4, maxZ: 6 });
+    assert.deepEqual(round(b.rooms.find((r) => r.slot === 1)!.rect), { minX: -9.5, maxX: -1.5, minZ: -1.2, maxZ: 6 });
     assert.equal(b.rooms.find((r) => r.key === VISITORS_KEY)?.desks.length, VISITOR_SEATS);
   });
 
@@ -59,6 +71,9 @@ describe("the building: departments and their rooms", () => {
   it("picks a room's look from the department's name", () => {
     const table: [string, string][] = [["Engineering", "engineering"], ["Software Development", "engineering"], ["QA", "qa"], ["Quality Assurance", "qa"], ["Testing", "qa"], ["Design", "design"], ["UX", "design"], ["Product", "product"], ["Operations", "operations"], ["Customer Support", "operations"], ["Management", "management"], ["Executive", "management"], ["Marketing", "general"], ["", "general"]];
     for (const [name, kind] of table) assert.equal(kindOfDepartment(name), kind, name);
+    // Only a whole name means the executives; words that merely contain a keyword do not.
+    const notWhatTheyLookLike: [string, string][] = [["Product Management", "product"], ["Project Management", "general"], ["Account Management", "general"], ["Directory", "general"], ["Latest", "general"], ["Luxury", "general"], ["Barcode", "general"], ["Software Testing", "qa"]];
+    for (const [name, kind] of notWhatTheyLookLike) assert.equal(kindOfDepartment(name), kind, name);
   });
 
   it("gives each department a place in order, keeps a place while the department exists, and refills a freed place", () => {
@@ -79,9 +94,12 @@ describe("the building: departments and their rooms", () => {
     const b = buildingFor(allDepartments(8));
     assert.equal(b.slotOf.size, MAX_DEPARTMENTS);
     assert.equal(b.slotOf.has(deptKey("Dept 6")), false, "the seventh has no room");
-    const same = buildingFor([person("A", "Engineering"), person("B", " engineering "), person("C", "Leadership")]);
-    assert.equal(same.rooms.filter((r) => r.slot !== undefined).length, 1, "spelling and case do not make two rooms");
+    const same = buildingFor([person("A", "Engineering", ceo.id), person("B", " engineering ", ceo.id), person("C", "Leadership", ceo.id), person("D", "Quality  Assurance", ceo.id), person("E", "quality assurance", ceo.id)]);
+    assert.equal(same.rooms.filter((r) => r.slot !== undefined).length, 2, "Engineering, and Quality Assurance however its spaces are typed");
+
     assert.equal(same.rooms.find((r) => r.slot !== undefined)?.name, "Engineering");
+    const alone = buildingFor([person("Chief", "Operations", null)]);
+    assert.equal(alone.rooms.some((r) => r.slot !== undefined), false, "the person at the top does not make a room of their department");
     assert.equal(same.rooms.some((r) => r.name === "Leadership"), false, "Leadership shares the Management office");
   });
 });
@@ -108,7 +126,16 @@ describe("the building: who sits where", () => {
     assert.equal(p.roomOf.get("a-Zed"), VISITORS_KEY, "no sixth-and-seventh room");
     const q = place([asPerson(dev1), asPerson(dev2), asPerson(lead)]);
     const base = Math.min(...[...q.seat.values()]);
-    assert.equal(q.seat.get("a-Sam"), base, "the lead has the first desk although listed last");
+    assert.equal(q.seat.get("a-Zed"), base, "the lead has the first desk although listed and named last");
+  });
+
+  it("seats a subagent's own subagents in the same room, wherever they come in the list", () => {
+    const parent = asPerson(dev1);
+    const child = agent("child", { parentId: parent.id });
+    const grandchild = agent("grandchild", { parentId: child.id });
+    const p = place([grandchild, child, parent]);
+    assert.equal(p.roomOf.get("a-grandchild"), p.roomOf.get(parent.id));
+    assert.equal(p.roomOf.get("a-child"), p.roomOf.get(parent.id));
   });
 
   it("lets a subagent join its parent's room, and falls back to the next room when one is full", () => {
