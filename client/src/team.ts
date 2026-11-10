@@ -2,8 +2,9 @@
 import { isAvatar, type Avatar } from "../../shared/avatar.ts";
 import { defaultAvatar } from "./avatar.ts";
 
-export type Person = { id: string; name: string; role: string; brief: string; reportsTo: string | null; /** Their picture; a person saved before pictures existed has none and gets a default from their id. */ avatar?: Avatar };
-export type PersonFields = Omit<Person, "id">;
+export type Person = { id: string; name: string; role: string; brief: string; reportsTo: string | null; /** The department the person works in (their room in the office), or none. */ department?: string; /** Their picture; a person saved before pictures existed has none and gets a default from their id. */ avatar?: Avatar };
+/** What the form edits: a department of null takes the person's department away. */
+export type PersonFields = Omit<Person, "id" | "department"> & { department?: string | null };
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 export type TeamResult = { ok: true; people: Person[] } | { ok: false; message: string };
@@ -15,7 +16,8 @@ export function toPerson(raw: unknown): Person | null {
   const { id, name, role, brief, reportsTo } = raw;
   if (typeof id !== "string" || typeof name !== "string" || typeof role !== "string" || typeof brief !== "string") return null;
   if (reportsTo !== null && typeof reportsTo !== "string") return null;
-  return { id, name, role, brief, reportsTo, ...(isAvatar(raw["avatar"]) ? { avatar: raw["avatar"] } : {}) };
+  const department = typeof raw["department"] === "string" && raw["department"] !== "" ? raw["department"] : undefined;
+  return { id, name, role, brief, reportsTo, ...(department ? { department } : {}), ...(isAvatar(raw["avatar"]) ? { avatar: raw["avatar"] } : {}) };
 }
 
 /** The picture to show for a person: their own, or the default made from their id. */
@@ -126,11 +128,11 @@ export function roleOf(agent: { personId?: string }, people: readonly Person[]):
 export function demoTeam(): Person[] {
   const id = (n: number) => n.toString(16).padStart(12, "0");
   return [
-    { id: id(1), name: "Alex", role: "CEO", brief: "Sets the direction.", reportsTo: null },
-    { id: id(2), name: "Sam", role: "Engineering Lead", brief: "Leads the developers.", reportsTo: id(1) },
-    { id: id(3), name: "Jordan", role: "QA Lead", brief: "Leads quality.", reportsTo: id(1) },
-    { id: id(4), name: "Riley", role: "Frontend Developer", brief: "Builds the interface.", reportsTo: id(2) },
-    { id: id(5), name: "Casey", role: "Backend Developer", brief: "Builds the server side.", reportsTo: id(2) },
-    { id: id(6), name: "Morgan", role: "QA Engineer", brief: "Tests the change.", reportsTo: id(3) },
+    { id: id(1), name: "Alex", role: "CEO", brief: "Sets the direction.", reportsTo: null, department: "Management" },
+    { id: id(2), name: "Sam", role: "Engineering Lead", brief: "Leads the developers.", reportsTo: id(1), department: "Engineering" },
+    { id: id(3), name: "Jordan", role: "QA Lead", brief: "Leads quality.", reportsTo: id(1), department: "Quality" },
+    { id: id(4), name: "Riley", role: "Frontend Developer", brief: "Builds the interface.", reportsTo: id(2), department: "Engineering" },
+    { id: id(5), name: "Casey", role: "Backend Developer", brief: "Builds the server side.", reportsTo: id(2), department: "Engineering" },
+    { id: id(6), name: "Morgan", role: "QA Engineer", brief: "Tests the change.", reportsTo: id(3), department: "Quality" },
   ];
 }

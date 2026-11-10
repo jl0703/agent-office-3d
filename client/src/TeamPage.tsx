@@ -8,7 +8,7 @@ import { addPerson, addStarterTeam, avatarOf, belowOf, demoTeam, getTeam, orgOf,
 type View = "cards" | "chart";
 type Dialog = { kind: "form"; editing: Person | null } | { kind: "remove"; person: Person } | { kind: "starter" } | null;
 
-const EMPTY: PersonFields = { name: "", role: "", brief: "", reportsTo: null };
+const EMPTY: PersonFields = { name: "", role: "", brief: "", reportsTo: null, department: null };
 
 /** The team, read when the page opens: undefined while loading, null when it cannot be read. */
 function useTeam(demo: boolean) {
@@ -28,7 +28,7 @@ function useTeam(demo: boolean) {
 
 function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person[]; editing: Person | null; demo: boolean; onDone: (people: Person[]) => void; onClose: () => void }) {
   const id = useId();
-  const [fields, setFields] = useState<PersonFields>(editing ? { name: editing.name, role: editing.role, brief: editing.brief, reportsTo: editing.reportsTo } : EMPTY);
+  const [fields, setFields] = useState<PersonFields>(editing ? { name: editing.name, role: editing.role, brief: editing.brief, reportsTo: editing.reportsTo, department: editing.department ?? null } : EMPTY);
   // A new person starts with a random look; someone being edited starts with the look they have.
   const [original] = useState<Avatar>(() => (editing ? avatarOf(editing) : randomAvatar()));
   const [look, setLook] = useState<Avatar>(original);
@@ -43,7 +43,8 @@ function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person
     if (demo) return setError("Demo mode: nothing is saved.");
     setBusy(true);
     setError("");
-    const result = editing ? await updatePerson(editing.id, { ...fields, avatar: look, name: fields.name.trim(), role: fields.role.trim() }) : await addPerson({ ...fields, avatar: look, name: fields.name.trim(), role: fields.role.trim() });
+    const department = (fields.department ?? "").trim() === "" ? null : (fields.department ?? "").trim();
+    const result = editing ? await updatePerson(editing.id, { ...fields, avatar: look, name: fields.name.trim(), role: fields.role.trim(), department: department }) : await addPerson({ ...fields, avatar: look, name: fields.name.trim(), role: fields.role.trim(), department: department });
     setBusy(false);
     if (!result.ok) return setError(result.message);
     onDone(result.people);
@@ -62,6 +63,14 @@ function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person
       <input id={`${id}-name`} value={fields.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} autoComplete="off" />
       <label htmlFor={`${id}-role`}>Role</label>
       <input id={`${id}-role`} value={fields.role} maxLength={60} placeholder="Frontend Developer" onChange={(e) => set({ role: e.target.value })} autoComplete="off" />
+      <label htmlFor={`${id}-dept`}>Department</label>
+      <input id={`${id}-dept`} value={fields.department ?? ""} maxLength={40} list={`${id}-depts`} placeholder="Engineering" onChange={(e) => set({ department: e.target.value })} autoComplete="off" />
+      <datalist id={`${id}-depts`}>
+        {[...new Set(people.flatMap((p) => (p.department ? [p.department] : [])))].map((d) => (
+          <option key={d} value={d} />
+        ))}
+      </datalist>
+      <p className="panel-note">The department is the room this person sits in, in the office. Leave it empty for none.</p>
       <label htmlFor={`${id}-boss`}>Reports to</label>
       <select id={`${id}-boss`} value={fields.reportsTo ?? ""} onChange={(e) => set({ reportsTo: e.target.value === "" ? null : e.target.value })}>
         <option value="" disabled={hasTop}>
@@ -104,6 +113,7 @@ function Chart({ nodes, people }: { nodes: OrgNode[]; people: Person[] }) {
             <AvatarImage avatar={avatarOf(person)} size={28} />
             <span>
               <strong>{person.name}</strong>, {person.role}
+              {person.department ? ` (${person.department})` : ""}
             </span>
           </span>
           {reports.length > 0 && <Chart nodes={reports} people={people} />}
@@ -194,6 +204,7 @@ export function TeamPage({ demo }: { demo: boolean }) {
               <AvatarImage avatar={avatarOf(p)} size={72} />
               <h2>{p.name}</h2>
               <span className="chip">{p.role}</span>
+              <p className="panel-note">{p.department ? `Department: ${p.department}` : "No department"}</p>
               <p>{reportsLine(list, p.id)}</p>
               <p className="panel-note">{reportsOf(list, p.id).length === 0 ? "No one reports to them." : `${reportsOf(list, p.id).length} report to them.`}</p>
               <div className="task-foot">

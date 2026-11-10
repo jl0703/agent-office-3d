@@ -531,13 +531,13 @@ try {
       const plus = await page.evaluate<string>(`JSON.stringify((() => { const col = document.querySelector(".board-col"); const b = col?.querySelector("button.add-round"); const last = [...(col?.querySelectorAll(".task-card") ?? [])].at(-1); return { label: b?.getAttribute("aria-label"), under: b && last ? b.getBoundingClientRect().top >= last.getBoundingClientRect().bottom - 1 : false, first: col?.querySelector("h2")?.textContent?.startsWith("Active") }; })())`);
       expect(plus === '{"label":"Add a task","under":true,"first":true}', `sidebar(${scheme}): a small + under the first column's cards (${plus})`);
       await page.evaluate(`((e) => (e?.focus(), e?.click()))(document.querySelector(".board-col button.add-round"))`);
-      await page.wait(300);
+      await page.wait(600);
       expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Assigned to"), `sidebar(${scheme}): the + opens the New task pop-up`);
       await page.key("Escape", { keyCode: 27 });
       await page.wait(300);
       expect(await page.evaluate<boolean>(`!document.querySelector("dialog[open]") && document.activeElement?.classList.contains("add-round")`), `sidebar(${scheme}): Escape returns focus to the + button`);
       await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".add-btn")].find((b) => b.textContent.includes("New task")))`);
-      await page.wait(300);
+      await page.wait(600);
       expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Assigned to"), `sidebar(${scheme}): New task opens a pop-up with an assignee`);
       await page.key("Escape", { keyCode: 27 });
       await page.wait(300);
@@ -553,7 +553,7 @@ try {
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Team"))?.click()`);
       await page.wait(500);
       const teamCards = await page.evaluate<string>(`JSON.stringify({ hash: location.hash, title: document.title, cards: document.querySelectorAll(".person-card").length, line: [...document.querySelectorAll(".person-card")].find((c) => c.textContent.includes("Riley"))?.textContent ?? "" })`);
-      expect(teamCards.includes('"hash":"#/team"') && teamCards.includes("Team - Agent Office") && teamCards.includes('"cards":6') && teamCards.includes("Reports to Sam, then Alex"), `sidebar(${scheme}): the Team page shows six people and who each reports to (${teamCards.slice(0, 200)})`);
+      expect(teamCards.includes('"hash":"#/team"') && teamCards.includes("Team - Agent Office") && teamCards.includes('"cards":6') && teamCards.includes("Reports to Sam, then Alex") && teamCards.includes("Department: Engineering"), `sidebar(${scheme}): the Team page shows six people, who each reports to and their department (${teamCards.slice(0, 200)})`);
       expect(await page.evaluate<boolean>(`document.querySelectorAll(".person-card svg.avatar").length === 6 && [...document.querySelectorAll(".person-card svg.avatar")].every((s) => s.getAttribute("aria-hidden") === "true")`), `sidebar(${scheme}): each person card has a picture that screen readers skip`);
       await page.screenshot(join(out, `team-cards-${scheme}.png`));
       await page.evaluate(`[...document.querySelectorAll(".chips button")].find((b) => b.textContent === "Org chart")?.click()`);
@@ -566,7 +566,7 @@ try {
       expect(teamViolations.length === 0, `sidebar(${scheme}): axe on Team: ${teamViolations.join(", ")}`);
       await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".add-btn")].find((b) => b.textContent.includes("Add a person")))`);
       await page.wait(300);
-      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Reports to"), `sidebar(${scheme}): Add a person opens a pop-up with the form`);
+      expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Reports to") && (await page.evaluate<boolean>(`Boolean(document.querySelector("dialog[open] input[placeholder=Engineering]")) && document.querySelectorAll("dialog[open] datalist option").length === 3`)), `sidebar(${scheme}): Add a person opens a pop-up with the form and a department field that suggests the departments in use`);
       // The designer: a preview and a row of choices per part; Randomize changes the picture and Reset brings it back.
       const designer = await page.evaluate<string>(`JSON.stringify({ rows: document.querySelectorAll("dialog[open] .designer-row").length, swatches: document.querySelectorAll("dialog[open] .swatch").length, resetOff: [...document.querySelectorAll("dialog[open] .designer button")].find((b) => b.textContent === "Reset")?.disabled })`);
       expect(designer === '{"rows":9,"swatches":30,"resetOff":true}', `sidebar(${scheme}): the pop-up has the picture designer (${designer})`);
