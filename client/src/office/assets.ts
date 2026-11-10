@@ -17,8 +17,10 @@ import {
   deskGeometry,
   flatPlane,
   flatRing,
+  hairGeometry,
   headGeometry,
   legsGeometry,
+  outfitGeometry,
   monitorGeometry,
   pennantGeometry,
   screenGeometry,
@@ -26,6 +28,7 @@ import {
   walkLegGeometry,
   unitBox,
 } from "./geometry.ts";
+import { AVATAR_PARTS } from "../../../shared/avatar.ts";
 import { ACCESSORIES, SCENE, STATUS_COLOR, STATUSES, type Accessory, type Scheme } from "./palette.ts";
 import { makeScreenTextures, makeShadowTexture } from "./textures.ts";
 
@@ -47,8 +50,10 @@ export function createAssets(scheme: Scheme) {
     legs: legsGeometry(),
     torso: torsoGeometry(),
     arm: armGeometry(),
-    head: headGeometry(scheme),
-    accessories: Object.fromEntries(ACCESSORIES.filter((a): a is Visible => a !== "none").map((a) => [a, accessoryGeometry(a)])) as Record<Visible, BufferGeometry>,
+    head: headGeometry(),
+    accessories: Object.fromEntries([...ACCESSORIES, "sunglasses" as const].filter((a): a is Visible => a !== "none").map((a) => [a, accessoryGeometry(a)])) as Record<Visible, BufferGeometry>,
+    hair: Array.from({ length: AVATAR_PARTS.hair }, (_, i) => hairGeometry(i)),
+    outfit: Array.from({ length: AVATAR_PARTS.outfit }, (_, i) => outfitGeometry(i)),
     pennants: Object.fromEntries(STATUSES.map((s) => [s, pennantGeometry(s)])) as Record<AgentStatus, BufferGeometry>,
     ring: flatRing(0.92, 1.0),
     ringSoft: flatRing(0.9, 1.0),

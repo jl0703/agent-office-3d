@@ -24,7 +24,8 @@ export const FAMILY_COLORS = ["#1F4E8C", "#B3261E", "#0F6B4F", "#8A5A00", "#6B4E
 export const FAMILY_LETTERS = ["A", "B", "C", "D", "E", "F"] as const;
 
 export const ACCESSORIES = ["none", "glasses", "headphones", "cap", "antenna", "tie"] as const;
-export type Accessory = (typeof ACCESSORIES)[number];
+/** What a character can wear on the head or neck. The first list is what an agent with no person gets by chance; sunglasses come only from a person's picture. */
+export type Accessory = (typeof ACCESSORIES)[number] | "sunglasses";
 
 /** 32-bit FNV-1a: the same text always gives the same number. */
 export function hashId(id: string): number {

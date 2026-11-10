@@ -20,6 +20,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import type { AgentStatus } from "../../../shared/events.ts";
 import type { Accessory, Scheme } from "./palette.ts";
 import { SCENE } from "./palette.ts";
+import { HAIR_STYLE, OUTFIT_STYLE } from "../avatar.ts";
 
 // Everything is built from a few simple shapes and merged, so each kind of thing is drawn in one call.
 // Units are roughly metres. A desk faces +z; the character sits on its -z side, facing +z.
@@ -103,9 +104,10 @@ export function legsGeometry(): BufferGeometry {
 export const torsoGeometry = () => place(new CapsuleGeometry(0.2, 0.3, 2, 6), 0, 0.25, 0);
 export const armGeometry = () => place(new CapsuleGeometry(0.06, 0.26, 2, 6), 0, -0.19, 0);
 
-export function headGeometry(scheme: Scheme): BufferGeometry {
+/** The head is white where the skin is: each person's skin colour comes from the instance colour. */
+export function headGeometry(): BufferGeometry {
   return merge([
-    { geometry: new RoundedBoxGeometry(0.36, 0.34, 0.34, 2, 0.08), color: SCENE[scheme].skin },
+    { geometry: new RoundedBoxGeometry(0.36, 0.34, 0.34, 2, 0.08), color: "#ffffff" },
     box(0.05, 0.06, 0.02, -0.08, 0.02, 0.175, "#222B38"),
     box(0.05, 0.06, 0.02, 0.08, 0.02, 0.175, "#222B38"),
   ]);
@@ -134,8 +136,59 @@ export function accessoryGeometry(kind: Exclude<Accessory, "none">): BufferGeome
       return merge([box(0.02, 0.2, 0.02, 0, 0.27, 0, "#222B38"), { geometry: place(new SphereGeometry(0.05, 6, 4), 0, 0.4, 0), color: "#C2410C" }]);
     case "tie":
       return merge([box(0.08, 0.28, 0.03, 0, 0.3, 0.205, "#8A5A00"), box(0.12, 0.05, 0.03, 0, 0.45, 0.2, "#8A5A00")]);
+    case "sunglasses":
+      return merge([
+        box(0.14, 0.08, 0.02, -0.09, 0.02, 0.185, "#10151C"),
+        box(0.14, 0.08, 0.02, 0.09, 0.02, 0.185, "#10151C"),
+        box(0.05, 0.02, 0.02, 0, 0.04, 0.185, "#10151C"),
+      ]);
   }
 }
+
+const WHITE = "#ffffff"; // parts that are tinted by the instance colour are white in the shape
+
+/** A cap of hair on the head, in white so each person's hair colour tints it; null for no hair. Built around the head (a box 0.36 wide). */
+export function hairGeometry(style: number): BufferGeometry | null {
+  const cap = (): Part[] => [box(0.4, 0.1, 0.4, 0, 0.19, 0, WHITE), box(0.4, 0.22, 0.08, 0, 0.08, -0.17, WHITE)];
+  const ball = (r: number, x: number, y: number, z: number): Part => ({ geometry: place(new SphereGeometry(r, 6, 5), x, y, z), color: WHITE });
+  switch (HAIR_STYLE[style]) {
+    case "Short":
+      return merge(cap());
+    case "Long":
+      return merge([...cap(), box(0.4, 0.34, 0.08, 0, -0.06, -0.17, WHITE), box(0.06, 0.3, 0.2, -0.2, -0.02, -0.05, WHITE), box(0.06, 0.3, 0.2, 0.2, -0.02, -0.05, WHITE)]);
+    case "Bun":
+      return merge([...cap(), ball(0.1, 0, 0.3, -0.06)]);
+    case "Curly":
+      return merge([ball(0.12, -0.12, 0.2, 0.04), ball(0.12, 0.12, 0.2, 0.04), ball(0.13, 0, 0.23, -0.02), ball(0.12, -0.12, 0.16, -0.12), ball(0.12, 0.12, 0.16, -0.12), ball(0.1, -0.2, 0.05, -0.02), ball(0.1, 0.2, 0.05, -0.02)]);
+    case "Spiky":
+      return merge([-0.13, -0.065, 0, 0.065, 0.13].map((x, i): Part => ({ geometry: place(new ConeGeometry(0.06, 0.2, 5), x, 0.27, i % 2 === 0 ? 0.03 : -0.05), color: WHITE })).concat([box(0.4, 0.06, 0.4, 0, 0.18, 0, WHITE)]));
+    case "Side part":
+      return merge([...cap(), box(0.2, 0.08, 0.24, -0.1, 0.24, 0.07, WHITE, 0, 0.3)]);
+    case "Ponytail":
+      return merge([...cap(), box(0.08, 0.28, 0.08, 0, -0.02, -0.26, WHITE), ball(0.07, 0, -0.18, -0.27)]);
+    default:
+      return null; // "Bald"
+  }
+}
+
+/** The part of an outfit that shows above a plain T-shirt (null for the T-shirt). Built on the torso; white parts take the outfit colour. */
+export function outfitGeometry(style: number): BufferGeometry | null {
+  switch (OUTFIT_STYLE[style]) {
+    case "Shirt":
+      return merge([box(0.13, 0.05, 0.03, -0.065, 0.56, 0.2, "#F4F1EA", 0, 0.5), box(0.13, 0.05, 0.03, 0.065, 0.56, 0.2, "#F4F1EA", 0, -0.5)]);
+    case "Hoodie":
+      return merge([box(0.36, 0.14, 0.12, 0, 0.56, -0.17, WHITE), box(0.3, 0.1, 0.1, 0, 0.5, 0.17, WHITE)]); // a hood behind the neck and a pocket band in front, in the outfit colour
+    case "Suit":
+      return merge([box(0.07, 0.3, 0.03, -0.075, 0.4, 0.205, "#1F2A37", 0, 0.3), box(0.07, 0.3, 0.03, 0.075, 0.4, 0.205, "#1F2A37", 0, -0.3), box(0.07, 0.28, 0.025, 0, 0.4, 0.198, "#F4F1EA")]);
+    case "Turtleneck":
+      return merge([{ geometry: place(new CylinderGeometry(0.13, 0.15, 0.14, 8), 0, 0.6, 0), color: WHITE }]);
+    default:
+      return null; // "T-shirt"
+  }
+}
+
+/** Which outfit details take the outfit's colour (the others are fixed colours). */
+export const OUTFIT_TINTED: readonly boolean[] = OUTFIT_STYLE.map((s) => s === "Hoodie" || s === "Turtleneck");
 
 /** A pole with a small flag whose shape depends on the status, so status can be read without colour. */
 export function pennantGeometry(status: AgentStatus): BufferGeometry {
