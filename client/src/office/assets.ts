@@ -29,10 +29,10 @@ import {
   unitBox,
 } from "./geometry.ts";
 import { AVATAR_PARTS } from "../../../shared/avatar.ts";
-import { ACCESSORIES, SCENE, STATUS_COLOR, STATUSES, type Accessory, type Scheme } from "./palette.ts";
+import { ALL_ACCESSORIES, SCENE, STATUS_COLOR, STATUSES, type Scheme } from "./palette.ts";
 import { makeScreenTextures, makeShadowTexture } from "./textures.ts";
 
-type Visible = Exclude<Accessory, "none">;
+type Visible = (typeof ALL_ACCESSORIES)[number];
 
 /** Every shape, material, and texture the office uses. Built once per colour scheme and disposed when replaced. */
 export function createAssets(scheme: Scheme) {
@@ -51,7 +51,7 @@ export function createAssets(scheme: Scheme) {
     torso: torsoGeometry(),
     arm: armGeometry(),
     head: headGeometry(),
-    accessories: Object.fromEntries([...ACCESSORIES, "sunglasses" as const].filter((a): a is Visible => a !== "none").map((a) => [a, accessoryGeometry(a)])) as Record<Visible, BufferGeometry>,
+    accessories: Object.fromEntries(ALL_ACCESSORIES.map((a) => [a, accessoryGeometry(a)])) as Record<Visible, BufferGeometry>,
     hair: Array.from({ length: AVATAR_PARTS.hair }, (_, i) => hairGeometry(i)),
     outfit: Array.from({ length: AVATAR_PARTS.outfit }, (_, i) => outfitGeometry(i)),
     pennants: Object.fromEntries(STATUSES.map((s) => [s, pennantGeometry(s)])) as Record<AgentStatus, BufferGeometry>,

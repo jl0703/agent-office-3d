@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AVATAR_PARTS, type Avatar } from "../../shared/avatar.ts";
 import { HAIR_COLOR, OUTFIT_COLOR, SKIN, defaultAvatar, randomAvatar } from "../src/avatar.ts";
-import { hairGeometry, outfitGeometry, OUTFIT_TINTED } from "../src/office/geometry.ts";
+import { accessoryGeometry, hairGeometry, outfitGeometry, OUTFIT_TINTED } from "../src/office/geometry.ts";
 import { lookOfAgent, lookOfAvatar } from "../src/office/look.ts";
-import { CHARACTER_COLORS, characterStyle } from "../src/office/palette.ts";
+import { ALL_ACCESSORIES, CHARACTER_COLORS, characterStyle } from "../src/office/palette.ts";
 import type { Person } from "../src/team.ts";
 
 const base: Avatar = { skin: 0, hair: 0, hairColor: 0, eyes: 0, mouth: 0, glasses: 0, outfit: 0, outfitColor: 0, background: 0 };
@@ -85,5 +85,20 @@ describe("the shapes of hair and outfit", () => {
       const white = whiteOnly(g);
       assert.equal(OUTFIT_TINTED[i], white, `style ${i}: tinted exactly when the shape is white`);
     });
+  });
+
+  it("keeps a cap clear of the hair under it, so the two do not share faces", () => {
+    const hair = hairGeometry(0)!;
+    const cap = accessoryGeometry("cap");
+    hair.computeBoundingBox();
+    cap.computeBoundingBox();
+    const [h, c] = [hair.boundingBox!, cap.boundingBox!];
+    assert.ok(c.min.x < h.min.x && c.max.x > h.max.x && c.min.z < h.min.z, "wider than the hair on every side");
+    assert.ok(c.max.y > h.max.y, "taller than the hair");
+  });
+
+  it("can draw every accessory a look can name", () => {
+    for (const a of ["glasses", "headphones", "cap", "antenna", "tie", "sunglasses"]) assert.ok(ALL_ACCESSORIES.includes(a as never), a);
+    for (const a of ALL_ACCESSORIES) assert.ok(accessoryGeometry(a).getAttribute("position").count > 0, a);
   });
 });

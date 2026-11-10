@@ -27,6 +27,9 @@ export const ACCESSORIES = ["none", "glasses", "headphones", "cap", "antenna", "
 /** What a character can wear on the head or neck. The first list is what an agent with no person gets by chance; sunglasses come only from a person's picture. */
 export type Accessory = (typeof ACCESSORIES)[number] | "sunglasses";
 
+/** Every accessory that can be drawn, with the one that comes only from a person's picture. */
+export const ALL_ACCESSORIES = ["glasses", "headphones", "cap", "antenna", "tie", "sunglasses"] as const satisfies readonly Exclude<Accessory, "none">[];
+
 /** 32-bit FNV-1a: the same text always gives the same number. */
 export function hashId(id: string): number {
   let h = 0x811c9dc5;

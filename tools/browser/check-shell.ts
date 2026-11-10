@@ -721,7 +721,7 @@ try {
       await page.screenshot(join(out, `turn-${quarter}.png`));
       const now = await calls();
       seen.add(await walls());
-      expect(now > 20 && now <= 75, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
+      expect(now > 20 && now <= 70, `turn: after a ${quarter * 90} degree turn the office draws ${now} calls (${before} at the start)`);
     }
     const totals = new Set([...seen].map((w) => w.split("/").reduce((a, n) => a + Number(n), 0)));
     expect(seen.size >= 2 && totals.size === 1 && !seen.has(""), `turn: the tall and low walls change over as the view turns, the total stays the same (${[...seen].join(" | ")})`);

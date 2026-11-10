@@ -22,7 +22,7 @@ import { BENCH_LIMIT, BUSH_LIMIT, TREE_LIMIT, floorTone, furnitureOf, groundsOf,
 import { AVATAR_PARTS } from "../../../shared/avatar.ts";
 import { OUTFIT_TINTED } from "./geometry.ts";
 import { lookOfAgent, type Look } from "./look.ts";
-import { ACCESSORIES, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, type Accessory, type Scheme } from "./palette.ts";
+import { ALL_ACCESSORIES, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, type Scheme } from "./palette.ts";
 import { blendPose, poseFor, type Pose } from "./poses.ts";
 import type { Selection } from "./selection.ts";
 
@@ -34,7 +34,7 @@ const FURNITURE_LIMIT = 96;
 const GROUNDS = groundsOf();
 const MIDDLE: Point = { x: (BUILDING_RECT.minX + BUILDING_RECT.maxX) / 2, z: (BUILDING_RECT.minZ + BUILDING_RECT.maxZ) / 2 };
 const ORIGIN: Point = { x: 0, z: 0 };
-const NAMED: readonly Exclude<Accessory, "none">[] = [...ACCESSORIES, "sunglasses" as const].filter((a): a is Exclude<Accessory, "none"> => a !== "none");
+const NAMED = ALL_ACCESSORIES;
 const HAIR_NAMES = Array.from({ length: AVATAR_PARTS.hair }, (_, i) => `hair-${i}`);
 const OUTFIT_NAMES = Array.from({ length: AVATAR_PARTS.outfit }, (_, i) => `outfit-${i}`);
 const hairCount = HAIR_NAMES.map(() => 0);
@@ -324,9 +324,10 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, la
     [scheme, selection, placeWalls],
   );
 
-  // The lawn's trees, bushes and benches: the same every time, placed once.
+  // The lawn's trees, bushes and benches: the same every time, placed once. The hair and outfit meshes that are tinted get their colour buffer now, so the first agent to use a style does not make the shader be built again.
   useLayoutEffect(() => {
     if (!assets) return;
+    for (const name of [...HAIR_NAMES, ...OUTFIT_NAMES.filter((_, i) => OUTFIT_TINTED[i])]) instanced(name)?.setColorAt(0, colourOf("#ffffff"));
     const put = (name: string, i: number, x: number, z: number, turn: number, size: number) => instanced(name)?.setMatrixAt(i, compose(m1, x, -0.05, z, 0, turn, 0, size, size, size));
     GROUNDS.trees.forEach((t, i) => {
       put("trees", i, t.x, t.z, i * 2.4, t.scale);

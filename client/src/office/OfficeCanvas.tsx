@@ -185,8 +185,7 @@ const shortText = (text: string | null, max: number) => {
 };
 
 /** The role under the name, and, when the tag is hovered or selected, who the agent reports to and its current task. */
-function TagCard({ agent, team }: { agent: Agent; team: readonly Person[] }) {
-  const role = roleOf(agent, team);
+function TagCard({ agent, role }: { agent: Agent; role: ReturnType<typeof roleOf> }) {
   const task = shortText(agent.currentTask, 90);
   return (
     <>
@@ -364,7 +363,9 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
         </div>
 
         <div className="office-tags" aria-hidden="true">
-          {shown.map((a) => (
+          {shown.map((a) => {
+            const role = roleOf(a, team);
+            return (
             <div
               key={a.id}
               className="office-tag"
@@ -375,14 +376,15 @@ export function OfficeCanvas({ agents, team = [], connection, demo, layout, vaul
               }}
             >
               <span className="tag-line">
-                {roleOf(a, team) && <AvatarImage avatar={avatarOf(roleOf(a, team)!.person)} size={20} />}
+                {role && <AvatarImage avatar={avatarOf(role.person)} size={20} />}
                 <span className="tag-family">{FAMILY_LETTERS[families.get(a.id) ?? 0]}</span>
                 <span className="tag-name">{truncateTag(a.name)}</span>
                 <span className="tag-status">{a.status}</span>
               </span>
-              <TagCard agent={a} team={team} />
+              <TagCard agent={a} role={role} />
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {demo && <div className="office-watermark" aria-hidden="true">DEMO</div>}

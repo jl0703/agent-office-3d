@@ -131,7 +131,8 @@ export function accessoryGeometry(kind: Exclude<Accessory, "none">): BufferGeome
         box(0.035, 0.2, 0.035, 0.2, 0.12, 0, "#1F4E8C"),
       ]);
     case "cap":
-      return merge([box(0.4, 0.09, 0.4, 0, 0.2, 0, "#B3261E"), box(0.3, 0.025, 0.2, 0, 0.17, 0.26, "#B3261E")]);
+      // A little wider and taller than the hair cap, so it sits over the hair instead of sharing its faces.
+      return merge([box(0.42, 0.1, 0.42, 0, 0.21, 0, "#B3261E"), box(0.3, 0.025, 0.2, 0, 0.17, 0.27, "#B3261E")]);
     case "antenna":
       return merge([box(0.02, 0.2, 0.02, 0, 0.27, 0, "#222B38"), { geometry: place(new SphereGeometry(0.05, 6, 4), 0, 0.4, 0), color: "#C2410C" }]);
     case "tie":
@@ -149,7 +150,7 @@ const WHITE = "#ffffff"; // parts that are tinted by the instance colour are whi
 
 /** A cap of hair on the head, in white so each person's hair colour tints it; null for no hair. Built around the head (a box 0.36 wide). */
 export function hairGeometry(style: number): BufferGeometry | null {
-  const cap = (): Part[] => [box(0.4, 0.1, 0.4, 0, 0.19, 0, WHITE), box(0.4, 0.22, 0.08, 0, 0.08, -0.17, WHITE)];
+  const cap = (): Part[] => [box(0.4, 0.1, 0.4, 0, 0.19, 0, WHITE), box(0.4, 0.22, 0.08, 0, 0.08, -0.16, WHITE)];
   const ball = (r: number, x: number, y: number, z: number): Part => ({ geometry: place(new SphereGeometry(r, 6, 5), x, y, z), color: WHITE });
   switch (HAIR_STYLE[style]) {
     case "Short":
