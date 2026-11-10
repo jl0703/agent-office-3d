@@ -12,9 +12,15 @@
 // ("s" and "p" are the spine, 3 wide, that joins the corridor to the Library side and the lobby.)
 import type { Agent } from "../../../shared/events.ts";
 import { roleOf, type Person } from "../team.ts";
-import { ROOM_COLORS, SEATS_PER_ROOM, type Bounds } from "./rooms.ts";
 
-export type { Bounds };
+export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number };
+
+/** Desks in a department room or the Management office. */
+export const SEATS_PER_ROOM = 6;
+
+/** Eight room colours: muted and distinct. */
+export const ROOM_COLORS = ["#2E86AB", "#C8553D", "#4C9A6A", "#D9A21B", "#8E6BAE", "#2A9D8F", "#D17A9E", "#5C6BC0"] as const;
+
 export type Point = { x: number; z: number };
 
 export const ROOM_W = 8;
@@ -156,6 +162,17 @@ export function buildingFor(team: readonly Person[], previous: ReadonlyMap<strin
   rooms.push({ key: VISITORS_KEY, name: "Visitors", kind: "visitors", rect: LOBBY_RECT, door: ENTRANCE, desks: lobbyDesks(), color: 5 });
   return { rooms, slotOf };
 }
+
+/** The seat numbers of a room's desks, in desk order (the first is the lead's). */
+export function seatsOfRoom(building: Building, key: string): number[] {
+  const room = building.rooms.find((r) => r.key === key);
+  if (!room || room.desks.length === 0) return [];
+  const base = seatBase(room.key, room.slot);
+  return room.desks.map((_, i) => base + i);
+}
+
+/** The building and where everyone sits in it: what the office draws. */
+export type Layout = { building: Building; placement: Placement };
 
 /** Where a seat is on the floor, for the seat numbers above. */
 export function seatPoint(building: Building, seat: number): Point | undefined {

@@ -83,9 +83,9 @@ export function createAssets(scheme: Scheme) {
     outline: new LineBasicMaterial({ color: c.lip }),
     // Drawn into nothing, but still hit by the pointer, so characters can be clicked.
     room: lambert({}),
+    glass: lambert({ color: scheme === "light" ? 0xbfd6e4 : 0x4a6178, transparent: true, opacity: 0.4, depthWrite: false }),
+    ground: lambert({ color: scheme === "light" ? 0xc9bfa6 : 0x1d242d }),
     board: new MeshBasicMaterial({ color: scheme === "light" ? 0xfbf8f0 : 0xdfe6ee }),
-    road: new MeshBasicMaterial({ color: scheme === "light" ? 0x7d8794 : 0x4a586b }),
-    roadLit: new MeshBasicMaterial({ color: c.selection }),
     dais: lambert({ color: scheme === "light" ? 0xcfd6df : 0x2b3646 }),
     core: new MeshBasicMaterial({ color: scheme === "light" ? 0x4a90d9 : 0x7fd0ff, toneMapped: false }),
     hubRing: new MeshBasicMaterial({ color: scheme === "light" ? 0x1f4e8c : 0x7fb0f0, toneMapped: false }),

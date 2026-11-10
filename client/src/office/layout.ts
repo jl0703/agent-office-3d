@@ -1,5 +1,5 @@
-// Camera framing and tag text. Where things stand is in rooms.ts.
-import type { Bounds } from "./rooms.ts";
+// Camera framing and tag text. Where things stand is in building.ts.
+import type { Bounds } from "./building.ts";
 
 export const CAMERA_FOV_DEG = 35;
 export const CAMERA_ELEVATION = (50 * Math.PI) / 180;

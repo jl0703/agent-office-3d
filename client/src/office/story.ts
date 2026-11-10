@@ -2,7 +2,8 @@
 // walks to a worker to hand it a task, a worker walks to its master to report, and working agents
 // now and then say what they are doing. No clock of its own: the caller passes the time in milliseconds.
 import type { Agent, AgentStatus } from "../../../shared/events.ts";
-import { pointAlong, routeLength, walkRoute, WALK_SPEED, type Point } from "./paths.ts";
+import type { Building } from "./building.ts";
+import { pointAlong, routeLength, walkRoute, WALK_SPEED, type Point } from "./walk.ts";
 
 export const MAX_WALKERS = 4;
 export const MAX_BUBBLES = 4;
@@ -43,6 +44,8 @@ export type ObserveOptions = {
   reduced: boolean;
   /** The connection is down: show the last state without any story. */
   frozen: boolean;
+  /** Where the desks and doors are: walks follow it. */
+  building: Building;
 };
 
 export function createStory() {
@@ -63,7 +66,7 @@ export function createStory() {
   const say = (agentId: string, text: string, from: number, ms: number) => put(agentId, { text: shorten(text), from, until: from + ms });
 
   /** A walk from `walker` to a spot beside `target`, a pause, and back. Falls back to a bubble at the desk. */
-  function visit(walker: Agent, target: Agent, seats: ReadonlyMap<string, number>, text: string, speaker: Agent, now: number, reduced: boolean) {
+  function visit(building: Building, walker: Agent, target: Agent, seats: ReadonlyMap<string, number>, text: string, speaker: Agent, now: number, reduced: boolean) {
     const from = seats.get(walker.id);
     const to = seats.get(target.id);
     const free = jobs.length < MAX_WALKERS && !jobs.some((j) => j.walker === walker.id);
@@ -71,8 +74,9 @@ export function createStory() {
       if (seats.has(speaker.id)) say(speaker.id, text, now, reduced ? REDUCED_BUBBLE_MS : HOLD_MS);
       return;
     }
-    const out = walkRoute({ seat: from, at: "seat" }, { seat: to, at: "visit" });
-    const back = walkRoute({ seat: to, at: "visit" }, { seat: from, at: "seat" });
+    const out = walkRoute(building, { seat: from, at: "seat" }, { seat: to, at: "visit" });
+    const back = walkRoute(building, { seat: to, at: "visit" }, { seat: from, at: "seat" });
+    if (out.length === 0 || back.length === 0) return;
     const outMs = (routeLength(out) / WALK_SPEED) * 1000;
     const backMs = (routeLength(back) / WALK_SPEED) * 1000;
     jobs.push({ walker: walker.id, target: target.id, startedAt: now, out, back, outMs, backMs });
@@ -80,7 +84,7 @@ export function createStory() {
     put(speaker.id, { text: shorten(text), from: now + outMs, until: now + outMs + HOLD_MS });
   }
 
-  function observe(agents: readonly Agent[], seats: ReadonlyMap<string, number>, now: number, { reduced, frozen }: ObserveOptions) {
+  function observe(agents: readonly Agent[], seats: ReadonlyMap<string, number>, now: number, { reduced, frozen, building }: ObserveOptions) {
     const byId = new Map(agents.map((a) => [a.id, a]));
     const next = new Map<string, Remembered>();
     for (const a of agents) next.set(a.id, { status: a.status, task: a.currentTask, activity: a.activity });
@@ -110,9 +114,9 @@ export function createStory() {
         const before = known.get(a.id);
         const parent = a.parentId === null ? undefined : byId.get(a.parentId);
         if (parent && a.currentTask && (before === undefined || a.currentTask !== before.task)) {
-          visit(parent, a, seats, a.currentTask, a, now, reduced);
+          visit(building, parent, a, seats, a.currentTask, a, now, reduced);
         } else if (parent && before && isFinished(a.status) && !isFinished(before.status)) {
-          visit(a, parent, seats, a.note ?? a.activity ?? a.status, a, now, reduced);
+          visit(building, a, parent, seats, a.note ?? a.activity ?? a.status, a, now, reduced);
         } else if (before && a.status === "working" && a.activity && a.activity !== before.activity && seats.has(a.id)) {
           // A tool bubble never replaces words that are still waiting to be heard or are being heard.
           if (now - (lastTool.get(a.id) ?? -Infinity) >= TOOL_BUBBLE_EVERY_MS && (speech.get(a.id)?.until ?? 0) <= now) {

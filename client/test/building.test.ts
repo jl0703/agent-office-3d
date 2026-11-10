@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "../../shared/events.ts";
 import { BUILDING_RECT, CORRIDOR_RECT, SPINE_RECT, buildingFor, emptyPlacement, ENTRANCE, inside, kindOfDepartment, LOBBY_RECT, MAX_DEPARTMENTS, placeAgents, seatPoint, SEAT_COUNT, VISITORS_KEY, VISITOR_SEATS, MANAGEMENT_KEY, deptKey, type Building, type Placement } from "../src/office/building.ts";
-import { SEATS_PER_ROOM } from "../src/office/rooms.ts";
+import { SEATS_PER_ROOM } from "../src/office/building.ts";
 import type { Person } from "../src/team.ts";
 
 let n = 0;

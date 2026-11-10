@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "../../shared/events.ts";
-import { visitSpot } from "../src/office/paths.ts";
+import { buildingFor } from "../src/office/building.ts";
+import { visitSpot } from "../src/office/walk.ts";
+import type { Person } from "../src/team.ts";
 import { HOLD_MS, MAX_BUBBLES, MAX_TEXT, MAX_WALKERS, REDUCED_BUBBLE_MS, TOOL_BUBBLE_EVERY_MS, createStory, shorten } from "../src/office/story.ts";
 
 let n = 0;
@@ -22,7 +24,9 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   updatedAt: "2026-01-01T00:00:00.000Z",
   ...over,
 });
-const FREE = { reduced: false, frozen: false };
+// A building with all six department rooms, so that desks 0 to 41 and the Visitors desks exist.
+const BUILDING = buildingFor(["Engineering", "Quality", "Design", "Product", "Operations", "Sales"].map((department, i): Person => ({ id: i.toString(16).padStart(12, "0"), name: `P${i}`, role: "r", brief: "", reportsTo: "000000000fff", department })));
+const FREE = { reduced: false, frozen: false, building: BUILDING };
 const seatsOf = (list: Agent[]) => new Map(list.map((a, i) => [a.id, i]));
 
 describe("what the characters do", () => {
@@ -50,7 +54,7 @@ describe("what the characters do", () => {
     while (story.frame(t).walkers[0]?.moving) t += 100;
     const arrived = story.frame(t);
     assert.deepEqual(arrived.bubbles, [{ agentId: child.id, text: "Fix the flaky checkout tests" }]);
-    const spot = visitSpot(1);
+    const spot = visitSpot(BUILDING, 1);
     const w = arrived.walkers[0] as { x: number; z: number };
     assert.ok(Math.hypot(w.x - spot.x, w.z - spot.z) < 0.5, "standing next to the worker");
     t += HOLD_MS + 50;
@@ -114,10 +118,10 @@ describe("what the characters do", () => {
   it("with reduced motion nobody walks and a bubble lasts two seconds at the desk", () => {
     const master = agent();
     const story = createStory();
-    story.observe([master], seatsOf([master]), 0, { reduced: true, frozen: false });
+    story.observe([master], seatsOf([master]), 0, { ...FREE, reduced: true });
     const child = agent({ parentId: master.id, currentTask: "Do it", status: "working" });
     const list = [master, child];
-    story.observe(list, seatsOf(list), 100, { reduced: true, frozen: false });
+    story.observe(list, seatsOf(list), 100, { ...FREE, reduced: true });
     const f = story.frame(100);
     assert.deepEqual(f.walkers, []);
     assert.deepEqual(f.bubbles, [{ agentId: child.id, text: "Do it" }]);
@@ -133,7 +137,7 @@ describe("what the characters do", () => {
     story.observe(list, seatsOf(list), 0, FREE);
     story.observe([master, finished], seatsOf(list), 10, FREE);
     assert.equal(story.frame(10).walkers.length, 1);
-    story.observe([master, finished], seatsOf(list), 20, { reduced: false, frozen: true });
+    story.observe([master, finished], seatsOf(list), 20, { ...FREE, frozen: true });
     assert.deepEqual(story.frame(20), { walkers: [], bubbles: [] });
 
     const other = createStory();
@@ -194,7 +198,7 @@ describe("what the characters do", () => {
     story.observe(list, seatsOf(list), 0, FREE);
     story.observe([master, { ...child, status: "done" as const, activity: "ok" }], seatsOf(list), 10, FREE);
     assert.equal(story.frame(10).walkers.length, 1);
-    story.observe([master, { ...child, status: "done" as const, activity: "ok" }], seatsOf(list), 20, { reduced: true, frozen: false });
+    story.observe([master, { ...child, status: "done" as const, activity: "ok" }], seatsOf(list), 20, { ...FREE, reduced: true });
     assert.deepEqual(story.frame(20).walkers, []);
   });
 

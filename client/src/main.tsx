@@ -28,7 +28,7 @@ import { WorkshopPanel } from "./WorkshopPanel.tsx";
 import { demoVault } from "./vault.ts";
 import type { VaultInfo } from "../../shared/vault.ts";
 import { applyEvent, buildTree, initialState } from "./agents.ts";
-import { assignRooms, emptyAssignment, roomName } from "./office/rooms.ts";
+import { buildingFor, emptyPlacement, placeAgents, type Building, type Layout } from "./office/building.ts";
 import { useDemo, useMediaQuery } from "./office/hooks.ts";
 import { OfficeCanvas } from "./office/OfficeCanvas.tsx";
 import { selection, useSelection } from "./office/selection.ts";
@@ -194,24 +194,30 @@ function App() {
     requestAnimationFrame(() => document.querySelector<HTMLElement>("#catalog-title, .app-head h1")?.focus());
   }, [route]);
 
-  // Rooms keep their places while agents come and go, so the previous answer is part of the input.
-  const placed = useRef(emptyAssignment);
-  const assignment = useMemo(() => {
-    const next = assignRooms(placed.current, agents);
-    placed.current = next;
-    return next;
-  }, [agents]);
+  // The building follows the team's departments, and everyone keeps their desk while others come and go, so the previous answers are part of the input.
+  const places = useRef<ReadonlyMap<string, number>>(new Map());
+  const placed = useRef(emptyPlacement);
+  const layout = useMemo<Layout>(() => {
+    const building: Building = buildingFor(team, places.current);
+    places.current = building.slotOf;
+    const placement = placeAgents(building, placed.current, agents, team);
+    placed.current = placement;
+    return { building, placement };
+  }, [agents, team]);
   const groups = useMemo<RoomGroup[]>(() => {
+    const roomOf = layout.placement.roomOf;
     const byRoom = new Map<string, typeof tree>();
-    for (const node of tree) byRoom.set(assignment.roomOf.get(node.agent.id) ?? "", [...(byRoom.get(assignment.roomOf.get(node.agent.id) ?? "") ?? []), node]);
+    for (const node of tree) byRoom.set(roomOf.get(node.agent.id) ?? "", [...(byRoom.get(roomOf.get(node.agent.id) ?? "") ?? []), node]);
     const count = (nodes: typeof tree): Agent[] => nodes.flatMap((n) => [n.agent, ...count(n.children)]);
+    const order = (key: string) => layout.building.rooms.findIndex((r) => r.key === key);
+    const title = (key: string) => layout.building.rooms.find((r) => r.key === key)?.name ?? key;
     return [...byRoom]
-      .sort(([a], [b]) => (assignment.roomSlot.get(a) ?? 99) - (assignment.roomSlot.get(b) ?? 99))
+      .sort(([a], [b]) => (a === "" ? 99 : order(a)) - (b === "" ? 99 : order(b)))
       .map(([key, nodes]) => {
         const members = count(nodes);
-        return { key: key === "" ? "hidden" : key, title: key === "" ? "Not shown in the office view" : roomName(key), count: members.length, errors: members.filter((m) => m.status === "error").length, nodes };
+        return { key: key === "" ? "hidden" : key, title: key === "" ? "Not shown in the office view" : title(key), count: members.length, errors: members.filter((m) => m.status === "error").length, nodes };
       });
-  }, [tree, assignment]);
+  }, [tree, layout]);
   const inRoom = useMemo(() => (room === null ? groups : groups.filter((g) => g.key === room)), [groups, room]);
   // The search and status chips narrow the list; the office itself always shows everyone.
   const shownGroups = useMemo(() => (isFiltering(filter) ? inRoom.map((g) => ({ ...g, nodes: filterTree(g.nodes, filter) })).filter((g) => g.nodes.length > 0) : inRoom), [inRoom, filter]);
@@ -536,7 +542,7 @@ function App() {
           </section>
 
           <section className="pane pane-office" id="pane-office" role={narrow ? "tabpanel" : undefined} aria-labelledby={narrow ? "tab-office" : undefined}>
-            <OfficeCanvas agents={agents} team={team} connection={connection} demo={demo.active} assignment={assignment} vault={vault} hubOpen={hubOpen} newFindings={newFindings} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
+            <OfficeCanvas agents={agents} team={team} connection={connection} demo={demo.active} layout={layout} vault={vault} hubOpen={hubOpen} newFindings={newFindings} onOpenHub={openHub} selection={selection} resetSignal={resetSignal} onTryDemo={() => demo.start(20)} onStartWorker={openStartForm} />
             {current && !hubOpen && !researchOpen && !workshopOpen && narrow && !expanded && (
               <button type="button" className="peek" onClick={() => setExpanded(true)}>
                 <strong>{current.name}</strong> · {STATUS_WORD[current.status]} · Details
@@ -562,7 +568,7 @@ function App() {
               result={result}
               usage={usage}
               family={family}
-                notShown={!assignment.seat.has(current.id)}
+                notShown={!layout.placement.seat.has(current.id)}
                 stopOff={off}
                 stopping={stopping.has(current.id)}
                 headingRef={heading}

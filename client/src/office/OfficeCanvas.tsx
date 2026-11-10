@@ -8,7 +8,7 @@ import { CAMERA_AZIMUTH, CAMERA_ELEVATION, CAMERA_FOV_DEG, fitCamera, truncateTa
 import { roleOf, type Person } from "../team.ts";
 import type { Vault } from "../vault.ts";
 import { MAX_BUBBLES } from "./story.ts";
-import { overviewBounds, roomBounds, roomName, type Assignment, type Bounds } from "./rooms.ts";
+import { overviewBounds, roomBounds, type Bounds, type Layout } from "./building.ts";
 import { FAMILY_LETTERS } from "./palette.ts";
 import { familyIndexes } from "./families.ts";
 import { useReducedMotion, useScheme, webglAvailable } from "./hooks.ts";
@@ -207,7 +207,7 @@ export type OfficeCanvasProps = {
   team?: readonly Person[];
   connection: "connecting" | "connected" | "disconnected";
   demo: boolean;
-  assignment: Assignment;
+  layout: Layout;
   vault: Vault | null;
   hubOpen: boolean;
   /** Findings waiting for a decision, shown on the hub's sign. */
@@ -220,7 +220,7 @@ export type OfficeCanvasProps = {
   onStartWorker: () => void;
 };
 
-export function OfficeCanvas({ agents, team = [], connection, demo, assignment, vault, hubOpen, newFindings = 0, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
+export function OfficeCanvas({ agents, team = [], connection, demo, layout, vault, hubOpen, newFindings = 0, onOpenHub, selection, resetSignal, onTryDemo, onStartWorker }: OfficeCanvasProps) {
   const scheme = useScheme();
   const reduced = useReducedMotion();
   const [supported] = useState(webglAvailable);
@@ -235,16 +235,16 @@ export function OfficeCanvas({ agents, team = [], connection, demo, assignment, 
   const stats = useRef<HTMLPreElement | null>(null);
 
   const frozen = connection === "disconnected" && !demo;
+  const assignment = layout.placement;
   const shown = agents.filter((a) => assignment.seat.has(a.id));
   const hidden = assignment.unseated;
-  const slotKey = [...assignment.roomSlot.values()].sort().join(",");
-  const limit = useMemo(() => overviewBounds(slotKey === "" ? [] : slotKey.split(",").map(Number)), [slotKey]);
-  const focusSlot = room === null ? undefined : assignment.roomSlot.get(room);
-  const view = useMemo(() => (focusSlot === undefined ? limit : roomBounds(focusSlot)), [focusSlot, limit]);
-  // A room that has emptied cannot keep the focus.
+  const limit = useMemo(() => overviewBounds(), []);
+  const focused = room === null ? undefined : layout.building.rooms.find((r) => r.key === room);
+  const view = useMemo(() => (focused === undefined ? limit : roomBounds(focused)), [focused, limit]);
+  // A room that has gone (a department taken off the team) cannot keep the focus.
   useEffect(() => {
-    if (room !== null && focusSlot === undefined) selection.focusRoom(null);
-  }, [room, focusSlot, selection]);
+    if (room !== null && focused === undefined) selection.focusRoom(null);
+  }, [room, focused, selection]);
   const families = familyIndexes(agents);
   const empty = agents.length === 0 && connection === "connected" && !demo;
 
@@ -286,7 +286,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, assignment, 
               });
             }}
           >
-            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} assignment={assignment} roomRefs={roomRefs} vault={vault} hubRef={hubRef} bubbleRefs={bubbleRefs} />
+            <Office agents={agents} scheme={scheme} reduced={reduced} frozen={frozen} selection={selection} tagRefs={tagRefs} layout={layout} roomRefs={roomRefs} vault={vault} hubRef={hubRef} bubbleRefs={bubbleRefs} />
             <CameraRig view={view} limit={limit} focusKey={room ?? ""} reduced={reduced} api={rig} />
             {demo && <Stats out={stats} />}
           </Canvas>
@@ -308,7 +308,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, assignment, 
         )}
 
         <div className="office-rooms">
-          {[...assignment.roomSlot.keys()].map((key) => {
+          {layout.building.rooms.filter((r) => r.kind !== "library").map(({ key, name }) => {
             const members = agents.filter((a) => assignment.roomOf.get(a.id) === key);
             const errors = members.filter((a) => a.status === "error").length;
             return (
@@ -324,7 +324,7 @@ export function OfficeCanvas({ agents, team = [], connection, demo, assignment, 
                 }}
                 onClick={() => selection.focusRoom(room === key ? null : key)}
               >
-                <span className="room-name">{roomName(key)}</span>
+                <span className="room-name">{name}</span>
                 <span className="room-meta">
                   {members.length} {members.length === 1 ? "agent" : "agents"}
                   {errors > 0 ? ` · ${errors} error` : ""}
