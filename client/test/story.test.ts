@@ -4,7 +4,7 @@ import type { Agent } from "../../shared/events.ts";
 import { buildingFor } from "../src/office/building.ts";
 import { visitSpot } from "../src/office/walk.ts";
 import type { Person } from "../src/team.ts";
-import { HOLD_MS, MAX_BUBBLES, MAX_TEXT, MAX_WALKERS, REDUCED_BUBBLE_MS, TOOL_BUBBLE_EVERY_MS, createStory, shorten } from "../src/office/story.ts";
+import { BREAK_COOLDOWN_MS, BREAK_HOLD_MS, HOLD_MS, IDLE_BEFORE_BREAK_MS, KICKOFF_HOLD_MS, MAX_BUBBLES, MAX_KICKOFF, MAX_TEXT, MAX_WALKERS, REDUCED_BUBBLE_MS, TOOL_BUBBLE_EVERY_MS, createStory, shorten } from "../src/office/story.ts";
 
 let n = 0;
 const agent = (over: Partial<Agent> = {}): Agent => ({
@@ -214,5 +214,232 @@ describe("what the characters do", () => {
     let t = 1000;
     while (story.frame(t).walkers[0]?.moving) t += 100;
     assert.equal(story.frame(t).bubbles[0]?.text, "Fix it");
+  });
+});
+
+const roomRect = (key: string) => BUILDING.rooms.find((r) => r.key === key)!.rect;
+const isIn = (p: { x: number; z: number }, key: string) => p.x > roomRect(key).minX && p.x < roomRect(key).maxX && p.z > roomRect(key).minZ && p.z < roomRect(key).maxZ;
+const finishedWalking = (story: ReturnType<typeof createStory>, from: number, limit = 120_000) => {
+  let t = from;
+  while (story.frame(t).walkers.length > 0 && t < from + limit) t += 100;
+  return t;
+};
+/** The moment the first walker stands still, looking from `from`. */
+const untilStanding = (story: ReturnType<typeof createStory>, from: number, limit = 120_000) => {
+  let t = from;
+  while (story.frame(t).walkers[0]?.moving !== false && t < from + limit) t += 100;
+  return t;
+};
+
+describe("a break in the Pantry or the Lounge", () => {
+  const working = (over: Partial<Agent> = {}) => agent({ status: "working", ...over });
+
+  it("sends an agent that has been idle for thirty seconds, not before, and shows where it went", () => {
+    const idle = agent();
+    const story = createStory();
+    story.observe([idle], seatsOf([idle]), 0, FREE);
+    assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS - 1).walkers, [], "not yet");
+    assert.equal(story.frame(IDLE_BEFORE_BREAK_MS).walkers.length, 1, "now");
+    let t = untilStanding(story, IDLE_BEFORE_BREAK_MS);
+    const there = story.frame(t);
+    assert.equal(isIn(there.walkers[0]!, "pantry") || isIn(there.walkers[0]!, "lounge"), true, "standing in the Pantry or the Lounge");
+    assert.deepEqual(there.bubbles, [{ agentId: idle.id, text: "Taking a break" }]);
+    assert.equal(story.frame(t + BREAK_HOLD_MS - 100).walkers[0]?.moving, false, "stays for the hold");
+    assert.equal(story.frame(t + BREAK_HOLD_MS + 200).walkers[0]?.moving, true, "then walks home");
+    t = finishedWalking(story, t);
+    assert.deepEqual(story.frame(t), { walkers: [], bubbles: [] });
+  });
+
+  it("sends the same agent to the same room each time, and different agents to both rooms", () => {
+    const seenRooms = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      const a = agent();
+      const where = () => {
+        const story = createStory();
+        story.observe([a], seatsOf([a]), 0, FREE);
+        const w = story.frame(untilStanding(story, IDLE_BEFORE_BREAK_MS)).walkers[0]!;
+        return isIn(w, "pantry") ? "pantry" : isIn(w, "lounge") ? "lounge" : "elsewhere";
+      };
+      const first = where();
+      assert.equal(where(), first, "the same room again");
+      seenRooms.add(first);
+    }
+    assert.deepEqual([...seenRooms].sort(), ["lounge", "pantry"]);
+  });
+
+  it("does not send an agent that is working, waiting, finished, or when motion is reduced or the connection is down", () => {
+    for (const status of ["working", "waiting", "done", "stopped", "error"] as const) {
+      const a = agent({ status });
+      const story = createStory();
+      story.observe([a], seatsOf([a]), 0, FREE);
+      assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS * 3).walkers, [], status);
+    }
+    for (const opts of [{ ...FREE, reduced: true }, { ...FREE, frozen: true }]) {
+      const a = agent();
+      const story = createStory();
+      story.observe([a], seatsOf([a]), 0, opts);
+      assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS * 3).walkers, []);
+    }
+  });
+
+  it("counts idleness from the first update that says idle, and starts again when the agent works", () => {
+    const a = agent();
+    const story = createStory();
+    story.observe([a], seatsOf([a]), 0, FREE);
+    story.observe([{ ...a, status: "working" as const }], seatsOf([a]), 20_000, FREE);
+    story.observe([a], seatsOf([a]), 25_000, FREE);
+    assert.deepEqual(story.frame(25_000 + IDLE_BEFORE_BREAK_MS - 1).walkers, [], "thirty seconds after it went idle again, not after the first time");
+    assert.equal(story.frame(25_000 + IDLE_BEFORE_BREAK_MS).walkers.length, 1);
+  });
+
+  it("brings the agent home at once when it starts working, with no words left behind", () => {
+    const a = agent();
+    const story = createStory();
+    story.observe([a], seatsOf([a]), 0, FREE);
+    assert.equal(story.frame(IDLE_BEFORE_BREAK_MS).walkers.length, 1);
+    story.observe([{ ...a, status: "working" as const }], seatsOf([a]), IDLE_BEFORE_BREAK_MS + 500, FREE);
+    assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS + 500), { walkers: [], bubbles: [] });
+  });
+
+  it("lets one agent at a time take a break, the longest idle first, and not the same one again for two minutes", () => {
+    const a = agent({ name: "a" });
+    const b = agent({ name: "b" });
+    const list = [a, b];
+    const story = createStory();
+    story.observe([a], seatsOf(list), 0, FREE);
+    story.observe(list, seatsOf(list), 5000, FREE); // b has been idle for less time than a
+    const first = story.frame(IDLE_BEFORE_BREAK_MS);
+    assert.deepEqual(first.walkers.map((w) => w.agentId), [a.id], "a was idle first; b waits");
+    const home = finishedWalking(story, IDLE_BEFORE_BREAK_MS);
+    assert.deepEqual(story.frame(home).walkers.map((w) => w.agentId), [b.id], "then b");
+    const t2 = finishedWalking(story, home);
+    assert.deepEqual(story.frame(t2).walkers, [], "a is not due again yet");
+    assert.ok(t2 < IDLE_BEFORE_BREAK_MS + BREAK_COOLDOWN_MS);
+    assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS + BREAK_COOLDOWN_MS).walkers.map((w) => w.agentId), [a.id], "a again after the pause");
+  });
+
+  it("keeps a place for a task visit: with three people already walking nobody goes on a break", () => {
+    const master = working({ role: "master" });
+    const kids = Array.from({ length: 3 }, () => working({ parentId: master.id }));
+    const sleeper = agent();
+    const list = [master, ...kids, sleeper];
+    const story = createStory();
+    story.observe(list, seatsOf(list), 0, FREE);
+    story.observe([master, ...kids.map((k) => ({ ...k, status: "done" as const, activity: "ok" })), sleeper], seatsOf(list), 29_000, FREE);
+    assert.equal(story.frame(29_000).walkers.length, 3);
+    assert.equal(story.frame(IDLE_BEFORE_BREAK_MS).walkers.some((w) => w.agentId === sleeper.id), false);
+  });
+
+  it("forgets an agent that leaves", () => {
+    const a = agent();
+    const story = createStory();
+    story.observe([a], seatsOf([a]), 0, FREE);
+    assert.equal(story.frame(IDLE_BEFORE_BREAK_MS).walkers.length, 1);
+    const other = agent({ status: "working" });
+    story.observe([other], seatsOf([other]), IDLE_BEFORE_BREAK_MS + 100, FREE);
+    assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS + 100), { walkers: [], bubbles: [] });
+  });
+});
+
+describe("a kick-off in the Meeting room", () => {
+  const master = () => agent({ role: "master", status: "working" });
+  const worker = (m: Agent, task: string) => agent({ parentId: m.id, currentTask: task, status: "working" });
+
+  it("takes a master and its workers, given tasks together, to the table, with the first task as the master's words", () => {
+    const m = master();
+    const story = createStory();
+    story.observe([m], seatsOf([m]), 0, FREE);
+    const a = worker(m, "Fix the login form");
+    const b = worker(m, "Write the tests");
+    const list = [m, a, b];
+    story.observe(list, seatsOf(list), 1000, FREE);
+    const early = story.frame(1000);
+    assert.deepEqual(early.walkers.map((w) => w.agentId).sort(), [m.id, a.id, b.id].sort());
+    assert.deepEqual(early.bubbles, [], "no words before the master arrives");
+    let t = 1000;
+    while (story.frame(t).walkers.some((w) => w.moving)) t += 100;
+    const there = story.frame(t);
+    assert.equal(there.walkers.length, 3);
+    for (const w of there.walkers) assert.equal(isIn(w, "meeting"), true, `${w.agentId} is in the Meeting room`);
+    assert.deepEqual(there.bubbles, [{ agentId: m.id, text: "Kick-off: Fix the login form" }]);
+    assert.equal(new Set(there.walkers.map((w) => `${w.x.toFixed(2)},${w.z.toFixed(2)}`)).size, 3, "each stands in a place of their own");
+    t = finishedWalking(story, t);
+    assert.deepEqual(story.frame(t), { walkers: [], bubbles: [] });
+  });
+
+  it("takes the master and three workers at most; the others get what they got before", () => {
+    const m = master();
+    const story = createStory();
+    story.observe([m], seatsOf([m]), 0, FREE);
+    const kids = Array.from({ length: 5 }, (_, i) => worker(m, `task ${i}`));
+    const list = [m, ...kids];
+    story.observe(list, seatsOf(list), 1000, FREE);
+    const f = story.frame(1000);
+    assert.equal(f.walkers.length, MAX_KICKOFF);
+    assert.equal(MAX_KICKOFF, MAX_WALKERS);
+    assert.ok(f.walkers.some((w) => w.agentId === m.id));
+  });
+
+  it("still walks one worker's task to its desk, as before", () => {
+    const m = master();
+    const story = createStory();
+    story.observe([m], seatsOf([m]), 0, FREE);
+    const a = worker(m, "One thing");
+    story.observe([m, a], seatsOf([m, a]), 1000, FREE);
+    let t = 1000;
+    while (story.frame(t).walkers[0]?.moving) t += 100;
+    assert.equal(isIn(story.frame(t).walkers[0]!, "meeting"), false);
+    assert.deepEqual(story.frame(t).bubbles, [{ agentId: a.id, text: "One thing" }]);
+  });
+
+  it("does not go when there is not room for everyone to walk: then it is the desk visits", () => {
+    const m = master();
+    const finishers = Array.from({ length: 2 }, () => agent({ parentId: m.id, status: "working" }));
+    const base = [m, ...finishers];
+    const story = createStory();
+    story.observe(base, seatsOf(base), 0, FREE);
+    const a = worker(m, "A");
+    const b = worker(m, "B");
+    const c = worker(m, "C");
+    const list = [m, ...finishers.map((k) => ({ ...k, status: "done" as const, activity: "ok" })), a, b, c];
+    // Two workers finish in the same update, so two walks are already going and a group of four will not fit.
+    story.observe(list, seatsOf(list), 500, FREE);
+    const f = story.frame(500);
+    assert.equal(f.walkers.some((w) => isIn(w, "meeting")), false, "nobody is in the Meeting room");
+    assert.equal(f.walkers.length <= MAX_WALKERS, true);
+  });
+
+  it("is only bubbles at the desks with reduced motion", () => {
+    const m = master();
+    const story = createStory();
+    story.observe([m], seatsOf([m]), 0, { ...FREE, reduced: true });
+    const list = [m, worker(m, "X"), worker(m, "Y")];
+    story.observe(list, seatsOf(list), 100, { ...FREE, reduced: true });
+    assert.deepEqual(story.frame(100).walkers, []);
+    assert.equal(story.frame(100 + REDUCED_BUBBLE_MS - 1).bubbles.length > 0, true, "words at the desks");
+  });
+
+  it("drops a walker whose agent leaves and keeps the rest of the group", () => {
+    const m = master();
+    const story = createStory();
+    story.observe([m], seatsOf([m]), 0, FREE);
+    const a = worker(m, "A");
+    const b = worker(m, "B");
+    story.observe([m, a, b], seatsOf([m, a, b]), 1000, FREE);
+    story.observe([m, a], seatsOf([m, a]), 1500, FREE);
+    assert.deepEqual(story.frame(1500).walkers.map((w) => w.agentId).sort(), [m.id, a.id].sort());
+  });
+
+  it("holds the group at the table for the kick-off time", () => {
+    const m = master();
+    const story = createStory();
+    story.observe([m], seatsOf([m]), 0, FREE);
+    const list = [m, worker(m, "A"), worker(m, "B")];
+    story.observe(list, seatsOf(list), 1000, FREE);
+    let t = 1000;
+    while (story.frame(t).walkers.some((w) => w.moving)) t += 100;
+    assert.equal(story.frame(t + KICKOFF_HOLD_MS - 300).walkers.every((w) => !w.moving), true, "still standing before the hold is over");
+    t = finishedWalking(story, t);
+    assert.equal(story.frame(t).walkers.length, 0);
   });
 });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentStatus, ServerEvent } from "../../shared/events.ts";
 import { applyEvent, initialState } from "../src/agents.ts";
-import { createDemoWorld, demoSnapshot, stepDemo } from "../src/office/demo.ts";
+import { SLEEPER, createDemoWorld, demoSnapshot, stepDemo } from "../src/office/demo.ts";
 import { STATUSES } from "../src/office/palette.ts";
 
 const T0 = 1_700_000_000_000;
@@ -28,6 +28,17 @@ describe("demo office", () => {
       else assert.equal(a.parentId, null);
     }
     assert.ok(agents.some((a) => a.origin === "managed") && agents.some((a) => a.origin === "observed"));
+  });
+
+  it("keeps one session idle for ever, so the demo shows a break", () => {
+    const world = createDemoWorld(20, 7, T0);
+    const sleeper = world.agents.get(`demo-${SLEEPER + 1}`)!;
+    assert.equal(sleeper.kind, "session");
+    for (let t = 0; t < 200_000; t += 1000) {
+      stepDemo(world, T0 + t);
+      assert.equal(sleeper.status, "idle", `still idle after ${t / 1000} s`);
+    }
+    assert.ok([...world.agents.values()].some((a) => a.status !== "idle"), "the others still change");
   });
 
   it("includes a long name and a name that looks like HTML, as plain strings", () => {
