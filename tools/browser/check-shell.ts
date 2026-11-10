@@ -105,9 +105,11 @@ try {
       const count = (selector: string) => page.evaluate<number>(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
       const signs = await count(".room-sign:not(.hub-sign)");
       const groupsBefore = await count(".room-head");
-      expect(signs >= 3, `rooms(${scheme}): room signs shown (${signs})`);
+      expect(signs >= 4, `rooms(${scheme}): room signs shown (${signs})`);
+      const names = await page.evaluate<string>(`[...document.querySelectorAll(".room-sign:not(.hub-sign) .room-name")].map((n) => n.textContent).join(",")`);
+      expect(["Management", "Engineering", "Quality", "Visitors"].every((n) => names.split(",").includes(n)), `rooms(${scheme}): the building has a room for each department of the demo team, and Visitors (${names})`);
       await page.screenshot(join(out, `rooms-${scheme}-overview.png`));
-      await page.evaluate(`document.querySelector(".room-sign:not(.hub-sign)").click()`);
+      await page.evaluate(`[...document.querySelectorAll(".room-sign:not(.hub-sign)")].find((s) => !s.textContent.includes("0 agents"))?.click()`); // a room with someone in it: an empty one would filter the list to nothing
       await page.wait(900);
       const groupsFocused = await count(".room-head");
       const overview = await page.evaluate<boolean>(`[...document.querySelectorAll(".app-actions button")].some((b) => b.textContent.includes("Overview"))`);

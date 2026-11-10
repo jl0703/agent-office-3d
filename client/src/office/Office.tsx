@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   BufferGeometry,
   Color,
@@ -17,14 +17,18 @@ import { createStory, type StoryFrame, type Walker } from "./story.ts";
 import { graphLayout, MAX_GRAPH_NODES, type Vault } from "../vault.ts";
 import { createAssets, type Assets } from "./assets.ts";
 import { familyIndexes, rootOf } from "./families.ts";
-import { HUB_RADIUS, ROOM_COLORS, ROOM_D, ROOM_W, MAX_ROOMS, SEATS_PER_ROOM, SEAT_COUNT, roadSegment, roomCenter, seatPosition, type Assignment } from "./rooms.ts";
+import { BUILDING_RECT, ROOM_COLORS, SEAT_COUNT, VISITORS_KEY, seatPoint, seatsOfRoom, type Layout, type Point } from "./building.ts";
+import { furnitureOf, hubCentre, HUB_SCALE, wallsOf, WALL_GLASS, WALL_TALL } from "./buildingParts.ts";
 import { ACCESSORIES, CHARACTER_COLORS, FAMILY_COLORS, SCENE, STATUS_COLOR, STATUSES, characterStyle, type Accessory, type Scheme } from "./palette.ts";
 import { blendPose, poseFor, type Pose } from "./poses.ts";
 import type { Selection } from "./selection.ts";
 
 const N = SEAT_COUNT;
-const SEAT_POS = Array.from({ length: N }, (_, i) => seatPosition(i));
-const deskPosition = (seat: number) => SEAT_POS[seat] as { x: number; z: number };
+const HUB_RADIUS = 3.5;
+const ROOM_LIMIT = 9; // the Management office, the Library, six departments and Visitors
+const WALL_LIMIT = 96;
+const FURNITURE_LIMIT = 96;
+const ORIGIN: Point = { x: 0, z: 0 };
 const NAMED: readonly Exclude<Accessory, "none">[] = ACCESSORIES.filter((a): a is Exclude<Accessory, "none"> => a !== "none");
 
 type Slot = { id: string; status: AgentStatus; since: number; appearedAt: number; pose: Pose; color: number; accessory: Accessory; family: number };
@@ -32,8 +36,8 @@ type World = {
   slots: (Slot | null)[];
   byId: Map<string, number>;
   first: boolean;
-  /** Rooms in use, in the order of their instances. */
-  rooms: { key: string; slot: number }[];
+  /** Rooms of the building, in the order of their instances. */
+  rooms: { key: string }[];
   pulse: number[];
   /** For each status, the desk numbers drawn in that status's instanced mesh. */
   onScreen: Record<AgentStatus, number[]>;
@@ -81,7 +85,8 @@ export type OfficeProps = {
   frozen: boolean;
   selection: Selection;
   tagRefs: MutableRefObject<Map<string, HTMLElement>>;
-  assignment: Assignment;
+  /** The building and where everyone sits in it. */
+  layout: Layout;
   /** The connected vault, drawn as notes orbiting the hub; null when there is none. */
   vault: Vault | null;
   /** The hub's sign, positioned over the scene by the frame loop. */
@@ -92,7 +97,7 @@ export type OfficeProps = {
   bubbleRefs: MutableRefObject<(HTMLElement | null)[]>;
 };
 
-export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, assignment, roomRefs, vault, hubRef, bubbleRefs }: OfficeProps) {
+export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, layout, roomRefs, vault, hubRef, bubbleRefs }: OfficeProps) {
   const invalidate = useThree((s) => s.invalidate);
   const [assets, setAssets] = useState<Assets | null>(null);
   useEffect(() => {
@@ -106,6 +111,14 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
   const world = useRef<World>(newWorld());
   const story = useRef(createStory());
   const walking = useRef(new Set<number>());
+  const assignment = layout.placement;
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  // The desks are wherever the building puts them: worked out again only when the building changes.
+  const seatsRef = useRef<Point[]>([]);
+  seatsRef.current = useMemo(() => Array.from({ length: N }, (_, i) => seatPoint(layout.building, i) ?? ORIGIN), [layout.building]);
+  const deskPosition = (seat: number): Point => seatsRef.current[seat] ?? ORIGIN;
+  const hub = hubCentre(layout.building);
   const assignmentRef = useRef(assignment);
   assignmentRef.current = assignment;
   const agentsRef = useRef(agents);
@@ -131,12 +144,16 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       const set = (name: string, i: number, m: Matrix4) => instanced(name)?.setMatrixAt(i, m);
 
       const outline: number[] = [];
+      // An empty desk is marked by a dim outline in every room that is in use: the Management office and the departments always, Visitors once someone sits there.
+      const outlined = new Set<number>();
+      const visitorsUsed = [...assignmentRef.current.roomOf.values()].includes(VISITORS_KEY);
+      for (const room of layoutRef.current.building.rooms) if (room.kind !== "visitors" || visitorsUsed) for (const s of seatsOfRoom(layoutRef.current.building, room.key)) outlined.add(s);
       for (let d = 0; d < N; d++) {
         const slot = w.slots[d];
         const { x, z } = deskPosition(d);
         if (!slot) {
           for (const name of ["desks", "monitors", "stripes", "shadows", "hit", "chairs", "torsos", "heads", "armsL", "armsR", "legs"]) set(name, d, ZERO);
-          if (w.rooms.some((r) => r.slot === Math.floor(d / SEATS_PER_ROOM))) {
+          if (outlined.has(d)) {
             // A dim outline marks an empty desk.
             const [x0, x1, z0, z1] = [x - 0.75, x + 0.75, z - 0.4, z + 0.4];
             outline.push(x0, 0.01, z0, x1, 0.01, z0, x1, 0.01, z0, x1, 0.01, z1, x1, 0.01, z1, x0, 0.01, z1, x0, 0.01, z1, x0, 0.01, z0);
@@ -190,35 +207,53 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
 
-      // Rooms: a floor tile, two walls, a whiteboard and a few props each, and a road from the hub.
+      // Rooms: a floor tile each, a board on the back wall of those along the north, a plant and a lamp; then the walls with their door gaps and the furniture.
       const dark = scheme === "dark";
       const settle = new Color(dark ? "#12161c" : "#f3eee2");
-      w.rooms.forEach(({ key, slot }, i) => {
-        const at = roomCenter(slot);
-        const hue = new Color(ROOM_COLORS[assignmentRef.current.colorOf.get(key) ?? 0] as string);
-        set("roomFloors", i, compose(m1, at.x, -0.15, at.z, 0, 0, 0, ROOM_W, 0.3, ROOM_D));
+      const building = layoutRef.current.building;
+      w.rooms = building.rooms.map((r) => ({ key: r.key }));
+      building.rooms.forEach((room, i) => {
+        const r = room.rect;
+        const cx = (r.minX + r.maxX) / 2;
+        const cz = (r.minZ + r.maxZ) / 2;
+        const hue = new Color(ROOM_COLORS[room.color % ROOM_COLORS.length] as string);
+        set("roomFloors", i, compose(m1, cx, -0.15, cz, 0, 0, 0, r.maxX - r.minX, 0.3, r.maxZ - r.minZ));
         instanced("roomFloors")?.setColorAt(i, hue.clone().lerp(settle, dark ? 0.6 : 0.45));
-        const wall = hue.clone().multiplyScalar(dark ? 0.7 : 1);
-        set("roomBack", i, compose(m1, at.x, 1.3, at.z - ROOM_D / 2 + 0.125, 0, 0, 0, ROOM_W, 2.6, 0.25));
-        instanced("roomBack")?.setColorAt(i, wall);
-        set("roomLeft", i, compose(m1, at.x - ROOM_W / 2 + 0.125, 1.3, at.z, 0, 0, 0, 0.25, 2.6, ROOM_D - 0.25));
-        instanced("roomLeft")?.setColorAt(i, wall);
-        set("roomBoards", i, compose(m1, at.x, 1.75, at.z - ROOM_D / 2 + 0.28, 0, 0, 0, 3.4, 1.1, 0.06));
-        set("roomPlants", i, compose(m1, at.x + ROOM_W / 2 - 0.9, 0, at.z - ROOM_D / 2 + 0.9));
-        set("roomShelves", i, compose(m1, at.x - ROOM_W / 2 + 0.45, 0, at.z + 0.8, 0, Math.PI / 2, 0));
-        set("roomLamps", i, compose(m1, at.x + ROOM_W / 2 - 0.7, 0, at.z + 0.9));
-        const road = roadSegment(slot);
-        set("roads", i, compose(m1, road.x, 0.015, road.z, 0, road.angle, 0, 0.7, 0.03, road.length));
+        const northRow = room.door.z === r.maxZ && room.kind !== "library" && room.kind !== "visitors"; // its back wall is the tall one at the north
+        set("roomBoards", i, northRow ? compose(m1, cx - 1.2, 1.75, r.minZ + 0.3, 0, 0, 0, 3.0, 1.1, 0.06) : ZERO);
+        set("roomPlants", i, compose(m1, r.minX + 0.45, 0, r.maxZ - 0.5));
+        set("roomLamps", i, compose(m1, r.maxX - 0.45, 0, r.maxZ - 0.5));
       });
+      let tall = 0;
+      let glass = 0;
+      const wallTone = new Color(dark ? "#3a4250" : "#d9d2c3");
+      for (const wall of wallsOf(building)) {
+        const isTall = wall.kind === "tall";
+        const i = isTall ? tall++ : glass++;
+        if (i >= WALL_LIMIT) continue;
+        const h = isTall ? WALL_TALL : WALL_GLASS;
+        const name = isTall ? "wallsTall" : "wallsGlass";
+        set(name, i, compose(m1, wall.x, h / 2, wall.z, 0, 0, 0, wall.w, h, wall.d));
+        if (isTall) instanced(name)?.setColorAt(i, wallTone);
+      }
+      let pieces = 0;
+      for (const room of building.rooms) {
+        for (const f of furnitureOf(room)) {
+          if (pieces >= FURNITURE_LIMIT) break;
+          set("furniture", pieces, compose(m1, f.x, (f.y ?? 0) + f.h / 2, f.z, 0, 0, 0, f.w, f.h, f.d));
+          instanced("furniture")?.setColorAt(pieces, mix.set(f.color));
+          pieces++;
+        }
+      }
       // Picking caches a bounding sphere per instanced mesh; rooms and seats move, so forget it.
       for (const name of ["roomFloors", "hit"]) {
         const mesh = instanced(name);
         if (mesh) mesh.boundingSphere = null;
       }
-      for (const name of ["roomFloors", "roomBack", "roomLeft", "roomBoards", "roomPlants", "roomShelves", "roomLamps", "roads"]) {
+      for (const [name, count] of [["roomFloors", w.rooms.length], ["roomBoards", w.rooms.length], ["roomPlants", w.rooms.length], ["roomLamps", w.rooms.length], ["wallsTall", Math.min(tall, WALL_LIMIT)], ["wallsGlass", Math.min(glass, WALL_LIMIT)], ["furniture", pieces]] as const) {
         const mesh = instanced(name);
         if (!mesh) continue;
-        mesh.count = w.rooms.length;
+        mesh.count = count;
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
@@ -316,14 +351,13 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
     w.slots = next;
     w.byId = new Map(next.flatMap((s, d) => (s ? [[s.id, d] as const] : [])));
     if (agents.length > 0) w.first = false;
-    story.current.observe(agents, assignment.seat, performance.now(), { reduced, frozen });
+    story.current.observe(agents, assignment.seat, performance.now(), { reduced, frozen, building: layout.building });
     // With frames on demand, nothing redraws to take a bubble down: ask for one when it is due.
     const redraw = reduced ? setTimeout(invalidate, 2200) : undefined;
-    w.rooms = [...assignment.roomSlot].map(([key, slot]) => ({ key, slot })).sort((x, y) => x.slot - y.slot);
     rebuild();
     invalidate();
     return () => clearTimeout(redraw);
-  }, [assets, agents, assignment, clock, rebuild, invalidate, reduced, frozen]);
+  }, [assets, agents, layout, assignment, clock, rebuild, invalidate, reduced, frozen]);
 
   // Bright cables follow the selection.
   useEffect(
@@ -547,11 +581,10 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
     }
 
     // Room signs sit above each room's back wall.
-    for (const { key, slot } of w.rooms) {
-      const el = roomRefs.current.get(key);
+    for (const room of layoutRef.current.building.rooms) {
+      const el = roomRefs.current.get(room.key);
       if (!el) continue;
-      const at = roomCenter(slot);
-      pos.set(at.x, 2.9, at.z - ROOM_D / 2 + 0.2).project(camera);
+      pos.set((room.rect.minX + room.rect.maxX) / 2, 2.9, room.rect.minZ + 0.2).project(camera);
       if (pos.z < 1 && Math.abs(pos.x) < 1.3 && Math.abs(pos.y) < 1.3) {
         el.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
         el.style.display = "";
@@ -565,7 +598,7 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
     if (graph && !still) graph.rotation.y = t * 0.12;
     const sign = hubRef.current;
     if (sign) {
-      pos.set(0, 3.9, 0).project(camera);
+      pos.set(hubCentre(layoutRef.current.building).x, 3.3, hubCentre(layoutRef.current.building).z).project(camera);
       if (pos.z < 1 && Math.abs(pos.x) < 1.3 && Math.abs(pos.y) < 1.3) {
         sign.style.transform = `translate(${((pos.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-pos.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`;
         sign.style.display = "";
@@ -589,9 +622,10 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
       <hemisphereLight args={["#ffffff", c.floor, 1.1]} />
       <directionalLight position={[6, 12, 8]} intensity={1.4} />
 
+      <mesh position={[(BUILDING_RECT.minX + BUILDING_RECT.maxX) / 2, -0.17, (BUILDING_RECT.minZ + BUILDING_RECT.maxZ) / 2]} scale={[BUILDING_RECT.maxX - BUILDING_RECT.minX + 0.6, 0.3, BUILDING_RECT.maxZ - BUILDING_RECT.minZ + 0.6]} geometry={geo.box} material={mat.ground} />
       <instancedMesh
         ref={bind("roomFloors")}
-        args={[geo.box, mat.room, MAX_ROOMS]}
+        args={[geo.box, mat.room, ROOM_LIMIT]}
         frustumCulled={false}
         onClick={(e) => {
           const room = e.instanceId === undefined ? undefined : world.current.rooms[e.instanceId];
@@ -601,25 +635,27 @@ export function Office({ agents, scheme, reduced, frozen, selection, tagRefs, as
           }
         }}
       />
-      <instancedMesh ref={bind("roomBack")} args={[geo.box, mat.room, MAX_ROOMS]} frustumCulled={false} />
-      <instancedMesh ref={bind("roomLeft")} args={[geo.box, mat.room, MAX_ROOMS]} frustumCulled={false} />
-      <instancedMesh ref={bind("roomBoards")} args={[geo.box, mat.board, MAX_ROOMS]} frustumCulled={false} />
-      <instancedMesh ref={bind("roomPlants")} args={[geo.plant, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
-      <instancedMesh ref={bind("roomShelves")} args={[geo.shelf, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
-      <instancedMesh ref={bind("roomLamps")} args={[geo.lamp, mat.vertex, MAX_ROOMS]} frustumCulled={false} />
+      <instancedMesh ref={bind("wallsTall")} args={[geo.box, mat.room, WALL_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("wallsGlass")} args={[geo.box, mat.glass, WALL_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("furniture")} args={[geo.box, mat.room, FURNITURE_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomBoards")} args={[geo.box, mat.board, ROOM_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomPlants")} args={[geo.plant, mat.vertex, ROOM_LIMIT]} frustumCulled={false} />
+      <instancedMesh ref={bind("roomLamps")} args={[geo.lamp, mat.vertex, ROOM_LIMIT]} frustumCulled={false} />
       <instancedMesh ref={bind("walkLegs")} args={[geo.walkLeg, mat.vertex, 8]} frustumCulled={false} />
-      <instancedMesh ref={bind("roads")} args={[geo.box, mat.road, MAX_ROOMS]} frustumCulled={false} />
 
-      <mesh geometry={geo.dais} material={mat.dais} scale={[HUB_RADIUS, 0.3, HUB_RADIUS]} position={[0, -0.3, 0]} />
-      <mesh geometry={geo.core} material={mat.core} scale={0.9} position={[0, 1.7, 0]} />
-      <mesh ref={bind("hubRing")} geometry={geo.hubRing} material={mat.hubRing} position={[0, 1.7, 0]} />
-      <group ref={bind("graph")} position={[0, 1.7, 0]}>
-        <instancedMesh ref={bind("graphNodes")} args={[geo.node, mat.node, MAX_GRAPH_NODES]} frustumCulled={false} />
-        <lineSegments ref={bind("graphLines")} material={mat.graphLine} frustumCulled={false}>
-          <bufferGeometry />
-        </lineSegments>
+      {/* The knowledge hub stands in the middle of the Library. */}
+      <group position={[hub.x, 0, hub.z]} scale={HUB_SCALE}>
+        <mesh geometry={geo.dais} material={mat.dais} scale={[HUB_RADIUS, 0.3, HUB_RADIUS]} position={[0, -0.3, 0]} />
+        <mesh geometry={geo.core} material={mat.core} scale={0.9} position={[0, 1.7, 0]} />
+        <mesh ref={bind("hubRing")} geometry={geo.hubRing} material={mat.hubRing} position={[0, 1.7, 0]} />
+        <group ref={bind("graph")} position={[0, 1.7, 0]}>
+          <instancedMesh ref={bind("graphNodes")} args={[geo.node, mat.node, MAX_GRAPH_NODES]} frustumCulled={false} />
+          <lineSegments ref={bind("graphLines")} material={mat.graphLine} frustumCulled={false}>
+            <bufferGeometry />
+          </lineSegments>
+        </group>
+        <mesh geometry={geo.hubRingOuter} material={mat.hubRing} position={[0, 0.04, 0]} />
       </group>
-      <mesh geometry={geo.hubRingOuter} material={mat.hubRing} position={[0, 0.04, 0]} />
       <lineSegments ref={bind("outlines")} material={mat.outline}>
         <bufferGeometry />
       </lineSegments>

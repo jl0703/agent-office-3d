@@ -1,5 +1,5 @@
 // What stands in the building besides desks: the walls (with gaps for the doors) and each room's furniture. Plain arithmetic.
-import { BUILDING_RECT, ENTRANCE, type Building, type Point, type RoomKind, type RoomSpec } from "./building.ts";
+import { BUILDING_RECT, ENTRANCE, type Building, type Point, type RoomSpec } from "./building.ts";
 
 export const WALL_THICK = 0.25;
 export const WALL_TALL = 2.6;
