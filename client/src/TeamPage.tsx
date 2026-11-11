@@ -1,5 +1,5 @@
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AvatarDesigner, AvatarImage } from "./Avatar.tsx";
 import { randomAvatar, type Avatar } from "./avatar.ts";
 import { Modal } from "./Modal.tsx";
@@ -130,7 +130,7 @@ function OrgChart({ people }: { people: Person[] }) {
   const nodes = orgOf(people);
   const scroller = useRef<HTMLDivElement>(null);
   // A chart wider than the page opens with the person at the top in view, not its left edge.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
   }, [people.length]);

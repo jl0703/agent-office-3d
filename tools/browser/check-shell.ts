@@ -765,11 +765,13 @@ try {
       await until(async () => page.evaluate<boolean>(`[...document.querySelectorAll("button")].some((b) => b.textContent.includes("Org chart"))`), 20000, "the team page");
       await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Org chart"))?.click()`);
       await page.wait(600);
-      const facts = await page.evaluate<string>(`JSON.stringify({ layers: [...document.querySelectorAll(".org-layers li strong")].map((l) => l.textContent), nodes: document.querySelectorAll(".org-node").length, tops: [...new Set([...document.querySelectorAll(".org-node")].map((n) => Math.round(n.getBoundingClientRect().top + scrollY)))].length, overflow: document.documentElement.scrollWidth > innerWidth, focusable: document.querySelector(".org-scroll")?.tabIndex })`);
-      const f = JSON.parse(facts) as { layers: string[]; nodes: number; tops: number; overflow: boolean; focusable: number };
+      const facts = await page.evaluate<string>(`JSON.stringify({ layers: [...document.querySelectorAll(".org-layers li strong")].map((l) => l.textContent), nodes: document.querySelectorAll(".org-node").length, tops: [...new Set([...document.querySelectorAll(".org-node")].map((n) => Math.round(n.getBoundingClientRect().top + scrollY)))].length, overflow: document.documentElement.scrollWidth > innerWidth, aligned: [...document.querySelectorAll(".org-layers li")].every((li, i) => [...document.querySelectorAll(".org-node")].filter((n) => { let d = 0; for (let e = n.parentElement; e; e = e.parentElement) if (e.tagName === "UL") d++; return d === i + 1; }).every((n) => Math.abs(n.getBoundingClientRect().top - li.getBoundingClientRect().top) <= 1)), scrolls: (document.querySelector(".org-scroll")?.scrollWidth ?? 0) > (document.querySelector(".org-scroll")?.clientWidth ?? 0), focusable: document.querySelector(".org-scroll")?.tabIndex })`);
+      const f = JSON.parse(facts) as { layers: string[]; nodes: number; tops: number; overflow: boolean; aligned: boolean; scrolls: boolean; focusable: number };
       expect(f.layers.join(",") === "Top,Level 2,Level 3" && f.nodes === 6, `chart(${width}): three layers and six people (${facts})`);
       expect(f.tops === f.layers.length, `chart(${width}): everyone on a layer is level with the others (${f.tops} rows for ${f.layers.length} layers)`);
       expect(!f.overflow, `chart(${width}): the chart does not widen the page`);
+      expect(f.aligned, `chart(${width}): each layer label is level with its people (${facts})`);
+      expect(f.scrolls === (width < 600), `chart(${width}): the chart scrolls inside its box only when it is wider than the page (${facts})`);
       expect(f.focusable === 0, `chart(${width}): the scrolling box can be reached with the keyboard`);
       await page.screenshot(join(out, `chart-${width}-${scheme}.png`));
       await page.evaluate(source);

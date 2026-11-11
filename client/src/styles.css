@@ -2007,6 +2007,7 @@ textarea {
 .org-canvas {
   width: max-content;
   min-width: 100%;
+  padding-bottom: calc(var(--org-half) * 2); /* the last band is as tall as the others */
   background-image: repeating-linear-gradient(to bottom, color-mix(in srgb, var(--color-text) 6%, transparent) 0, color-mix(in srgb, var(--color-text) 6%, transparent) var(--org-pitch), transparent var(--org-pitch), transparent calc(var(--org-pitch) * 2));
 }
 
