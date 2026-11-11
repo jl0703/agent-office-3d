@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|needs|panel|filter|research|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|board|needs|panel|filter|research|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|needs|panel|filter|research|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|board|needs|panel|filter|research|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -513,7 +513,7 @@ try {
       // The Tasks board: four columns, with cards from the demo agents, builds and finds.
       await page.evaluate(`[...document.querySelectorAll(".rail a")].find((a) => a.textContent.includes("Tasks"))?.click()`);
       await page.wait(500);
-      const board = await page.evaluate<string>(`JSON.stringify({ hash: location.hash, title: document.title, cols: [...document.querySelectorAll(".board-col h2")].map((h) => h.firstChild.textContent.trim()), cards: document.querySelectorAll(".task-card").length, marked: document.querySelector(".rail a[aria-current=page]")?.textContent.trim() })`);
+      const board = await page.evaluate<string>(`JSON.stringify({ hash: location.hash, title: document.title, cols: [...document.querySelectorAll(".board-col h2")].map((h) => [...h.childNodes].find((n) => n.nodeType === 3).textContent.trim()), cards: document.querySelectorAll(".task-card").length, marked: document.querySelector(".rail a[aria-current=page]")?.textContent.trim() })`);
       const parsed = JSON.parse(board) as { hash: string; title: string; cols: string[]; cards: number; marked: string };
       expect(parsed.hash === "#/tasks" && parsed.title === "Tasks - Agent Office" && parsed.marked === "Tasks" && parsed.cols.join(",") === "Active,In progress,Review,Done" && parsed.cards > 3, `sidebar(${scheme}): the Tasks board has four columns and cards (${board})`);
       await page.wait(700);
@@ -545,7 +545,7 @@ try {
       expect((await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`)).includes("Assigned to"), `sidebar(${scheme}): New task opens a pop-up with an assignee`);
       await page.key("Escape", { keyCode: 27 });
       await page.wait(300);
-      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Make the header sticky"))?.querySelector(".task-foot:last-child button"))`);
+      await page.evaluate(`((e) => (e?.focus(), e?.click()))([...document.querySelectorAll(".task-card")].find((c) => c.textContent.includes("Make the header sticky"))?.querySelector(".task-actions .task-main"))`);
       await page.wait(300);
       const startText = await page.evaluate<string>(`document.querySelector("dialog[open]")?.textContent ?? ""`);
       expect(startText.includes("Riley, Frontend Developer") && startText.includes("waits for your approval") && startText.includes("Folder"), `sidebar(${scheme}): Start asks for a folder and says the plan waits for approval (${startText.slice(0, 160)})`);
@@ -778,6 +778,36 @@ try {
       const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
       expect(violations.length === 0, `chart(${width}): axe: ${violations.join(", ")}`);
       console.log(`chart(${width}, ${scheme}): ${facts} axe=${violations.length}`);
+      await close();
+    }
+  }
+
+  if (run("board")) {
+    // The Tasks board: columns and cards carry their colours with words and icons, and it passes axe and the touch size on a phone.
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [width, scheme] of [[1440, "light"], [1440, "dark"], [375, "light"]] as const) {
+      const { page, close } = await launchBrowser({ width, height: 900 });
+      await page.emulate({ scheme });
+      await page.viewport(width, 900, width < 600);
+      const server = await login(page);
+      await page.goto(`${server.base}/?demo=20#/tasks`);
+      await until(async () => page.evaluate<boolean>(`document.querySelectorAll(".task-card").length > 3`), 20000, "the board");
+      await page.wait(600);
+      const facts = await page.evaluate<string>(`JSON.stringify({ cols: [...document.querySelectorAll(".board-col")].map((c) => c.dataset.col + ":" + getComputedStyle(c).borderTopColor), counts: [...document.querySelectorAll(".board-col .count")].map((c) => c.textContent), kinds: [...new Set([...document.querySelectorAll(".task-card")].map((c) => c.dataset.kind))].sort(), tones: [...new Set([...document.querySelectorAll(".task-pill")].map((c) => c.dataset.tone))].sort(), pillsWithIcon: [...document.querySelectorAll(".task-pill")].every((p) => p.querySelector("svg") && p.textContent.trim().length > 0), edge: [...new Set([...document.querySelectorAll(".task-card")].map((c) => getComputedStyle(c).borderLeftColor))].length, overflow: document.documentElement.scrollWidth > innerWidth })`);
+      const f = JSON.parse(facts) as { cols: string[]; counts: string[]; kinds: string[]; tones: string[]; pillsWithIcon: boolean; edge: number; overflow: boolean };
+      expect(f.cols.length === 4 && new Set(f.cols.map((c) => c.split(":")[1])).size === 4, `board(${width} ${scheme}): each column has its own colour (${f.cols.join(" ")})`);
+      expect(f.kinds.length >= 4 && f.tones.length >= 3 && f.edge >= 4, `board(${width} ${scheme}): cards differ by kind and status (${facts})`);
+      expect(f.pillsWithIcon, `board(${width} ${scheme}): every status pill has an icon and words`);
+      expect(!f.overflow, `board(${width} ${scheme}): the board does not widen the page`);
+      if (width < 600) {
+        const small = await page.evaluate<string[]>(`[...document.querySelectorAll("main button, main select, main a")].filter((e) => e.offsetParent !== null).map((e) => { const b = e.getBoundingClientRect(); return { n: (e.getAttribute("aria-label") || e.textContent || e.tagName).trim().slice(0, 30), w: Math.round(b.width), h: Math.round(b.height) }; }).filter((x) => x.h < 44).map((x) => x.n + " " + x.w + "x" + x.h)`);
+        expect(small.length === 0, `board(${width}): controls under 44px tall: ${small.join("; ")}`);
+      }
+      await page.screenshot(join(out, `board-${width}-${scheme}.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+      expect(violations.length === 0, `board(${width} ${scheme}): axe: ${violations.join(", ")}`);
+      console.log(`board(${width}, ${scheme}): ${facts} axe=${violations.length}`);
       await close();
     }
   }

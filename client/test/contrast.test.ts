@@ -24,6 +24,7 @@ export function contrast(a: string, b: string): number {
 
 const TEXT_ON = ["canvas", "surface", "surface-2"] as const;
 const STATUSES = ["working", "idle", "waiting", "done", "stopped", "error", "detached"];
+const KINDS = ["master", "build"];
 
 for (const scheme of ["light", "dark"] as const) {
   const t = tokens(scheme);
@@ -43,6 +44,15 @@ for (const scheme of ["light", "dark"] as const) {
       for (const bg of ["surface", "canvas"]) {
         const ratio = contrast(at(`status-${status}`), at(`color-${bg}`));
         assert.ok(ratio >= 4.5, `${status} on ${bg}: ${ratio.toFixed(2)}`);
+      }
+    }
+  });
+
+  test(`${scheme}: the colours of the board (columns, kinds and tones) are at least 4.5:1 on the cards and the page`, () => {
+    for (const name of [...STATUSES.map((s) => `status-${s}`), ...KINDS.map((k) => `kind-${k}`), "color-accent"]) {
+      for (const bg of ["surface", "canvas"]) {
+        const ratio = contrast(at(name), at(`color-${bg}`));
+        assert.ok(ratio >= 4.5, `${name} on ${bg}: ${ratio.toFixed(2)}`);
       }
     }
   });

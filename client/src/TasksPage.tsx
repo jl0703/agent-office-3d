@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { ArrowRight, CircleCheck, ClipboardCheck, Hourglass, Inbox, Lightbulb, Play, Plus, TriangleAlert, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import type { Agent } from "../../shared/events.ts";
 import { AvatarImage } from "./Avatar.tsx";
@@ -7,7 +7,7 @@ import { acceptTask, addTask, demoOwnTasks, getOwnTasks, removeTask, startTask, 
 import { loadRecent, remember } from "./recent.ts";
 import { demoFindings, getFindings, type Finding } from "./research.ts";
 import { hrefFor } from "./route.ts";
-import { COLUMNS, COLUMN_EMPTY, COLUMN_WORD, tasksOf, type Task } from "./tasks.ts";
+import { COLUMNS, COLUMN_EMPTY, COLUMN_WORD, KIND_WORD, tasksOf, type Column, type Task, type Tone } from "./tasks.ts";
 import { avatarOf, demoTeam, getTeam, type Person } from "./team.ts";
 import { demoBuilds, getBuilds, type Build } from "./workshop.ts";
 
@@ -35,18 +35,22 @@ function useWork(demo: boolean) {
 
 type Dialog = { kind: "new" } | { kind: "start"; task: Task } | { kind: "remove"; task: Task } | null;
 
+const COLUMN_ICON: Record<Column, LucideIcon> = { active: Inbox, progress: Play, review: ClipboardCheck, done: CircleCheck };
+const TONE_ICON: Record<Tone, LucideIcon> = { new: Inbox, work: Play, attention: Hourglass, bad: TriangleAlert, done: CircleCheck, suggest: Lightbulb };
+
 function Card({ task, team, demo, onOpenAgent, onChange, onAsk }: { task: Task; team: Person[]; demo: boolean; onOpenAgent: (id: string) => void; onChange: (r: TasksResult) => void; onAsk: (d: Dialog) => void }) {
   const id = useId();
   const [error, setError] = useState("");
   const own = task.own;
   const target = task.target;
+  const ToneIcon = TONE_ICON[task.tone];
   const open = target && ("agent" in target ? (
-    <button type="button" className="link-btn" onClick={() => onOpenAgent(target.agent)}>
-      Open in the office
+    <button type="button" className="link-btn task-open" onClick={() => onOpenAgent(target.agent)}>
+      Open in the office <ArrowRight size={14} strokeWidth={1.75} aria-hidden="true" />
     </button>
   ) : (
-    <a className="link-btn" href={hrefFor({ page: "find", id: target.find })}>
-      Open the find
+    <a className="link-btn task-open" href={hrefFor({ page: "find", id: target.find })}>
+      Open the find <ArrowRight size={14} strokeWidth={1.75} aria-hidden="true" />
     </a>
   ));
 
@@ -59,12 +63,22 @@ function Card({ task, team, demo, onOpenAgent, onChange, onAsk }: { task: Task; 
   };
 
   return (
-    <li className="task-card">
+    <li className="task-card" data-kind={task.kind}>
+      <div className="task-top">
+        <span className="task-kind">{KIND_WORD[task.kind]}</span>
+        <span className="task-pill" data-tone={task.tone}>
+          <ToneIcon size={13} strokeWidth={2} aria-hidden="true" />
+          {task.chip}
+        </span>
+      </div>
       <h3>{task.title}</h3>
+      {task.text && <p className="task-text">{task.text}</p>}
       {own ? (
         <div className="task-assignee">
           {task.person && <AvatarImage avatar={avatarOf(task.person)} size={28} />}
-          <label htmlFor={`${id}-who`}>Assigned to</label>
+          <label className="sr-only" htmlFor={`${id}-who`}>
+            Assigned to
+          </label>
           <select id={`${id}-who`} value={own.assignee ?? ""} disabled={own.done} onChange={(e) => void act(() => updateTask(own.id, { assignee: e.target.value === "" ? null : e.target.value }))}>
             <option value="">Nobody yet</option>
             {team.map((p) => (
@@ -77,47 +91,43 @@ function Card({ task, team, demo, onOpenAgent, onChange, onAsk }: { task: Task; 
       ) : (
         <div className="task-assignee">
           {task.person && <AvatarImage avatar={avatarOf(task.person)} size={28} />}
-          <span>{task.person ? `${task.person.name}, ${task.person.role}` : "Not assigned"}</span>
-          <span className="panel-note">{task.who}</span>
+          <span className={task.person ? undefined : "task-nobody"}>{task.person ? `${task.person.name}, ${task.person.role}` : "Not assigned"}</span>
         </div>
       )}
-      {task.text && <p>{task.text}</p>}
       {error && (
         <p className="form-message" role="alert">
           {error}
         </p>
       )}
-      <div className="task-foot">
-        <span className="chip">{task.chip}</span>
-        {open}
-      </div>
-      {own && (
-        <div className="task-foot">
-          {own.suggestedBy !== undefined ? (
-            <>
-              <button type="button" onClick={() => void act(() => acceptTask(own.id))}>
-                Accept<span className="sr-only"> {task.title}</span>
-              </button>
-              <button type="button" onClick={() => onAsk({ kind: "remove", task })}>
-                Dismiss<span className="sr-only"> {task.title}</span>
-              </button>
-            </>
-          ) : (
-            <>
-              {!own.done && (
-                <button type="button" disabled={own.assignee === null || task.running === true} onClick={() => onAsk({ kind: "start", task })}>
-                  Start<span className="sr-only"> {task.title}</span>
+      {(open || own) && (
+        <div className="task-actions">
+          {own &&
+            (own.suggestedBy !== undefined ? (
+              <>
+                <button type="button" className="task-main" onClick={() => void act(() => acceptTask(own.id))}>
+                  Accept<span className="sr-only"> {task.title}</span>
                 </button>
-              )}
-              <button type="button" onClick={() => void act(() => updateTask(own.id, { done: !own.done }))}>
-                {own.done ? "Reopen" : "Mark done"}
-                <span className="sr-only"> {task.title}</span>
-              </button>
-              <button type="button" onClick={() => onAsk({ kind: "remove", task })}>
-                Remove<span className="sr-only"> {task.title}</span>
-              </button>
-            </>
-          )}
+                <button type="button" className="task-quiet" onClick={() => onAsk({ kind: "remove", task })}>
+                  Dismiss<span className="sr-only"> {task.title}</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {!own.done && (
+                  <button type="button" className="task-main" disabled={own.assignee === null || task.running === true} onClick={() => onAsk({ kind: "start", task })}>
+                    Start<span className="sr-only"> {task.title}</span>
+                  </button>
+                )}
+                <button type="button" onClick={() => void act(() => updateTask(own.id, { done: !own.done }))}>
+                  {own.done ? "Reopen" : "Mark done"}
+                  <span className="sr-only"> {task.title}</span>
+                </button>
+                <button type="button" className="task-quiet" onClick={() => onAsk({ kind: "remove", task })}>
+                  Remove<span className="sr-only"> {task.title}</span>
+                </button>
+              </>
+            ))}
+          {open}
         </div>
       )}
     </li>
@@ -282,12 +292,16 @@ export function TasksPage({ agents, demo, onOpenAgent }: { agents: readonly Agen
       </div>
       <div className="board-cols">
         {COLUMNS.map((c) => (
-          <section key={c} className="board-col" aria-labelledby={`col-${c}`}>
+          <section key={c} className="board-col" data-col={c} aria-labelledby={`col-${c}`}>
             <h2 id={`col-${c}`}>
+              {(() => {
+                const Icon = COLUMN_ICON[c];
+                return <Icon size={16} strokeWidth={2} aria-hidden="true" />;
+              })()}
               {COLUMN_WORD[c]} <span className="count">{columns[c].length}</span>
             </h2>
             {columns[c].length === 0 ? (
-              <p className="panel-note">{COLUMN_EMPTY[c]}</p>
+              <p className="board-empty">{COLUMN_EMPTY[c]}</p>
             ) : (
               <ul>
                 {columns[c].map((t) => (

@@ -30,6 +30,9 @@
   --status-error: #b3261e;
   --status-detached: #4b5563;
 
+  --kind-master: #6b4e8f;
+  --kind-build: #006b7d;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -66,5 +69,8 @@
     --status-stopped: #d2a98e;
     --status-error: #ff8a80;
     --status-detached: #9aa5b1;
+
+    --kind-master: #c4a8f0;
+    --kind-build: #5cd0e0;
   }
 }
