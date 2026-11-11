@@ -1718,17 +1718,59 @@ textarea {
 }
 
 .board-col {
+  --col: var(--color-accent);
   display: grid;
   gap: var(--space-2);
   padding: var(--space-3);
-  background: var(--color-surface-2);
+  background: color-mix(in srgb, var(--col) 7%, var(--color-surface-2));
   border: 1px solid var(--color-border);
+  border-top: 4px solid var(--col);
   border-radius: var(--radius-1);
 }
 
+.board-col[data-col="progress"] {
+  --col: var(--status-working);
+}
+
+.board-col[data-col="review"] {
+  --col: var(--status-waiting);
+}
+
+.board-col[data-col="done"] {
+  --col: var(--status-idle);
+}
+
 .board-col h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0;
   font-size: 15px;
+}
+
+.board-col h2 svg {
+  flex: none;
+  color: var(--col);
+}
+
+.board-col h2 .count {
+  margin-left: auto;
+  min-width: 24px;
+  padding: 0 var(--space-2);
+  font: 600 13px/22px var(--font-mono);
+  text-align: center;
+  color: var(--color-surface);
+  background: var(--col);
+  border-radius: 11px;
+}
+
+.board-empty {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--col);
+  border-radius: var(--radius-1);
 }
 
 .board-col ul {
@@ -1740,25 +1782,115 @@ textarea {
 }
 
 .task-card {
+  --kind: var(--color-accent);
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
   padding: var(--space-3);
   overflow-wrap: anywhere;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
+  border-left: 4px solid var(--kind);
   border-radius: var(--radius-1);
+}
+
+.task-card[data-kind="suggested"] {
+  --kind: var(--status-waiting);
+}
+
+.task-card[data-kind="master"] {
+  --kind: var(--kind-master);
+}
+
+.task-card[data-kind="worker"] {
+  --kind: var(--status-working);
+}
+
+.task-card[data-kind="session"] {
+  --kind: var(--status-idle);
+}
+
+.task-card[data-kind="build"] {
+  --kind: var(--kind-build);
+}
+
+.task-card[data-kind="find"] {
+  --kind: var(--status-stopped);
+}
+
+.task-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+}
+
+.task-kind {
+  font: 600 11px/1.2 var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kind);
+}
+
+/* A status as a filled pill with an icon: the words and the icon carry the meaning, the tint helps. */
+.task-pill {
+  --tone: var(--color-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--tone) 16%, var(--color-surface));
+  border: 1px solid var(--tone);
+  border-radius: 11px;
+}
+
+.task-pill svg {
+  flex: none;
+  color: var(--tone);
+}
+
+.task-pill[data-tone="work"] {
+  --tone: var(--status-working);
+}
+
+.task-pill[data-tone="attention"],
+.task-pill[data-tone="suggest"] {
+  --tone: var(--status-waiting);
+}
+
+.task-pill[data-tone="bad"] {
+  --tone: var(--status-error);
+}
+
+.task-pill[data-tone="done"] {
+  --tone: var(--status-idle);
 }
 
 .task-card h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.task-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 .task-assignee {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  font-size: 13px;
+}
+
+.task-nobody {
+  color: var(--color-text-muted);
 }
 
 .task-assignee .avatar {
@@ -1766,13 +1898,18 @@ textarea {
 }
 
 .task-assignee select {
+  flex: 1;
+  min-width: 0;
   min-height: 32px;
-  max-width: 100%;
   padding: 2px var(--space-2);
   color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-1);
+  background: var(--color-surface-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+}
+
+.task-assignee select:hover:not(:disabled) {
+  border-color: var(--color-border);
 }
 
 .add-round {
@@ -1807,12 +1944,61 @@ textarea {
   margin: 0;
 }
 
-.task-foot {
+.task-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
+}
+
+.task-actions button {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  font-size: 13px;
+}
+
+.task-actions .task-main {
+  color: var(--color-surface);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.task-actions .task-main:disabled {
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
+}
+
+.task-actions .task-quiet {
+  color: var(--color-text-muted);
+  background: none;
+  border-color: transparent;
+}
+
+.task-actions .task-quiet:hover {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.task-actions .task-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  min-height: 32px;
+  padding: 0;
+  font-size: 13px;
+  background: none;
+  border: none;
+}
+
+@media (max-width: 600px) {
+  .task-actions button,
+  .task-actions .task-open,
+  .task-assignee select {
+    min-height: 44px;
+  }
 }
 
 @media (max-width: 1100px) {
