@@ -1,9 +1,9 @@
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AvatarDesigner, AvatarImage } from "./Avatar.tsx";
 import { randomAvatar, type Avatar } from "./avatar.ts";
 import { Modal } from "./Modal.tsx";
-import { addPerson, addStarterTeam, avatarOf, belowOf, demoTeam, getTeam, orgOf, removePerson, reportsLine, reportsOf, updatePerson, type OrgNode, type Person, type PersonFields } from "./team.ts";
+import { addPerson, addStarterTeam, avatarOf, belowOf, demoTeam, getTeam, layersOf, orgOf, removePerson, reportsLine, reportsOf, updatePerson, type OrgNode, type Person, type PersonFields } from "./team.ts";
 
 type View = "cards" | "chart";
 type Dialog = { kind: "form"; editing: Person | null } | { kind: "remove"; person: Person } | { kind: "starter" } | null;
@@ -104,22 +104,52 @@ function PersonForm({ people, editing, demo, onDone, onClose }: { people: Person
   );
 }
 
-function Chart({ nodes, people }: { nodes: OrgNode[]; people: Person[] }) {
+function Tree({ nodes, depth }: { nodes: OrgNode[]; depth: number }) {
   return (
-    <ul className="org-tree">
+    <ul className={depth === 1 ? "org-tree" : undefined}>
       {nodes.map(({ person, reports }) => (
         <li key={person.id}>
           <span className="org-node">
-            <AvatarImage avatar={avatarOf(person)} size={28} />
-            <span>
-              <strong>{person.name}</strong>, {person.role}
-              {person.department ? ` (${person.department})` : ""}
+            <AvatarImage avatar={avatarOf(person)} size={36} />
+            <span className="org-text">
+              <span className="sr-only">Level {depth}. </span>
+              <strong>{person.name}</strong>
+              <span>{person.role}</span>
+              {person.department && <span className="org-dept">{person.department}</span>}
             </span>
           </span>
-          {reports.length > 0 && <Chart nodes={reports} people={people} />}
+          {reports.length > 0 && <Tree nodes={reports} depth={depth + 1} />}
         </li>
       ))}
     </ul>
+  );
+}
+
+/** The chart in layers: one band across the page for each level of reporting, labelled at the left, with the lines between a person and those who report to them. */
+function OrgChart({ people }: { people: Person[] }) {
+  const nodes = orgOf(people);
+  const scroller = useRef<HTMLDivElement>(null);
+  // A chart wider than the page opens with the person at the top in view, not its left edge.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+  }, [people.length]);
+  return (
+    <div className="org-chart">
+      <ol className="org-layers" aria-hidden="true">
+        {layersOf(nodes).map(({ level, people: row }) => (
+          <li key={level}>
+            <strong>{level === 1 ? "Top" : `Level ${level}`}</strong>
+            <span>{row.length === 1 ? "1 person" : `${row.length} people`}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="org-scroll" ref={scroller} tabIndex={0} role="group" aria-label="Org chart, scrolls sideways when it is wider than the page">
+        <div className="org-canvas">
+          <Tree nodes={nodes} depth={1} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -222,7 +252,7 @@ export function TeamPage({ demo }: { demo: boolean }) {
 
       {ready && list.length > 0 && view === "chart" && (
         <nav aria-label="Who reports to whom">
-          <Chart nodes={orgOf(list)} people={list} />
+          <OrgChart people={list} />
         </nav>
       )}
 
