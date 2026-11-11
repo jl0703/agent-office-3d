@@ -47,6 +47,9 @@ function mulberry32(seed: number): () => number {
 /** The first demo sessions work as people of the demo team (see demoTeam), so the office card shows a role and a manager. */
 const DEMO_PEOPLE = ["000000000004", "000000000006", "000000000005"];
 
+/** The demo agent that stays idle. */
+export const SLEEPER = 3;
+
 export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): DemoWorld {
   const n = Math.max(1, Math.min(Math.floor(count) || 1, 200));
   const rng = mulberry32(seed);
@@ -62,6 +65,8 @@ export function createDemoWorld(count: number, seed = 7, nowMs = Date.now()): De
       const j = Math.floor(rng() * (k + 1));
       [order[k], order[j]] = [order[j] as AgentStatus, order[k] as AgentStatus];
     }
+    // One session never leaves idle, so the demo shows an agent taking a break after thirty seconds.
+    if (i === SLEEPER) order.splice(0, order.length, "idle");
     const status = order[0] as AgentStatus;
     const base = SESSION_NAMES[i % SESSION_NAMES.length] as string;
     const [tool, activity] = pick(TOOLS);

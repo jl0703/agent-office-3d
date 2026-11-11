@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|needs|panel|filter|research|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|needs|panel|filter|research|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|needs|panel|filter|research|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|needs|panel|filter|research|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -732,6 +732,24 @@ try {
     await page.screenshot(join(out, "turn-reset.png"));
     console.log(`turn: draws ${before} -> ${await calls()} problems=${JSON.stringify(page.problems().filter((x) => !x.includes("THREE.Clock") && !x.includes("api/research")))}`);
     expect(page.problems().filter((x) => !x.includes("THREE.Clock") && !x.includes("api/research")).length === 0, "turn: nothing logged while turning");
+    await close();
+  }
+
+  if (run("break")) {
+    // An agent that has been idle for thirty seconds walks to the Pantry or the Lounge and says so. The demo has idle agents, so wait for one.
+    const { page, close } = await launchBrowser({ width: 1440, height: 900 });
+    const server = await login(page);
+    await demo(page, server.base);
+    const words = `[...document.querySelectorAll(".office-bubble")].map((b) => b.textContent).filter(Boolean).join("|")`;
+    let seen = "";
+    for (let waited = 0; waited < 70000 && !seen.includes("Taking a break"); waited += 1000) {
+      await page.wait(1000);
+      seen = await page.evaluate<string>(words);
+    }
+    expect(seen.includes("Taking a break"), `break: an idle agent went on a break within 70 seconds (${seen || "no words"})`);
+    await page.wait(500);
+    await page.screenshot(join(out, "break.png"));
+    console.log(`break: ${seen.includes("Taking a break") ? "someone is on a break" : "nobody went"} problems=${JSON.stringify(page.problems().filter((x) => !x.includes("THREE.Clock") && !x.includes("api/research")))}`);
     await close();
   }
 
