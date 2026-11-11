@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, Boxes, ChevronRight, ExternalLink, Home, Puzzle } from "lucide-react";
+import { ArrowRight, Bot, Boxes, ChevronRight, CirclePlus, ExternalLink, FlaskConical, FolderOpen, Home, Puzzle, Search, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { hrefFor, KIND_WORD, type CatalogKind } from "./route.ts";
 import { DECISION_WORD, demoFindings, getFindings, safeLink, VERDICT_WORD, type Finding, type Kind } from "./research.ts";
@@ -83,19 +83,35 @@ export function Breadcrumb({ kind, name }: { kind?: CatalogKind; name?: string }
   );
 }
 
-function Card({ title, by, badge, description, chips, href, external, children }: { title: string; by: string; badge?: string; description: string; chips: string[]; href?: string; /** The source of a research find: opens in a new tab. */ external?: string; children?: ReactNode }) {
+/** Where a card comes from: added from this app, found in your own folder or settings, or found by research. It sets the card's colour and icon. */
+type Source = "app" | "folder" | "research";
+const SOURCE_ICON: Record<Source, LucideIcon> = { app: CirclePlus, folder: FolderOpen, research: FlaskConical };
+/** A detail chip: plain text, or a model name that gets its own colour. */
+type Chip = string | { text: string; model: string };
+const MODELS = ["opus", "sonnet", "haiku"];
+
+function Card({ title, by, source, badge, description, chips, href, external, children }: { title: string; by: string; source: Source; badge?: string; description: string; chips: Chip[]; href?: string; /** The source of a research find: opens in a new tab. */ external?: string; children?: ReactNode }) {
+  const SourceIcon = SOURCE_ICON[source];
   return (
-    <article className="card" aria-label={title}>
-      <header>
-        <h3>{title}</h3>
+    <article className="card" data-source={source} aria-label={title}>
+      <div className="card-top">
+        <span className="card-source">
+          <SourceIcon size={13} strokeWidth={2} aria-hidden="true" />
+          {by}
+        </span>
         {badge && <span className="badge">{badge}</span>}
-      </header>
-      <p className="card-by">{by}</p>
+      </div>
+      <h3>{title}</h3>
       <p className="card-desc">{description || "No description."}</p>
       <ul className="card-chips" aria-label="Details">
-        {chips.map((c) => (
-          <li key={c}>{c}</li>
-        ))}
+        {chips.map((c) => {
+          const text = typeof c === "string" ? c : c.text;
+          return (
+            <li key={text} {...(typeof c === "string" || !MODELS.includes(c.model) ? {} : { "data-model": c.model })}>
+              {text}
+            </li>
+          );
+        })}
       </ul>
       <footer>
         <span className="card-actions">{children}</span>
@@ -181,6 +197,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
           </div>
           <label className="catalog-search">
             <span className="sr-only">Search {KIND_WORD[kind]}</span>
+            <Search size={16} strokeWidth={1.75} aria-hidden="true" />
             <input type="search" value={query} maxLength={60} placeholder={`Search ${KIND_WORD[kind].toLowerCase()}`} onChange={(e) => setQuery(e.target.value)} />
           </label>
         </div>
@@ -198,7 +215,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               key={s.name}
               title={s.name}
               by={s.added ? "Added from this app" : "In your skills folder"}
-              {...(s.added ? { badge: "Added here" } : {})}
+              source={s.added ? "app" : "folder"}
               description={s.description}
               chips={[`Updated ${when(s.modified)}`]}
               href={hrefFor({ page: "item", kind, name: s.name })}
@@ -206,7 +223,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               {s.added && ready.canManage && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={false} />}
             </Card>
           ))}
-          {skills.length === 0 && <p className="panel-note">{ready.skills.length === 0 ? "No skills found in your skills folder." : "No skill matches."}</p>}
+          {skills.length === 0 && <p className="catalog-empty">{ready.skills.length === 0 ? "No skills found in your skills folder." : "No skill matches."}</p>}
         </div>
         </>
       )}
@@ -223,7 +240,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               key={s.name}
               title={s.name}
               by={s.added ? "Added from this app" : "In your Claude settings"}
-              {...(s.added ? { badge: "Added here" } : {})}
+              source={s.added ? "app" : "folder"}
               description={describeServer(s)}
               chips={[s.type === "stdio" ? "Local program" : s.type.toUpperCase(), ...(s.envCount > 0 ? [`${s.envCount} env value${s.envCount === 1 ? "" : "s"} set`] : []), ...(s.hasHeaders ? ["Headers set"] : [])]}
               href={hrefFor({ page: "item", kind, name: s.name })}
@@ -231,7 +248,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               {s.added && ready.canManageMcp && <RemoveButton name={s.name} onAsk={setPendingRemove} disabled={false} />}
             </Card>
           ))}
-          {servers.length === 0 && <p className="panel-note">{ready.mcp.length === 0 ? "No user-level MCP servers found." : "No server matches."}</p>}
+          {servers.length === 0 && <p className="catalog-empty">{ready.mcp.length === 0 ? "No user-level MCP servers found." : "No server matches."}</p>}
         </div>
         </>
       )}
@@ -248,22 +265,22 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
               key={a.name}
               title={a.name}
               by={a.added ? "Added from this app" : "In your agents folder"}
-              {...(a.added ? { badge: "Added here" } : {})}
+              source={a.added ? "app" : "folder"}
               description={a.description}
-              chips={[...(a.model ? [`Model ${a.model}`] : []), ...(a.tools ? [`Tools ${a.tools}`] : []), `Updated ${when(a.modified)}`]}
+              chips={[...(a.model ? [{ text: `Model ${a.model}`, model: a.model.toLowerCase() }] : []), ...(a.tools ? [`Tools ${a.tools}`] : []), `Updated ${when(a.modified)}`]}
               href={hrefFor({ page: "item", kind, name: a.name })}
             >
               {a.added && ready.canManageAgents && <RemoveButton name={a.name} onAsk={setPendingRemove} disabled={false} />}
             </Card>
           ))}
-          {agents.length === 0 && <p className="panel-note">{ready.agents.length === 0 ? "No agents found in your agents folder." : "No agent matches."}</p>}
+          {agents.length === 0 && <p className="catalog-empty">{ready.agents.length === 0 ? "No agents found in your agents folder." : "No agent matches."}</p>}
         </div>
         </>
       )}
 
       {ready && (
         <>
-          <h2 className="catalog-section">Found by research{finds ? ` (${found.length})` : ""}</h2>
+          <h2 className="catalog-section" data-section="research">Found by research{finds ? ` (${found.length})` : ""}</h2>
           {finds === undefined && <p className="panel-note">Loading…</p>}
           {finds === null && <p className="panel-note">The research findings could not be read.</p>}
           {rejected > 0 && <p className="panel-note">{rejected} rejected {rejected === 1 ? "find is" : "finds are"} hidden here. They stay on the research board.</p>}
@@ -273,6 +290,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
                 key={f.id}
                 title={f.title}
                 by={`Found by ${f.found_by} on ${f.date}`}
+                source="research"
                 badge={DECISION_WORD[f.status]}
                 description={f.why}
                 chips={[
@@ -290,7 +308,7 @@ export function CatalogPage({ kind, demo }: { kind: CatalogKind; demo: boolean }
                 {...(safeLink(f.url) ? { external: f.url } : {})}
               />
             ))}
-            {finds && found.length === 0 && <p className="panel-note">{foundTotal === 0 ? "The research team has not found any yet. Run a sweep from the Research department." : "No find matches."}</p>}
+            {finds && found.length === 0 && <p className="catalog-empty">{foundTotal === 0 ? "The research team has not found any yet. Run a sweep from the Research department." : "No find matches."}</p>}
           </div>
         </>
       )}
