@@ -301,6 +301,24 @@ describe("a break in the Pantry or the Lounge", () => {
     assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS + 500), { walkers: [], bubbles: [] });
   });
 
+  it("announces no break that has been cancelled by switching to reduced motion mid-trip", () => {
+    const a = agent();
+    const story = createStory();
+    story.observe([a], seatsOf([a]), 0, FREE);
+    assert.equal(story.frame(IDLE_BEFORE_BREAK_MS).walkers.length, 1);
+    story.observe([a], seatsOf([a]), IDLE_BEFORE_BREAK_MS + 100, { ...FREE, reduced: true });
+    for (const t of [IDLE_BEFORE_BREAK_MS + 100, IDLE_BEFORE_BREAK_MS + 6000, IDLE_BEFORE_BREAK_MS + 12000]) assert.deepEqual(story.frame(t), { walkers: [], bubbles: [] }, `at ${t}`);
+  });
+
+  it("ends a break when the agent is given a task, even while it still says idle", () => {
+    const a = agent();
+    const story = createStory();
+    story.observe([a], seatsOf([a]), 0, FREE);
+    assert.equal(story.frame(IDLE_BEFORE_BREAK_MS).walkers.length, 1);
+    story.observe([{ ...a, currentTask: "New job" }], seatsOf([a]), IDLE_BEFORE_BREAK_MS + 500, FREE);
+    assert.deepEqual(story.frame(IDLE_BEFORE_BREAK_MS + 500), { walkers: [], bubbles: [] });
+  });
+
   it("lets one agent at a time take a break, the longest idle first, and not the same one again for two minutes", () => {
     const a = agent({ name: "a" });
     const b = agent({ name: "b" });

@@ -164,13 +164,21 @@ export function createStory() {
       lastBreak.clear();
       return;
     }
-    if (reduced) jobs = []; // asking for less motion mid-walk sends everyone home at once
+    if (reduced) {
+      // Asking for less motion mid-walk sends everyone home at once, and a break that is no longer happening must not be announced.
+      for (const j of jobs) if (j.kind === "break") speech.delete(j.walker);
+      jobs = [];
+    }
 
     // Anyone who left takes their walks and words with them.
     jobs = jobs.filter((j) => byId.has(j.walker) && (j.target === null || byId.has(j.target)));
-    // A break ends the moment the agent is no longer idle: it is back at its desk at once.
-    for (const j of jobs) if (j.kind === "break" && byId.get(j.walker)?.status !== "idle") speech.delete(j.walker);
-    jobs = jobs.filter((j) => j.kind !== "break" || byId.get(j.walker)?.status === "idle");
+    // A break ends the moment the agent is no longer idle, or is given a task: it is back at its desk at once.
+    const endsBreak = (id: string) => {
+      const a = byId.get(id);
+      return !a || a.status !== "idle" || (known.has(id) && a.currentTask !== known.get(id)?.task);
+    };
+    for (const j of jobs) if (j.kind === "break" && endsBreak(j.walker)) speech.delete(j.walker);
+    jobs = jobs.filter((j) => j.kind !== "break" || !endsBreak(j.walker));
     for (const id of [...lastBreak.keys()]) if (!byId.has(id)) lastBreak.delete(id);
     for (const id of [...speech.keys()]) if (!byId.has(id)) speech.delete(id);
     for (const id of [...lastTool.keys()]) if (!byId.has(id)) lastTool.delete(id);
