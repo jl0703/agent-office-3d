@@ -1948,12 +1948,12 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
 }
 
 .task-actions button {
   min-height: 32px;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
   font-size: 13px;
 }
 
@@ -1968,6 +1968,7 @@ textarea {
   color: var(--color-text-muted);
   background: var(--color-surface-2);
   border-color: var(--color-border);
+  opacity: 1; /* already shown as unavailable by its colours */
 }
 
 .task-actions .task-quiet {
