@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addPerson, belowOf, chainOf, demoTeam, getTeam, orgOf, removePerson, reportsLine, roleOf, TEAM_FAILURES } from "../src/team.ts";
+import { addPerson, belowOf, chainOf, demoTeam, getTeam, layersOf, orgOf, removePerson, reportsLine, roleOf, TEAM_FAILURES, type Person } from "../src/team.ts";
 
 const team = demoTeam();
 const named = (n: string) => team.find((p) => p.name === n)!;
@@ -58,5 +58,28 @@ describe("team: the role of an agent", () => {
     assert.equal(roleOf({}, team), null, "a session you started yourself has no role");
     assert.equal(roleOf({ personId: "000000000099" }, team), null, "a person who left the team");
     assert.deepEqual(roleOf({ personId: named("Alex").id }, team)?.managers, []);
+  });
+});
+
+describe("the org chart in layers", () => {
+  const person = (id: string, reportsTo: string | null): Person => ({ id, name: id, role: "r", brief: "", reportsTo });
+
+  it("puts the top person on level 1 and everyone who reports to a person one level below them", () => {
+    const layers = layersOf(orgOf(demoTeam()));
+    assert.deepEqual(layers.map((l) => [l.level, l.people.map((p) => p.name)]), [[1, ["Alex"]], [2, ["Sam", "Jordan"]], [3, ["Riley", "Casey", "Morgan"]]]);
+  });
+
+  it("counts every person once, and has as many layers as the longest reporting line", () => {
+    const team = [person("a", null), person("b", "a"), person("c", "b"), person("d", "c"), person("e", "a"), person("f", "d")];
+    const layers = layersOf(orgOf(team));
+    assert.equal(layers.length, 5);
+    assert.equal(layers.flatMap((l) => l.people).length, team.length);
+    assert.deepEqual(layers.map((l) => l.people.length), [1, 2, 1, 1, 1]);
+  });
+
+  it("has no layers for no team, and puts people whose manager is missing on the first layer", () => {
+    assert.deepEqual(layersOf([]), []);
+    const layers = layersOf(orgOf([person("x", "gone"), person("y", "x")]));
+    assert.deepEqual(layers.map((l) => l.people.map((p) => p.id)), [["x"], ["y"]]);
   });
 });

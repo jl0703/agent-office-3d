@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|needs|panel|filter|research|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|needs|panel|filter|research|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|needs|panel|filter|research|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|needs|panel|filter|research|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -751,6 +751,33 @@ try {
     await page.screenshot(join(out, "break.png"));
     console.log(`break: ${seen.includes("Taking a break") ? "someone is on a break" : "nobody went"} problems=${JSON.stringify(page.problems().filter((x) => !x.includes("THREE.Clock") && !x.includes("api/research")))}`);
     await close();
+  }
+
+  if (run("chart")) {
+    // The org chart has one band for each level of reporting, never widens the page, and has nothing axe objects to.
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [width, scheme] of [[1440, "light"], [375, "dark"]] as const) {
+      const { page, close } = await launchBrowser({ width, height: 900 });
+      await page.emulate({ scheme });
+      await page.viewport(width, 900, width < 600);
+      const server = await login(page);
+      await page.goto(`${server.base}/?demo=20#/team`);
+      await until(async () => page.evaluate<boolean>(`[...document.querySelectorAll("button")].some((b) => b.textContent.includes("Org chart"))`), 20000, "the team page");
+      await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Org chart"))?.click()`);
+      await page.wait(600);
+      const facts = await page.evaluate<string>(`JSON.stringify({ layers: [...document.querySelectorAll(".org-layers li strong")].map((l) => l.textContent), nodes: document.querySelectorAll(".org-node").length, tops: [...new Set([...document.querySelectorAll(".org-node")].map((n) => Math.round(n.getBoundingClientRect().top + scrollY)))].length, overflow: document.documentElement.scrollWidth > innerWidth, focusable: document.querySelector(".org-scroll")?.tabIndex })`);
+      const f = JSON.parse(facts) as { layers: string[]; nodes: number; tops: number; overflow: boolean; focusable: number };
+      expect(f.layers.join(",") === "Top,Level 2,Level 3" && f.nodes === 6, `chart(${width}): three layers and six people (${facts})`);
+      expect(f.tops === f.layers.length, `chart(${width}): everyone on a layer is level with the others (${f.tops} rows for ${f.layers.length} layers)`);
+      expect(!f.overflow, `chart(${width}): the chart does not widen the page`);
+      expect(f.focusable === 0, `chart(${width}): the scrolling box can be reached with the keyboard`);
+      await page.screenshot(join(out, `chart-${width}-${scheme}.png`));
+      await page.evaluate(source);
+      const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+      expect(violations.length === 0, `chart(${width}): axe: ${violations.join(", ")}`);
+      console.log(`chart(${width}, ${scheme}): ${facts} axe=${violations.length}`);
+      await close();
+    }
   }
 
   if (run("keys")) {

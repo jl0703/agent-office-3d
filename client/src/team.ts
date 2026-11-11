@@ -113,6 +113,13 @@ export function orgOf(people: readonly Person[]): OrgNode[] {
   return people.filter((p) => p.reportsTo === null || !ids.has(p.reportsTo)).map((p) => build(p, new Set([p.id])));
 }
 
+/** The people of each layer of the chart, top first: the top person is level 1, those who report to them level 2, and so on. */
+export function layersOf(nodes: readonly OrgNode[]): { level: number; people: Person[] }[] {
+  const layers: { level: number; people: Person[] }[] = [];
+  for (let row: readonly OrgNode[] = nodes, level = 1; row.length > 0; row = row.flatMap((n) => n.reports), level++) layers.push({ level, people: row.map((n) => n.person) });
+  return layers;
+}
+
 /** The names a person reports to, for one line of text such as "Reports to Sam, then Alex". */
 export function reportsLine(people: readonly Person[], id: string): string {
   const line = chainOf(people, id).map((p) => p.name);
