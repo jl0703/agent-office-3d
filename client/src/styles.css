@@ -1411,8 +1411,15 @@ textarea {
 }
 
 @media (max-width: 600px) {
-  .chip-filter {
+  .chip-filter,
+  .search-row input {
     min-height: 44px;
+  }
+
+  .legend summary {
+    min-height: 44px;
+    padding-block: 0.7rem;
+    box-sizing: border-box;
   }
 }
 
