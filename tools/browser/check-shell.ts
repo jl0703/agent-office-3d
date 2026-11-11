@@ -1,12 +1,12 @@
 // Looks at the page around the office in a real browser. Run with:
-//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|board|needs|panel|filter|research|axe|keys|touch|fonts|all]
+//   node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|board|catalog|needs|panel|filter|research|axe|keys|touch|fonts|all]
 import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, type Page } from "./cdp.ts";
 import { startServer, stopAllServers, until } from "./server.ts";
 
 const out = process.argv[2];
-if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|board|needs|panel|filter|research|axe|keys|touch|fonts|all]");
+if (!out) throw new Error("usage: node tools/browser/check-shell.ts <output folder> [shots|states|rooms|turn|break|chart|board|catalog|needs|panel|filter|research|axe|keys|touch|fonts|all]");
 const wanted = new Set(process.argv.slice(3).length ? process.argv.slice(3) : ["all"]);
 const run = (name: string) => wanted.has("all") || wanted.has(name);
 mkdirSync(out, { recursive: true });
@@ -809,6 +809,38 @@ try {
       expect(violations.length === 0, `board(${width} ${scheme}): axe: ${violations.join(", ")}`);
       console.log(`board(${width}, ${scheme}): ${facts} axe=${violations.length}`);
       await close();
+    }
+  }
+
+  if (run("catalog")) {
+    // The Agents, Skills and MCP pages: cards carry where they come from with an icon and words, models are coloured, and the pages pass axe and the touch size.
+    const source = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
+    for (const [width, scheme] of [[1440, "light"], [1440, "dark"], [375, "dark"]] as const) {
+      for (const page_ of ["agents", "skills", "mcp"] as const) {
+        const { page, close } = await launchBrowser({ width, height: 900 });
+        await page.emulate({ scheme });
+        await page.viewport(width, 900, width < 600);
+        const server = await login(page);
+        await page.goto(`${server.base}/?demo=20#/${page_}`);
+        await until(async () => page.evaluate<boolean>(`document.querySelectorAll(".card").length > 0`), 20000, "the cards");
+        await page.wait(500);
+        const facts = await page.evaluate<string>(`JSON.stringify({ sources: [...new Set([...document.querySelectorAll(".card")].map((c) => c.dataset.source))].sort(), edges: [...new Set([...document.querySelectorAll(".card")].map((c) => getComputedStyle(c).borderTopColor))].length, pills: [...document.querySelectorAll(".card")].every((c) => c.querySelector(".card-source svg") && c.querySelector(".card-source").textContent.trim().length > 0), models: [...document.querySelectorAll(".card-chips li[data-model]")].map((c) => c.dataset.model), overflow: document.documentElement.scrollWidth > innerWidth })`);
+        const f = JSON.parse(facts) as { sources: string[]; edges: number; pills: boolean; models: string[]; overflow: boolean };
+        expect(f.pills, `catalog(${page_} ${width} ${scheme}): every card names its source with an icon (${facts})`);
+        expect(!f.overflow, `catalog(${page_} ${width} ${scheme}): the page does not widen`);
+        if (page_ !== "mcp") expect(f.sources.includes("folder") && f.sources.includes("app") && (page_ === "agents" || f.sources.includes("research")) && f.edges >= 2, `catalog(${page_} ${width} ${scheme}): cards differ by source (${facts})`);
+        if (page_ === "agents") expect(f.models.length >= 2 && f.models.includes("sonnet"), `catalog(agents ${width} ${scheme}): models have their own colour (${facts})`);
+        if (width < 600) {
+          const small = await page.evaluate<string[]>(`[...document.querySelectorAll("main button, main input, main a")].filter((e) => e.offsetParent !== null).map((e) => { const b = e.getBoundingClientRect(); return { n: (e.getAttribute("aria-label") || e.textContent || e.tagName).trim().slice(0, 30), w: Math.round(b.width), h: Math.round(b.height) }; }).filter((x) => x.h < 44 && !x.n.startsWith("Office")).map((x) => x.n + " " + x.w + "x" + x.h)`);
+          expect(small.length === 0, `catalog(${page_} ${width}): controls under 44px tall: ${small.join("; ")}`);
+        }
+        await page.screenshot(join(out, `catalog-${page_}-${width}-${scheme}.png`));
+        await page.evaluate(source);
+        const violations = await page.evaluate<string[]>(`axe.run(document, { resultTypes: ["violations"] }).then((r) => r.violations.map((v) => v.id + " " + v.impact))`);
+        expect(violations.length === 0, `catalog(${page_} ${width} ${scheme}): axe: ${violations.join(", ")}`);
+        console.log(`catalog(${page_}, ${width}, ${scheme}): ${facts} axe=${violations.length}`);
+        await close();
+      }
     }
   }
 
